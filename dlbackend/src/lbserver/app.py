@@ -162,6 +162,7 @@ def parse_args() -> "argparse.Namespace":
     parser.add_argument("--host", default=settings.lb.host)
     parser.add_argument("--port", type=int, default=settings.lb.port)
     parser.add_argument("--log-dir", default=None, help="Directory for rotating log files")
+    parser.add_argument("--pid-file", default=None, help="Write PID to this file")
     return parser.parse_args()
 
 
@@ -181,8 +182,15 @@ def _setup_logging(log_dir: str | None) -> None:
 
 
 def main() -> None:
+    import os
+
     args = parse_args()
     _setup_logging(args.log_dir)
+
+    if args.pid_file:
+        from pathlib import Path
+
+        Path(args.pid_file).write_text(str(os.getpid()))
 
     if BACKENDS:
         logger.info("Backends: %s", ", ".join(BACKENDS))

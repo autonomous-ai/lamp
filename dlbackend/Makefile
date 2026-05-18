@@ -69,8 +69,8 @@ DLSERVER_PID ?= /tmp/dlserver.pid
 LBSERVER_PID ?= /tmp/lbserver.pid
 
 start-runpod-dlserver: install stop-runpod-dlserver
-	@python -m dlserver --host 127.0.0.1 --port $(DLSERVER_PORT) --log-dir /workspace/logs/dlbackend & echo $$! > $(DLSERVER_PID)
-	@echo "dlserver started on port $(DLSERVER_PORT), pid=$$(cat $(DLSERVER_PID))"
+	@nohup python -m dlserver --host 127.0.0.1 --port $(DLSERVER_PORT) --log-dir /workspace/logs/dlbackend --pid-file $(DLSERVER_PID) </dev/null >/dev/null 2>&1 &
+	@sleep 1 && echo "dlserver started on port $(DLSERVER_PORT), pid=$$(cat $(DLSERVER_PID) 2>/dev/null)"
 
 stop-runpod-dlserver:
 	@if [ -f $(DLSERVER_PID) ]; then \
@@ -80,8 +80,8 @@ stop-runpod-dlserver:
 	fi
 
 start-runpod-lbserver: install-lb stop-runpod-lbserver
-	@python -m lbserver --host 127.0.0.1 --port $(LBSERVER_PORT) --log-dir /workspace/logs/lbserver & echo $$! > $(LBSERVER_PID)
-	@echo "lbserver started on port $(LBSERVER_PORT), pid=$$(cat $(LBSERVER_PID))"
+	@nohup python -m lbserver --host 127.0.0.1 --port $(LBSERVER_PORT) --log-dir /workspace/logs/lbserver --pid-file $(LBSERVER_PID) </dev/null >/dev/null 2>&1 &
+	@sleep 1 && echo "lbserver started on port $(LBSERVER_PORT), pid=$$(cat $(LBSERVER_PID) 2>/dev/null)"
 
 stop-runpod-lbserver:
 	@if [ -f $(LBSERVER_PID) ]; then \

@@ -148,6 +148,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8001, help="Bind port (default: 8001)")
     parser.add_argument("--log-dir", default=None, help="Directory for rotating log files")
+    parser.add_argument("--pid-file", default=None, help="Write PID to this file")
     return parser.parse_args()
 
 
@@ -167,7 +168,15 @@ def _setup_logging(log_dir: str | None) -> None:
 
 
 def main() -> None:
+    import os
+
     args = parse_args()
     _setup_logging(args.log_dir)
-    logger.info("Starting DL backend on %s:%d", args.host, args.port)
+
+    if args.pid_file:
+        from pathlib import Path
+
+        Path(args.pid_file).write_text(str(os.getpid()))
+
+    logger.info("Starting DL backend on %s:%d (pid=%d)", args.host, args.port, os.getpid())
     uvicorn.run(app, host=args.host, port=args.port)
