@@ -233,32 +233,6 @@ func LastActionTS(user, action string, lookbackDays int) float64 {
 	return 0
 }
 
-// CountActionsSince returns the number of rows matching `action` whose ts is
-// >= sinceTS. Today's file is scanned (budget caps don't need a cross-day
-// window). Used by the budget gate (≤3 voice nudges per hour).
-func CountActionsSince(user, action string, sinceTS float64) int {
-	user = usercanon.Resolve(user)
-	day := time.Unix(int64(sinceTS), 0).Format("2006-01-02")
-	data, err := os.ReadFile(filePath(user, day))
-	if err != nil {
-		return 0
-	}
-	count := 0
-	for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
-		if line == "" {
-			continue
-		}
-		var evt Event
-		if err := json.Unmarshal([]byte(line), &evt); err != nil {
-			continue
-		}
-		if evt.Action == action && evt.TS >= sinceTS {
-			count++
-		}
-	}
-	return count
-}
-
 // LastNudgeLevel returns the level of the most recent nudge_posture row today,
 // or 0 if no nudge has been logged today.
 func LastNudgeLevel(user string) int {

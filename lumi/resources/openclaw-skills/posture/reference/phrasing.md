@@ -13,7 +13,7 @@ filtered upstream), per-side scores, per-region sub-scores + 4 angles, optional
 `[skipped: ...]` joints.
 
 From `[posture_context]`: `asymmetric` / `dominant_side` / `trend`,
-`is_repeated` / `praise_eligible` / `voice_budget_left`,
+`is_repeated` / `praise_eligible`,
 `patterns_now`, `last_offender_named`.
 
 Decode the message into region labels via `reading-message.md` BEFORE
@@ -123,17 +123,11 @@ asymmetry, prepend side: *"Right arm's off."* / *"Left side's leaning."*
 Never repeat the same opener twice in one session. Track `last_offender_named`
 from context to diverge.
 
-## L3 — servo only
+## L1-L3 — not reachable from this skill
 
-No words. Servo plays `posture_correct` gesture. The log row carries `nudge_level=3`.
-
-## L2 — chime only
-
-No words. Soft chime via audio. Log row carries `nudge_level=2`.
-
-## L1 — LED only
-
-Owned by lelamp side. No event reaches the agent — nothing to phrase.
+L1 (LED ambient) is owned by lelamp and never fires an agent turn. L2 (chime)
+and L3 (servo-only) were budget fallbacks that no longer apply — every event
+that arrives at Lumi is voiced as L4 or L5.
 
 ## Praise (rare, earned)
 
