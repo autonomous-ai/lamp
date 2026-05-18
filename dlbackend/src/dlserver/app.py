@@ -10,6 +10,7 @@ Usage:
 
 import argparse
 import logging
+import os
 import secrets
 from contextlib import asynccontextmanager
 
@@ -176,8 +177,6 @@ def _setup_logging(log_dir: str | None) -> None:
 
 
 def main() -> None:
-    import os
-
     args = parse_args()
     _setup_logging(args.log_dir)
 

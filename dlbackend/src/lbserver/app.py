@@ -18,8 +18,10 @@ Configuration (env vars or .env):
     LB_INTERNAL_PREFIX — prefix prepended to all paths (default: /_internal)
 """
 
+import argparse
 import asyncio
 import logging
+import os
 
 import httpx
 import uvicorn
@@ -153,9 +155,7 @@ async def proxy_ws(client_ws: WebSocket, path: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def parse_args() -> "argparse.Namespace":
-    import argparse
-
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="DL Backend Load Balancer")
     parser.add_argument("--host", default=settings.lb.host)
     parser.add_argument("--port", type=int, default=settings.lb.port)
@@ -188,8 +188,6 @@ def _setup_logging(log_dir: str | None) -> None:
 
 
 def main() -> None:
-    import os
-
     args = parse_args()
     _setup_logging(args.log_dir)
 
