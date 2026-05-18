@@ -856,7 +856,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt/lelamp
 Environment="PYTHONPATH=/opt"
-ExecStart=/opt/lelamp/.venv/bin/uvicorn lelamp.server:app --host 0.0.0.0 --port 5001
+ExecStart=/opt/lelamp/.venv/bin/uvicorn lelamp.server:app --host 127.0.0.1 --port 5001
 Restart=always
 RestartSec=5
 StandardOutput=journal
@@ -962,6 +962,28 @@ server {
   # limit 413s anything past ~700 KB raw. Match scripts/setup.sh.
   client_max_body_size 20M;
   location / { try_files \$uri /index.html; }
+  # Interactive shell WebSocket (xterm.js PTY) — must come before generic /api/.
+  location = /api/system/shell {
+    proxy_pass http://backend;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host \$host;
+    proxy_read_timeout 86400s;
+    proxy_send_timeout 86400s;
+  }
+
+  # Remote code execution endpoint — local callers only (OpenClaw agent on Pi).
+  location = /api/system/exec {
+    allow 127.0.0.1;
+    allow ::1;
+    deny all;
+
+    proxy_pass http://backend;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+  }
   location /api/ {
     proxy_pass http://backend;
     proxy_set_header Host \$host;
@@ -969,6 +991,10 @@ server {
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
   }
   location /hw/ {
+    allow 127.0.0.1;
+    allow ::1;
+    deny all;
+
     proxy_pass http://lelamp/;
     proxy_set_header Host \$host;
     proxy_set_header X-Real-IP \$remote_addr;
