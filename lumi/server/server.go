@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -194,6 +195,37 @@ func (s *Server) stopMQTT() {
 	}
 }
 
+// productionLocalOnly blocks the route for non-localhost callers when
+// LELAMP_MODE=production. In developer mode every caller is allowed through.
+func productionLocalOnly() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !_healthHttpDeliver.IsProductionMode() {
+			c.Next()
+			return
+		}
+		host := c.Request.RemoteAddr
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		xff := strings.TrimSpace(strings.SplitN(c.GetHeader("X-Forwarded-For"), ",", 2)[0])
+		realIP := strings.TrimSpace(c.GetHeader("X-Real-IP"))
+		if !isLoopback(host) || (xff != "" && !isLoopback(xff)) || (realIP != "" && !isLoopback(realIP)) {
+			c.JSON(http.StatusForbidden, gin.H{"status": 0, "message": "local-only in production mode"})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
@@ -282,7 +314,7 @@ func (s *Server) Serve(closeFn func()) error {
 	network.GET("check-internet", s.networkHandler.CheckInternet)
 
 	sensing := api.Group("sensing")
-	sensing.POST("event", s.sensingHandler.PostEvent)
+	sensing.POST("event", productionLocalOnly(), s.sensingHandler.PostEvent)
 	sensing.GET("snapshot/:category/:name", s.sensingHandler.GetSnapshot)
 
 	// Voice file delete (filesystem orchestration on Pi). Voice enroll

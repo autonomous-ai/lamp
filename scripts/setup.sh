@@ -285,6 +285,7 @@ After=network-online.target
 [Service]
 User=root
 WorkingDirectory=/root
+EnvironmentFile=/opt/lelamp/.env
 ExecStart=/usr/local/bin/lumi-server
 Restart=always
 RestartSec=5

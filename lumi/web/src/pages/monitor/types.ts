@@ -28,6 +28,7 @@ export interface SystemInfo {
   goRoutines: number;
   version: string;
   deviceId: string;
+  mode: "production" | "developer";
   diskTotal: number;
   diskUsed: number;
   diskPercent: number;

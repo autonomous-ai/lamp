@@ -44,6 +44,18 @@ func (h *HealthHandler) Readiness(c *gin.Context) {
 	c.JSON(http.StatusOK, serializers.ResponseSuccess("OK"))
 }
 
+// lumiMode returns "production" or "developer" based on the LELAMP_MODE env var.
+// Defaults to "production" when unset — safe by default.
+func lumiMode() string {
+	if strings.ToLower(strings.TrimSpace(os.Getenv("LELAMP_MODE"))) == "developer" {
+		return "developer"
+	}
+	return "production"
+}
+
+// IsProductionMode reports whether the device is running in production mode.
+func IsProductionMode() bool { return lumiMode() == "production" }
+
 // SystemInfo returns CPU load, RAM usage, temperature, and uptime.
 func (h *HealthHandler) SystemInfo(c *gin.Context) {
 	info := map[string]any{
@@ -64,6 +76,7 @@ func (h *HealthHandler) SystemInfo(c *gin.Context) {
 		"goRoutines": runtime.NumGoroutine(),
 		"version":    config.LumiVersion,
 		"deviceId":   h.config.DeviceID,
+		"mode":       lumiMode(),
 	}
 
 	// Parse /proc/meminfo for RAM + swap (KB).
