@@ -677,11 +677,10 @@ server {
   # attachment. 20 MB leaves headroom for future bumps to the client-side cap.
   client_max_body_size 20M;
 
-  # Web UI — local callers only in production. External clients get 403.
+  # Web UI. Access rules come from lumi-access-web.conf (written by lumi-mode).
+  # Production: allow 127.0.0.1; deny all. Developer: empty = open.
   location / {
-    allow 127.0.0.1;
-    allow ::1;
-    deny all;
+    include /etc/nginx/conf.d/lumi-access-web.conf;
     try_files \$uri /index.html;
   }
 
@@ -689,9 +688,7 @@ server {
   # /api/ block so the more-specific match wins. Needs HTTP/1.1 + Upgrade
   # forwarding and a long read timeout (sessions stay open while idle).
   location = /api/system/shell {
-    allow 127.0.0.1;
-    allow ::1;
-    deny all;
+    include /etc/nginx/conf.d/lumi-access-api.conf;
     proxy_pass http://backend;
     proxy_http_version 1.1;
     proxy_set_header Upgrade \$http_upgrade;
@@ -701,7 +698,7 @@ server {
     proxy_send_timeout 86400s;
   }
 
-  # Remote code execution endpoint — local callers only (OpenClaw agent on Pi).
+  # Remote code execution endpoint — always local-only regardless of mode.
   # Must come BEFORE the generic /api/ block so the exact match wins.
   location = /api/system/exec {
     allow 127.0.0.1;
@@ -714,11 +711,9 @@ server {
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
   }
 
-  # API — local callers only (OpenClaw on Pi calls 127.0.0.1).
+  # API. Access rules come from lumi-access-api.conf (written by lumi-mode).
   location /api/ {
-    allow 127.0.0.1;
-    allow ::1;
-    deny all;
+    include /etc/nginx/conf.d/lumi-access-api.conf;
     proxy_pass http://backend;
     proxy_set_header Host \$host;
     proxy_set_header X-Real-IP \$remote_addr;
@@ -771,6 +766,15 @@ server {
   location = /connecttest.txt { return 204; }
 }
 EOF
+
+  # Write production-mode access conf files (default). lumi-mode script can
+  # overwrite these at runtime to switch between production and developer.
+  printf 'allow 127.0.0.1;\nallow ::1;\ndeny all;\n' > /etc/nginx/conf.d/lumi-access-web.conf
+  printf 'allow 127.0.0.1;\nallow ::1;\ndeny all;\n' > /etc/nginx/conf.d/lumi-access-api.conf
+
+  # Install lumi-mode switch script.
+  cp "$(dirname "$0")/lumi-mode.sh" /usr/local/bin/lumi-mode
+  chmod +x /usr/local/bin/lumi-mode
 
   nginx -t
   systemctl enable nginx
