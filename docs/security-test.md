@@ -76,7 +76,7 @@ curl -s -o /dev/null -w "%{http_code}" -X POST http://100.119.50.21/api/system/e
 Shell WebSocket must still be reachable from LAN for the xterm.js terminal in the Web UI.
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}" \
+curl -s -o /dev/null -w "%{http_code}" --max-time 3 \
   -H "Upgrade: websocket" \
   -H "Connection: Upgrade" \
   -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
@@ -143,7 +143,7 @@ echo "HTTP $(curl -s -o /dev/null -w '%{http_code}' -X POST http://$PI/api/syste
 
 echo ""
 echo "=== F5b: /api/system/shell WebSocket reachable ==="
-echo "HTTP $(curl -s -o /dev/null -w '%{http_code}' -H 'Upgrade: websocket' -H 'Connection: Upgrade' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Sec-WebSocket-Version: 13' http://$PI/api/system/shell) — expect 101"
+echo "HTTP $(curl -s -o /dev/null -w '%{http_code}' --max-time 3 -H 'Upgrade: websocket' -H 'Connection: Upgrade' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Sec-WebSocket-Version: 13' http://$PI/api/system/shell) — expect 101"
 
 echo ""
 echo "=== F6: /gw/ loads ==="
