@@ -400,11 +400,11 @@ lelamp-{version}.zip
 
 ### LeLamp HTTP API (FastAPI on port 5001)
 
-The LeLamp Python runtime exposes its own HTTP API on `127.0.0.1:5001`. Lumi Server (Go, port 5000) bridges OpenClaw skill requests to this API. Nginx also exposes it externally at `/hw/*` for debugging/Swagger access.
+The LeLamp Python runtime exposes its own HTTP API on `127.0.0.1:5001`. Lumi Server (Go, port 5000) bridges OpenClaw skill requests to this API. Nginx proxies `/hw/*` for same-machine callers only — external clients receive 403. Swagger UI at `/hw/docs` is not accessible from LAN.
 
 ```
 OpenClaw LLM → curl 127.0.0.1:5000/api/servo → Lumi Server → http://127.0.0.1:5001/servo → LeLamp Python → Hardware
-External     → http://<device-ip>/hw/docs    → nginx → http://127.0.0.1:5001/docs (Swagger UI)
+External     → http://<device-ip>/hw/docs    → nginx → 403 Forbidden
 ```
 
 #### Endpoints (v0.2.0)

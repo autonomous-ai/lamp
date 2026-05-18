@@ -398,11 +398,11 @@ lelamp-{version}.zip
 
 ### LeLamp HTTP API (FastAPI trên port 5001)
 
-LeLamp Python runtime expose HTTP API trên `127.0.0.1:5001`. Lumi Server (Go, port 5000) bridge request từ OpenClaw skills đến API này. Nginx cũng expose ra ngoài tại `/hw/*` để debug/truy cập Swagger.
+LeLamp Python runtime expose HTTP API trên `127.0.0.1:5001`. Lumi Server (Go, port 5000) bridge request từ OpenClaw skills đến API này. Nginx proxy `/hw/*` chỉ cho caller trên cùng máy — client bên ngoài nhận 403. Swagger UI tại `/hw/docs` không truy cập được từ LAN.
 
 ```
 OpenClaw LLM → curl 127.0.0.1:5000/api/servo → Lumi Server → http://127.0.0.1:5001/servo → LeLamp Python → Phần cứng
-Bên ngoài    → http://<device-ip>/hw/docs    → nginx → http://127.0.0.1:5001/docs (Swagger UI)
+Bên ngoài    → http://<device-ip>/hw/docs    → nginx → 403 Forbidden
 ```
 
 #### Endpoints (v0.2.0)

@@ -67,7 +67,7 @@ Already running on the Pi4. Provides event-driven services with priority dispatc
 - **Audio** — Seeed mic/speaker, amixer volume, record WAV, play tone
 - **DisplayService** — small round display (GC9A01 1.28" or similar), dual-mode: eyes emotion (default) + info display (time, weather, timer, notifications)
 
-All hardware exposed via FastAPI on `127.0.0.1:5001` (systemd service: `lumi-lelamp.service`). Nginx proxies `/hw/*` for external Swagger access.
+All hardware exposed via FastAPI on `127.0.0.1:5001` (systemd service: `lumi-lelamp.service`). Nginx proxies `/hw/*` for same-machine callers only — external clients receive 403. Swagger UI at `/hw/docs` is not accessible from LAN.
 
 ### Lumi Server — System Layer + HTTP API Bridge (Go)
 
@@ -246,7 +246,7 @@ Dashboard layout with 4 sections:
 3. **Workflow timeline**: Real-time SSE event stream with color-coded event types
 4. **Camera**: Collapsible MJPEG stream + snapshot from LeLamp `/hw/camera/stream`
 
-### LeLamp Status Endpoints (proxied via nginx `/hw/*`)
+### LeLamp Status Endpoints (proxied via nginx `/hw/*`, local-only)
 
 | Endpoint | Method | Description |
 |---|---|---|

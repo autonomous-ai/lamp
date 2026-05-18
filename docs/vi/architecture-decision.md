@@ -86,7 +86,7 @@ Giữ nguyên từ dự án LeLamp hiện tại, nhưng bỏ phần AI/LiveKit:
 - **Audio** — Seeed mic/speaker, amixer volume, thu WAV, phát tone
 - Event-driven **ServiceBase** với priority dispatch
 
-Tất cả hardware expose qua FastAPI trên `127.0.0.1:5001` (systemd: `lumi-lelamp.service`). Nginx proxy `/hw/*` để truy cập Swagger từ bên ngoài.
+Tất cả hardware expose qua FastAPI trên `127.0.0.1:5001` (systemd: `lumi-lelamp.service`). Nginx proxy `/hw/*` chỉ cho caller trên cùng máy — client bên ngoài nhận 403. Swagger UI tại `/hw/docs` không truy cập được từ LAN.
 
 ### Lumi Server (Go, fork từ openclaw-lobster) — Hệ Thống + HTTP API Bridge
 
@@ -372,7 +372,7 @@ Dashboard gồm 4 phần:
 │  • ServiceBase    — Event-driven, priority dispatch                 │
 │                                                                     │
 │  FastAPI :5001 | systemd: lumi-lelamp.service                       │
-│  nginx: /hw/* → 127.0.0.1:5001 (Swagger tại /hw/docs)             │
+│  nginx: /hw/* → 127.0.0.1:5001 (local-only, external → 403)       │
 │                                                                     │
 └───────────────────────────┬─────────────────────────────────────────┘
                             │
