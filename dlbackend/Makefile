@@ -8,7 +8,7 @@
 # Variables
 # ---------------------------------------------------------------------------
 
-NGINX_CONF ?= /workspace/ai-lamp-openclaw/dlbackend/nginx.conf
+NGINX_CONF ?= /workspace/ai-lamp-lumi/dlbackend/nginx.conf
 HOST ?= 0.0.0.0
 
 # Port layout:

@@ -158,8 +158,16 @@ def _setup_logging(log_dir: str | None) -> None:
         from pathlib import Path
 
         Path(log_dir).mkdir(parents=True, exist_ok=True)
+        # Clean up old .bak files, then rename current logs to .bak
+        for bak in Path(log_dir).glob("dlserver.log*.bak"):
+            bak.unlink()
+        log_path = Path(log_dir) / "dlserver.log"
+        if log_path.exists():
+            log_path.rename(log_path.with_suffix(".log.bak"))
+        for old in Path(log_dir).glob("dlserver.log.*"):
+            old.rename(Path(str(old) + ".bak"))
         handler = RotatingFileHandler(
-            f"{log_dir}/dlserver.log", maxBytes=1_048_576, backupCount=3
+            str(log_path), maxBytes=1_048_576, backupCount=3
         )
         handler.setFormatter(logging.Formatter(LOG_FORMAT))
         logging.basicConfig(level=logging.INFO, handlers=[handler])
