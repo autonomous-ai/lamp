@@ -1018,6 +1018,10 @@ server {
   location = /connecttest.txt     { return 204; }
 }
 EOF
+# Install lumi-mode switch script.
+cp /tmp/lumi-mode.sh /usr/local/bin/lumi-mode
+chmod +x /usr/local/bin/lumi-mode
+
 nginx -t
 systemctl enable nginx
 
