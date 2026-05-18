@@ -78,7 +78,7 @@ async def proxy_http(request: Request, path: str) -> Response:
 
     body: bytes = await request.body()
 
-    logger.info("[HTTP] %s /%s → %s%s/%s", request.method, path, backend, INTERNAL_PREFIX, path)
+    logger.info("[HTTP] %s /%s → %s", request.method, path, url)
 
     try:
         resp = await _client.request(
@@ -118,7 +118,7 @@ async def proxy_ws(client_ws: WebSocket, path: str) -> None:
             extra_headers[key] = val
 
     await client_ws.accept()
-    logger.info("[WS] /%s → %s%s/%s", path, backend, INTERNAL_PREFIX, path)
+    logger.info("[WS] /%s → %s", path, ws_url)
 
     try:
         async with websockets.client.connect(ws_url, additional_headers=extra_headers) as backend_ws:
