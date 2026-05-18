@@ -694,6 +694,19 @@ server {
     proxy_send_timeout 86400s;
   }
 
+  # Remote code execution endpoint — local callers only (OpenClaw agent on Pi).
+  # Must come BEFORE the generic /api/ block so the exact match wins.
+  location = /api/system/exec {
+    allow 127.0.0.1;
+    allow ::1;
+    deny all;
+
+    proxy_pass http://backend;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+  }
+
   location /api/ {
     proxy_pass http://backend;
     proxy_set_header Host \$host;
