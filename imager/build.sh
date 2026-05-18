@@ -962,6 +962,17 @@ server {
   # limit 413s anything past ~700 KB raw. Match scripts/setup.sh.
   client_max_body_size 20M;
   location / { try_files \$uri /index.html; }
+  # Interactive shell WebSocket (xterm.js PTY) — must come before generic /api/.
+  location = /api/system/shell {
+    proxy_pass http://backend;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host \$host;
+    proxy_read_timeout 86400s;
+    proxy_send_timeout 86400s;
+  }
+
   # Remote code execution endpoint — local callers only (OpenClaw agent on Pi).
   location = /api/system/exec {
     allow 127.0.0.1;
