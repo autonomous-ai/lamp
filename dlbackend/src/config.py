@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import ClassVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from core.enums import (
@@ -82,6 +82,13 @@ class Settings(BaseSettings):
     )
 
     dl_api_key: str = ""
+
+    @field_validator("dl_api_key")
+    @classmethod
+    def require_api_key(cls, v: str) -> str:
+        if not v:
+            raise ValueError("DL_API_KEY must be set — server refuses to start without auth")
+        return v
 
     cache_dir: Path = Path.home() / ".dlbackend"
 
