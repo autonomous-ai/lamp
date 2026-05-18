@@ -65,21 +65,32 @@ start-nginx:
 	pkill nginx 2>/dev/null || true
 	nginx -c $(NGINX_CONF)
 
+DLSERVER_PID ?= /tmp/dlserver.pid
+LBSERVER_PID ?= /tmp/lbserver.pid
+
 start-runpod-dlserver: install stop-runpod-dlserver
 	@mkdir -p /workspace/logs/dlbackend
-	@(python -m dlserver --host 127.0.0.1 --port $(DLSERVER_PORT) 2>&1 | multilog t s1048576 n3 /workspace/logs/dlbackend) &
-	@echo "dlserver started on port $(DLSERVER_PORT) (logs: /workspace/logs/dlbackend/)"
+	@(python -m dlserver --host 127.0.0.1 --port $(DLSERVER_PORT) 2>&1 | multilog t s1048576 n3 /workspace/logs/dlbackend) & echo $$! > $(DLSERVER_PID)
+	@echo "dlserver started on port $(DLSERVER_PORT), pid=$$(cat $(DLSERVER_PID)) (logs: /workspace/logs/dlbackend/)"
 
 stop-runpod-dlserver:
-	@pkill -f "python -m dlserver" 2>/dev/null || true
+	@if [ -f $(DLSERVER_PID) ]; then \
+		kill $$(cat $(DLSERVER_PID)) 2>/dev/null || true; \
+		rm -f $(DLSERVER_PID); \
+		echo "dlserver stopped"; \
+	fi
 
 start-runpod-lbserver: install-lb stop-runpod-lbserver
 	@mkdir -p /workspace/logs/lbserver
-	@(python -m lbserver --host 127.0.0.1 --port $(LBSERVER_PORT) 2>&1 | multilog t s1048576 n3 /workspace/logs/lbserver) &
-	@echo "lbserver started on port $(LBSERVER_PORT) (logs: /workspace/logs/lbserver/)"
+	@(python -m lbserver --host 127.0.0.1 --port $(LBSERVER_PORT) 2>&1 | multilog t s1048576 n3 /workspace/logs/lbserver) & echo $$! > $(LBSERVER_PID)
+	@echo "lbserver started on port $(LBSERVER_PORT), pid=$$(cat $(LBSERVER_PID)) (logs: /workspace/logs/lbserver/)"
 
 stop-runpod-lbserver:
-	@pkill -f "python -m lbserver" 2>/dev/null || true
+	@if [ -f $(LBSERVER_PID) ]; then \
+		kill $$(cat $(LBSERVER_PID)) 2>/dev/null || true; \
+		rm -f $(LBSERVER_PID); \
+		echo "lbserver stopped"; \
+	fi
 
 # ---------------------------------------------------------------------------
 # Jupyter
