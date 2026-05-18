@@ -961,9 +961,18 @@ server {
   # Monitor chat sends base64 attachments inside JSON; default 1 MB nginx
   # limit 413s anything past ~700 KB raw. Match scripts/setup.sh.
   client_max_body_size 20M;
-  location / { try_files \$uri /index.html; }
+  # Web UI — local callers only in production. External clients get 403.
+  location / {
+    allow 127.0.0.1;
+    allow ::1;
+    deny all;
+    try_files \$uri /index.html;
+  }
   # Interactive shell WebSocket (xterm.js PTY) — must come before generic /api/.
   location = /api/system/shell {
+    allow 127.0.0.1;
+    allow ::1;
+    deny all;
     proxy_pass http://backend;
     proxy_http_version 1.1;
     proxy_set_header Upgrade \$http_upgrade;
@@ -984,7 +993,11 @@ server {
     proxy_set_header X-Real-IP \$remote_addr;
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
   }
+  # API — local callers only (OpenClaw on Pi calls 127.0.0.1).
   location /api/ {
+    allow 127.0.0.1;
+    allow ::1;
+    deny all;
     proxy_pass http://backend;
     proxy_set_header Host \$host;
     proxy_set_header X-Real-IP \$remote_addr;

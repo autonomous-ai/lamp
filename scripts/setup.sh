@@ -677,7 +677,11 @@ server {
   # attachment. 20 MB leaves headroom for future bumps to the client-side cap.
   client_max_body_size 20M;
 
+  # Web UI — local callers only in production. External clients get 403.
   location / {
+    allow 127.0.0.1;
+    allow ::1;
+    deny all;
     try_files \$uri /index.html;
   }
 
@@ -685,6 +689,9 @@ server {
   # /api/ block so the more-specific match wins. Needs HTTP/1.1 + Upgrade
   # forwarding and a long read timeout (sessions stay open while idle).
   location = /api/system/shell {
+    allow 127.0.0.1;
+    allow ::1;
+    deny all;
     proxy_pass http://backend;
     proxy_http_version 1.1;
     proxy_set_header Upgrade \$http_upgrade;
@@ -707,7 +714,11 @@ server {
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
   }
 
+  # API — local callers only (OpenClaw on Pi calls 127.0.0.1).
   location /api/ {
+    allow 127.0.0.1;
+    allow ::1;
+    deny all;
     proxy_pass http://backend;
     proxy_set_header Host \$host;
     proxy_set_header X-Real-IP \$remote_addr;
