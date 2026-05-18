@@ -701,7 +701,13 @@ async def local_only_middleware(request, call_next):
         if _is_local(client) and not (xff and not _is_local(xff)) and not (real_ip and not _is_local(real_ip)):
             return await call_next(request)
 
-        # Browser requests from the same device origin pass (web UI, Swagger).
+        # Swagger UI pages are navigated to directly — no Origin/Referer. Allow them
+        # so the docs load; API calls from Swagger will carry a Referer header.
+        path = request.url.path.rstrip("/")
+        if path in ("/docs", "/redoc", "/openapi.json"):
+            return await call_next(request)
+
+        # Browser requests from the same device origin pass (web UI, Swagger API calls).
         host = request.headers.get("host", "")
         origin = request.headers.get("origin")
         referer = request.headers.get("referer")
