@@ -15,6 +15,11 @@ LAMP_ID = os.environ.get("LELAMP_LAMP_ID", "lelamp")
 SERVO_FPS = int(os.environ.get("LELAMP_SERVO_FPS", "30"))
 SERVO_HOLD_S = float(os.environ.get("LELAMP_SERVO_HOLD_S", "3.0"))
 HTTP_PORT = int(os.environ.get("LELAMP_HTTP_PORT", "5001"))
+# production (default): bind 127.0.0.1, local-only middleware enforced.
+# developer: bind 0.0.0.0, no access restrictions — for local dev/testing only.
+_mode = os.environ.get("LELAMP_MODE", "production").strip().lower()
+MODE: str = "developer" if _mode == "developer" else "production"
+HTTP_HOST: str = "0.0.0.0" if MODE == "developer" else "127.0.0.1"
 CAMERA_INDEX = int(os.environ.get("LELAMP_CAMERA_INDEX", "0"))
 CAMERA_WIDTH = int(os.environ.get("LELAMP_CAMERA_WIDTH", "640"))
 CAMERA_HEIGHT = int(os.environ.get("LELAMP_CAMERA_HEIGHT", "480"))

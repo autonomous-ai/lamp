@@ -49,7 +49,7 @@ lumi-test:
 lelamp: lelamp-dev
 
 lelamp-dev:
-	cd $(LELAMP_DIR) && PYTHONPATH=.. .venv/bin/uvicorn lelamp.server:app --host 0.0.0.0 --port $(LELAMP_PORT) --reload
+	cd $(LELAMP_DIR) && PYTHONPATH=.. LELAMP_MODE=developer .venv/bin/uvicorn lelamp.server:app --host 0.0.0.0 --port $(LELAMP_PORT) --reload
 
 lelamp-run:
 	cd $(LELAMP_DIR) && PYTHONPATH=.. .venv/bin/python -m lelamp.server

@@ -432,7 +432,7 @@ Environment="PYTHONPATH=/opt"
 # Anonymous PulseAudio socket — see /etc/pulse/default.pa. Lets root reach the
 # desktop user's PulseAudio so the Bluetooth headset routing works.
 Environment="PULSE_SERVER=unix:/tmp/pulse-anon-lumi"
-ExecStart=$LELAMP_DIR/.venv/bin/uvicorn lelamp.server:app --host 0.0.0.0 --port 5001
+ExecStart=$LELAMP_DIR/.venv/bin/uvicorn lelamp.server:app --host 127.0.0.1 --port 5001
 Restart=always
 RestartSec=5
 StandardOutput=journal
@@ -702,6 +702,10 @@ server {
   }
 
   location /hw/ {
+    allow 127.0.0.1;
+    allow ::1;
+    deny all;
+
     proxy_pass http://lelamp/;
     proxy_set_header Host \$host;
     proxy_set_header X-Real-IP \$remote_addr;

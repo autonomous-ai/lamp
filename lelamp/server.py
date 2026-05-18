@@ -28,8 +28,10 @@ from lelamp.config import (
     CAMERA_HEIGHT,
     CAMERA_INDEX,
     CAMERA_WIDTH,
+    HTTP_HOST,
     HTTP_PORT,
     LAMP_ID,
+    MODE,
     SERVO_FPS,
     SERVO_HOLD_S,
     SERVO_PORT,
@@ -654,6 +656,50 @@ class ProxyPrefixMiddleware:
 app.add_middleware(ProxyPrefixMiddleware)
 
 
+from ipaddress import ip_address, ip_network
+
+from fastapi.responses import JSONResponse
+
+_LOCAL_NETS = (ip_network("127.0.0.0/8"), ip_network("::1/128"))
+
+
+def _is_local(value: str | None) -> bool:
+    if not value:
+        return False
+    host = value.split(",")[0].strip()
+    if host.startswith("[") and "]" in host:
+        host = host[1 : host.index("]")]
+    elif ":" in host and host.count(":") == 1:
+        host = host.rsplit(":", 1)[0]
+    try:
+        addr = ip_address(host)
+    except ValueError:
+        return host == "localhost"
+    return any(addr in net for net in _LOCAL_NETS)
+
+
+@app.middleware("http")
+async def local_only_middleware(request, call_next):
+    if MODE == "production":
+        client = request.client.host if request.client else None
+        xff = request.headers.get("x-forwarded-for")
+        real_ip = request.headers.get("x-real-ip")
+        if (
+            not _is_local(client)
+            or (xff and not _is_local(xff))
+            or (real_ip and not _is_local(real_ip))
+        ):
+            logger.warning(
+                "Blocked non-local request: client=%s xff=%s real_ip=%s path=%s",
+                client,
+                xff,
+                real_ip,
+                request.url.path,
+            )
+            return JSONResponse(status_code=403, content={"detail": "LeLamp API is local-only"})
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def request_logging_middleware(request, call_next):
     start = time.perf_counter()
@@ -704,4 +750,4 @@ def health():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=HTTP_PORT)
+    uvicorn.run(app, host=HTTP_HOST, port=HTTP_PORT)

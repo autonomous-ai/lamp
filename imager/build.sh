@@ -856,7 +856,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt/lelamp
 Environment="PYTHONPATH=/opt"
-ExecStart=/opt/lelamp/.venv/bin/uvicorn lelamp.server:app --host 0.0.0.0 --port 5001
+ExecStart=/opt/lelamp/.venv/bin/uvicorn lelamp.server:app --host 127.0.0.1 --port 5001
 Restart=always
 RestartSec=5
 StandardOutput=journal
@@ -969,6 +969,10 @@ server {
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
   }
   location /hw/ {
+    allow 127.0.0.1;
+    allow ::1;
+    deny all;
+
     proxy_pass http://lelamp/;
     proxy_set_header Host \$host;
     proxy_set_header X-Real-IP \$remote_addr;
