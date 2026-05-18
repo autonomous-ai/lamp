@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from protocols.utils.state import get_emotion_model, set_emotion_model
+from dlserver.utils.state import get_emotion_model, set_emotion_model
 from core.perception.emotion.constants import RESOURCES_DIR
 from core.perception.emotion.perception import EmotionPerception
 from core.perception.emotion.utils import create_emotion_recognizer

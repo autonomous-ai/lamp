@@ -5,15 +5,15 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import TypeAdapter, ValidationError
 
-from protocols.models.action import (
+from dlserver.models.action import (
     ActionConfigRequest,
     ActionFrameRequest,
     ActionHeartBeatRequest,
     ActionRequest,
     ActionResponse,
 )
-from protocols.utils.common import decode_image, verify_ws_api_key
-from protocols.utils.state import get_action_model
+from dlserver.utils.common import decode_image, verify_ws_api_key
+from dlserver.utils.state import get_action_model
 
 logger = logging.getLogger(__name__)
 

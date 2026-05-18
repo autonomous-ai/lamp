@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import TypeAdapter, ValidationError
 
-from protocols.models.pose import (
+from dlserver.models.pose import (
     PoseConfigRequest,
     PoseEstimateRequest,
     PoseEstimateResponse,
@@ -14,8 +14,8 @@ from protocols.models.pose import (
     PoseRequest,
     PoseResponse,
 )
-from protocols.utils.common import decode_image, verify_ws_api_key
-from protocols.utils.state import get_pose_model
+from dlserver.utils.common import decode_image, verify_ws_api_key
+from dlserver.utils.state import get_pose_model
 
 logger: logging.Logger = logging.getLogger(__name__)
 

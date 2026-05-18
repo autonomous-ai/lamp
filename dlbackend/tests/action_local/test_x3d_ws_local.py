@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core.perception.action.perception import ActionPerception
-from protocols.utils.state import get_action_model, set_action_model
+from dlserver.utils.state import get_action_model, set_action_model
 
 TEST_API_KEY = "test-secret-key"
 os.environ["DL_API_KEY"] = TEST_API_KEY

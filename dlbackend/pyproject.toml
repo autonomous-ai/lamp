@@ -10,20 +10,24 @@ requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
+    "python-dotenv>=1.0.0",
+    "pydantic",
+    "pydantic-settings",
+]
+
+[project.optional-dependencies]
+dl = [
     "ultralytics>=8.3.0",
     "transformers>=4.40.0",
     "torch>=2.0.0",
     "torchvision>=0.15.0",
     "pillow>=10.0.0",
     "numpy>=2",
-    "python-dotenv>=1.0.0",
     "tqdm",
     "scikit-learn",
     "pandas",
     "opencv-contrib-python",
     "websockets",
-    "pydantic-settings",
-    "pydantic",
     "soundfile",
     "sounddevice",
     "scipy>=1.8",
@@ -33,10 +37,12 @@ dependencies = [
     "funasr==1.3.1",
     "onnx==1.21.0"
 ]
-
-[project.optional-dependencies]
 cpu = ["onnxruntime"]
 gpu = ["onnxruntime-gpu"]
+lb = [
+    "httpx",
+    "websockets",
+]
 dev = [
     "ruff",
     "pytest>=8.4",

@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from protocols.utils.state import get_action_model, get_emotion_model, get_pose_model
+from dlserver.utils.state import get_action_model, get_emotion_model, get_pose_model
 
 router = APIRouter()
 

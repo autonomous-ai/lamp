@@ -14,7 +14,7 @@ from core.perception.emotion.constants import RESOURCES_DIR
 from core.perception.emotion.perception import EmotionPerception
 from core.perception.emotion.utils import create_emotion_recognizer
 from core.perception.face.predictors.yunet import YuNetFaceDetector
-from protocols.utils.state import get_emotion_model, set_emotion_model
+from dlserver.utils.state import get_emotion_model, set_emotion_model
 
 EMONET_EMOTIONS: list[str] = (
     (RESOURCES_DIR / "emonet_8_classes.txt").read_text().strip().split("\n")

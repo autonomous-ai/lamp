@@ -76,6 +76,13 @@ class SpeechEmotionRecognizerSetting(BaseModel):
     providers: str = ""
 
 
+class LBSetting(BaseModel):
+    backends: str = ""  # comma-separated backend URLs, e.g. "http://127.0.0.1:8888"
+    host: str = "0.0.0.0"
+    port: int = 7999
+    internal_prefix: str = "/_internal"
+
+
 class Settings(BaseSettings):
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
         env_file=".env", env_nested_delimiter="__", extra="allow"
@@ -103,6 +110,8 @@ class Settings(BaseSettings):
     emotion: EmotionSetting = EmotionSetting()
     pose: PoseSetting = PoseSetting()
     person_detector: PersonDetectorSetting = PersonDetectorSetting()
+
+    lb: LBSetting = LBSetting()
 
 
 settings = Settings()
