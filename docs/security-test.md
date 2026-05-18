@@ -123,6 +123,50 @@ curl -s -o /dev/null -w "%{http_code}" \
 
 ---
 
+## Findings not patched in this PR — rationale
+
+These were reviewed and explicitly deferred. They are not oversights.
+
+### F4 — Lumi Go wildcard CORS (`Access-Control-Allow-Origin: *`)
+
+Not patched because CORS only matters when a browser can reach the endpoint.
+Every high-risk endpoint is already blocked at the nginx layer before a browser
+request arrives (`/api/system/exec` → 403, `/hw/*` → 403).
+For the remaining public UI endpoints (`/api/health`, setup flow, etc.) wildcard
+CORS is acceptable: they carry no secrets and are intentionally browser-accessible.
+
+Revisit if a sensitive non-admin endpoint is added to `/api/` in the future.
+
+### F6 — `/gw/` OpenClaw gateway proxied by nginx
+
+Not patched because the browser enforces a secure-context requirement on its own:
+WebSocket connections from an HTTP page to a non-localhost host are blocked by the
+browser (`mixed content` / `secure context` policy).
+Connecting to the Control UI over `http://` produces:
+> "control ui requires device identity (use HTTPS or localhost secure context)"
+
+Practical impact: a LAN attacker who loads the page gets an HTML shell but cannot
+establish the WebSocket session needed to read conversations or send commands.
+OpenClaw also requires device-identity + OAuth before any agent action.
+
+Revisit if HTTPS is added to the Pi (at that point the WebSocket gate opens and
+the nginx `allow/deny` block from the audit becomes necessary).
+
+### F8 — OpenClaw `controlUi.allowedOrigins: ["*"]`
+
+Depends on F6. The wildcard origins only become dangerous if the `/gw/` WebSocket
+is reachable from a browser, which requires HTTPS (see F6 above). Until HTTPS is
+added, this setting has no practical effect on the attack surface.
+Will be tightened together with F6 when HTTPS is introduced.
+
+### F9 — Docs describe external Swagger as intentional
+
+The relevant doc sections were written before the local-only boundary was designed.
+They are factually wrong but do not affect runtime security.
+Low-priority cleanup; will be corrected as part of the next doc refresh cycle.
+
+---
+
 ## Quick all-in-one script
 
 Copy-paste to run all Pi tests at once:
