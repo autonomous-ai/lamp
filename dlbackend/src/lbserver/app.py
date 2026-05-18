@@ -23,8 +23,7 @@ import logging
 
 import httpx
 import uvicorn
-import websockets.client
-import websockets.exceptions
+import websockets
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 
 from config import settings
@@ -47,7 +46,6 @@ if not BACKENDS:
     logger.warning("No backends configured — set LB__BACKENDS=http://127.0.0.1:8888")
 
 
-# Separate round-robin selectors for HTTP and WS
 http_rr = RoundRobin(BACKENDS)
 ws_rr = RoundRobin(BACKENDS)
 
@@ -121,7 +119,7 @@ async def proxy_ws(client_ws: WebSocket, path: str) -> None:
     logger.info("[WS] /%s → %s", path, ws_url)
 
     try:
-        async with websockets.client.connect(ws_url, additional_headers=extra_headers) as backend_ws:
+        async with websockets.connect(ws_url, additional_headers=extra_headers) as backend_ws:
 
             async def client_to_backend() -> None:
                 try:
