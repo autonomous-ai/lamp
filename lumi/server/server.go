@@ -31,6 +31,7 @@ import (
 	"go-lamp.autonomous.ai/internal/statusled"
 	devicebutton "go-lamp.autonomous.ai/lib/devicebutton"
 	"go-lamp.autonomous.ai/lib/i18n"
+	"go-lamp.autonomous.ai/lib/lelamp"
 	"go-lamp.autonomous.ai/lib/logger"
 	"go-lamp.autonomous.ai/lib/mqtt"
 	"go-lamp.autonomous.ai/lib/safego"
@@ -347,6 +348,15 @@ func (s *Server) Serve(closeFn func()) error {
 
 	// HTTP server is about to listen — booting is done.
 	s.statusLED.Clear(statusled.StateBooting)
+
+	// When the device is still in AP/provisioning mode, paint the strip solid
+	// white as a visual "ready for WiFi setup" signal. Done after Clear(Booting)
+	// so the blue breathing shows during init, then settles to white once the
+	// HTTP/web UI is reachable. Skipped post-setup — agent flash + ambient take
+	// over from here.
+	if !s.config.SetUpCompleted {
+		lelamp.SetSolid(255, 255, 255)
+	}
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil {
