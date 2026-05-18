@@ -30,10 +30,7 @@ from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSoc
 from config import settings
 from lbserver.utils import RoundRobin
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-)
+LOG_FORMAT = "%(asctime)s [%(name)s] %(levelname)s: %(message)s"
 logger = logging.getLogger("lbserver")
 
 
@@ -164,11 +161,28 @@ def parse_args() -> "argparse.Namespace":
     parser = argparse.ArgumentParser(description="DL Backend Load Balancer")
     parser.add_argument("--host", default=settings.lb.host)
     parser.add_argument("--port", type=int, default=settings.lb.port)
+    parser.add_argument("--log-dir", default=None, help="Directory for rotating log files")
     return parser.parse_args()
+
+
+def _setup_logging(log_dir: str | None) -> None:
+    if log_dir:
+        from logging.handlers import RotatingFileHandler
+        from pathlib import Path
+
+        Path(log_dir).mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(
+            f"{log_dir}/lbserver.log", maxBytes=1_048_576, backupCount=3
+        )
+        handler.setFormatter(logging.Formatter(LOG_FORMAT))
+        logging.basicConfig(level=logging.INFO, handlers=[handler])
+    else:
+        logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 
 
 def main() -> None:
     args = parse_args()
+    _setup_logging(args.log_dir)
 
     if BACKENDS:
         logger.info("Backends: %s", ", ".join(BACKENDS))

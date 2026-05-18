@@ -38,10 +38,7 @@ from dlserver.utils.state import (
 )
 from factory import build_action_perception, build_emotion_perception, build_pose_perception
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-)
+LOG_FORMAT = "%(asctime)s [%(name)s] %(levelname)s: %(message)s"
 logger = logging.getLogger(__name__)
 
 # --- Auth ---
@@ -150,10 +147,27 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="DL Backend Server")
     parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8001, help="Bind port (default: 8001)")
+    parser.add_argument("--log-dir", default=None, help="Directory for rotating log files")
     return parser.parse_args()
+
+
+def _setup_logging(log_dir: str | None) -> None:
+    if log_dir:
+        from logging.handlers import RotatingFileHandler
+        from pathlib import Path
+
+        Path(log_dir).mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(
+            f"{log_dir}/dlserver.log", maxBytes=1_048_576, backupCount=3
+        )
+        handler.setFormatter(logging.Formatter(LOG_FORMAT))
+        logging.basicConfig(level=logging.INFO, handlers=[handler])
+    else:
+        logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 
 
 def main() -> None:
     args = parse_args()
+    _setup_logging(args.log_dir)
     logger.info("Starting DL backend on %s:%d", args.host, args.port)
     uvicorn.run(app, host=args.host, port=args.port)

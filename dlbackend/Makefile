@@ -69,9 +69,8 @@ DLSERVER_PID ?= /tmp/dlserver.pid
 LBSERVER_PID ?= /tmp/lbserver.pid
 
 start-runpod-dlserver: install stop-runpod-dlserver
-	@mkdir -p /workspace/logs/dlbackend
-	@(python -m dlserver --host 127.0.0.1 --port $(DLSERVER_PORT) 2>&1 | multilog t s1048576 n3 /workspace/logs/dlbackend) & echo $$! > $(DLSERVER_PID)
-	@echo "dlserver started on port $(DLSERVER_PORT), pid=$$(cat $(DLSERVER_PID)) (logs: /workspace/logs/dlbackend/)"
+	@python -m dlserver --host 127.0.0.1 --port $(DLSERVER_PORT) --log-dir /workspace/logs/dlbackend & echo $$! > $(DLSERVER_PID)
+	@echo "dlserver started on port $(DLSERVER_PORT), pid=$$(cat $(DLSERVER_PID))"
 
 stop-runpod-dlserver:
 	@if [ -f $(DLSERVER_PID) ]; then \
@@ -81,9 +80,8 @@ stop-runpod-dlserver:
 	fi
 
 start-runpod-lbserver: install-lb stop-runpod-lbserver
-	@mkdir -p /workspace/logs/lbserver
-	@(python -m lbserver --host 127.0.0.1 --port $(LBSERVER_PORT) 2>&1 | multilog t s1048576 n3 /workspace/logs/lbserver) & echo $$! > $(LBSERVER_PID)
-	@echo "lbserver started on port $(LBSERVER_PORT), pid=$$(cat $(LBSERVER_PID)) (logs: /workspace/logs/lbserver/)"
+	@python -m lbserver --host 127.0.0.1 --port $(LBSERVER_PORT) --log-dir /workspace/logs/lbserver & echo $$! > $(LBSERVER_PID)
+	@echo "lbserver started on port $(LBSERVER_PORT), pid=$$(cat $(LBSERVER_PID))"
 
 stop-runpod-lbserver:
 	@if [ -f $(LBSERVER_PID) ]; then \
