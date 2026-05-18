@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from core.models.pose import PosePerceptionSessionConfig
 from core.perception.pose.perception import PosePerception
 from core.perception.pose.utils import create_estimator_2d, create_lifter_3d
-from protocols.utils.state import set_pose_model
+from dlserver.utils.state import set_pose_model
 
 TEST_API_KEY = "test-secret-key"
 os.environ["DL_API_KEY"] = TEST_API_KEY

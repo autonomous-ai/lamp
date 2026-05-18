@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from core.models.action import ActionPerceptionSessionConfig
 from core.perception.action import ActionPerception
 from core.perception.person.predictors import PersonDetector, YOLOPersonDetector
-from protocols.utils.state import set_action_model
+from dlserver.utils.state import set_action_model
 
 TEST_API_KEY = "test-secret-key"
 os.environ["DL_API_KEY"] = TEST_API_KEY

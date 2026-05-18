@@ -1,47 +1,92 @@
-.PHONY: install install-cpu install-gpu install-dev start start-runpod start-jupyter test test-api test-local test-action test-action-api test-action-local test-emotion test-emotion-api test-emotion-local test-pose test-pose-api test-pose-local lint
+.PHONY: install install-cpu install-gpu install-lb install-dev start start-dlserver start-lbserver start-nginx start-runpod-dlserver start-runpod-lbserver stop-runpod-dlserver stop-runpod-lbserver start-jupyter test test-api test-local test-action test-action-api test-action-local test-emotion test-emotion-api test-emotion-local test-pose test-pose-api test-pose-local lint
 
 NGINX_CONF ?= /workspace/ai-lamp-openclaw/dlbackend/nginx.conf
 
 HOST ?= 0.0.0.0
-PORT ?= 8001
 
-# Auto-detect CUDA and install the right onnxruntime variant
+# Port layout:
+#   8888 — nginx (external)
+#   7999 — lbserver (round-robin, prepends /_internal)
+#   8000 — old DL server (nginx /_internal/ → here)
+#   8001 — DL server (nginx /_internal/lelamp/ → here)
+#   8890 — jupyter
+LBSERVER_PORT ?= 7999
+DLSERVER_PORT ?= 8001
+
+# ---------------------------------------------------------------------------
+# Install
+# ---------------------------------------------------------------------------
+
+# Auto-detect CUDA and install DL server deps
 install:
 	@if command -v nvidia-smi > /dev/null 2>&1 && nvidia-smi > /dev/null 2>&1; then \
 		echo "CUDA detected — installing onnxruntime-gpu"; \
-		pip install -e ".[gpu]"; \
+		pip install -e ".[dl,gpu]"; \
 	else \
 		echo "No CUDA detected — installing onnxruntime (CPU)"; \
-		pip install -e ".[cpu]"; \
+		pip install -e ".[dl,cpu]"; \
 	fi
 
 install-cpu:
-	pip install -e ".[cpu]"
+	pip install -e ".[dl,cpu]"
 
 install-gpu:
-	pip install -e ".[gpu]"
+	pip install -e ".[dl,gpu]"
+
+install-lb:
+	pip install -e ".[lb]"
 
 install-dev:
-	pip install -e ".[cpu,dev]"
+	pip install -e ".[dl,cpu,dev]"
 
+# ---------------------------------------------------------------------------
+# Local dev (foreground, blocking)
+# ---------------------------------------------------------------------------
+
+# Start a single DL server (for local dev, no LB)
 start: install
-	python src/server.py --host $(HOST) --port $(PORT)
+	python -m dlserver --host $(HOST) --port $(DLSERVER_PORT)
 
-JUPYTER_PORT ?= 8890
+start-dlserver: install
+	python -m dlserver --host $(HOST) --port $(DLSERVER_PORT)
 
-# RunPod: install nginx if missing, start nginx proxy, then start uvicorn
-start-runpod: install
+start-lbserver: install-lb
+	python -m lbserver --host $(HOST) --port $(LBSERVER_PORT)
+
+# ---------------------------------------------------------------------------
+# RunPod (background, non-blocking)
+# ---------------------------------------------------------------------------
+
+start-nginx:
 	@if ! command -v nginx > /dev/null 2>&1; then \
 		apt-get update && apt-get install -y nginx; \
 	fi
 	nginx -s stop 2>/dev/null || true
 	pkill nginx 2>/dev/null || true
 	nginx -c $(NGINX_CONF)
-	@mkdir -p /workspace/logs/dlbackend
-	python src/server.py --host 127.0.0.1 --port $(PORT) 2>&1 | multilog t s1048576 n3 /workspace/logs/dlbackend
 
-# Start jupyter-lab on port 8890, nginx proxies /jupyter/ to it.
-# Logs via multilog with rotation (1MB per file, 3 files kept).
+start-runpod-dlserver: install stop-runpod-dlserver
+	@mkdir -p /workspace/logs/dlbackend
+	@(python -m dlserver --host 127.0.0.1 --port $(DLSERVER_PORT) 2>&1 | multilog t s1048576 n3 /workspace/logs/dlbackend) &
+	@echo "dlserver started on port $(DLSERVER_PORT) (logs: /workspace/logs/dlbackend/)"
+
+stop-runpod-dlserver:
+	@pkill -f "python -m dlserver" 2>/dev/null || true
+
+start-runpod-lbserver: install-lb stop-runpod-lbserver
+	@mkdir -p /workspace/logs/lbserver
+	@(python -m lbserver --host 127.0.0.1 --port $(LBSERVER_PORT) 2>&1 | multilog t s1048576 n3 /workspace/logs/lbserver) &
+	@echo "lbserver started on port $(LBSERVER_PORT) (logs: /workspace/logs/lbserver/)"
+
+stop-runpod-lbserver:
+	@pkill -f "python -m lbserver" 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# Jupyter
+# ---------------------------------------------------------------------------
+
+JUPYTER_PORT ?= 8890
+
 start-jupyter:
 	@if ! command -v jupyter-lab > /dev/null 2>&1; then \
 		python -m pip install jupyter; \
@@ -54,6 +99,10 @@ start-jupyter:
 		echo "Jupyter Lab started — grep token from /workspace/logs/jupyter/current"; \
 	fi) &
 	jupyter-lab --ip=127.0.0.1 --port=$(JUPYTER_PORT) --no-browser --allow-root --ServerApp.allow_remote_access=true --ServerApp.base_url=/jupyter/ --notebook-dir=/workspace 2>&1 | multilog t s1048576 n3 /workspace/logs/jupyter
+
+# ---------------------------------------------------------------------------
+# Test
+# ---------------------------------------------------------------------------
 
 test:
 	python -m pytest tests/ -v

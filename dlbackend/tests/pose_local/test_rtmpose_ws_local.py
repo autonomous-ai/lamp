@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from protocols.utils.state import get_pose_model, set_pose_model
+from dlserver.utils.state import get_pose_model, set_pose_model
 from core.perception.pose.perception import PosePerception
 from core.perception.pose.utils import create_estimator_2d
 
