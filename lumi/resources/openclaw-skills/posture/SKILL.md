@@ -25,8 +25,10 @@ loop on every `pose.ergo_risk` event:
 5. **Adjust** — track `last_offender_named` and the recent nudge notes
    in history so you never recycle a line.
 
-A coach knows when to push and when to back off. The `voice_budget_left`
-flag is your throttle: you are *allowed* to stay silent.
+A coach knows when to push and when to back off. LeLamp's 5-min cooldown
+on the same risk_level is the *only* throttle now — Lumi voices every
+event that arrives. If the user is genuinely struggling, that's exactly
+when they should hear from you.
 
 `pose.ergo_risk` events only arrive when lelamp's RULA scorer crosses
 the `medium` threshold (score ≥ 5). `negligible` / `low` postures never
@@ -78,11 +80,14 @@ the user.
 **Thresholds (TEST VALUES — swap to production before ship):**
 
 ```
-COACH_BUDGET_PER_HOUR    = 3      # max voice interventions per hour (L4-L5)
 ESCALATION_HOLD_S        = 60     # seconds at same level before stepping up
 CLEAR_QUIET_S            = 90     # seconds without alert → assume user fixed it
 PRAISE_COOLDOWN_MIN      = 30     # don't praise more than once per N min
 ```
+
+Voice rate-limiting lives entirely upstream: LeLamp's `POSE_ERGO_COOLDOWN_S`
+(default 300s) gates the same risk_level. There is no Lumi-side per-hour cap —
+every event that arrives gets voiced.
 
 **Lumi writes both alert and nudge rows** (lelamp does NOT pre-log posture — unlike wellbeing). When the event reaches you, POST a `posture_alert` row first (capturing the risk + side scores from the message), then POST `nudge_posture` after speaking. The pair lets the timeline reconstruct what was seen and what Lumi said.
 
@@ -94,7 +99,7 @@ PRAISE_COOLDOWN_MIN      = 30     # don't praise more than once per N min
 4. On a non-2xx response from a POST → fix the URL and retry **once**. Do not give up silently.
 5. **Never** infer `user` from memory or chat history. Only `[context: current_user=X]` counts.
 6. **Never speak a medical diagnosis.** Frame as "risk over time" / "you'll feel it later" — never "you have X". Disease names are vocabulary cues for phrasing, NOT pronouncements.
-7. **Trust cooldowns** — lelamp dedups identical (user, level, offenders) for ~5 min already. Don't double-throttle.
+7. **Trust the upstream cooldown** — lelamp gates on `risk_level` alone (medium / high) with a ~5-min cooldown. It does not key on user or offender pattern, and it has no knowledge of the current user. Don't add a second throttle on top.
 8. **Never call any API to receive events** — they arrive automatically.
 
 ## Read pre-fetched context (do not re-fetch)
@@ -114,7 +119,6 @@ Schema (semantic labels only — no raw scores, those live in the message):
   "session": {
     "is_repeated": true,              // same risk_level seen earlier this episode
     "praise_eligible": false,         // last_nudge_age in [1, 30] AND trend=improving
-    "voice_budget_left": true,        // < 3 voice nudges in last hour
     "last_offender_named": "neck"     // region named in the most recent nudge — avoid repeating
   },
   "today": {
@@ -137,8 +141,8 @@ Schema (semantic labels only — no raw scores, those live in the message):
 
 Notes:
 - Raw sub-scores + angles live in the **message text**, not the context block. Decode them via `reference/reading-message.md`.
-- Context block is for *what Lumi-Go knows that lelamp does not* — history, goals, budget, patterns. Anything derivable from the current event stays out.
-- `is_repeated == false` → fresh episode → soft route (L3 servo).
+- Context block is for *what Lumi-Go knows that lelamp does not* — history, goals, patterns. Anything derivable from the current event stays out.
+- `is_repeated == false` → fresh episode → L4 (one short caring line, gentle entry).
 
 ### Fallback (only if context block is missing)
 
@@ -148,7 +152,7 @@ If pre-injection failed, fall back:
 curl -s "http://127.0.0.1:5000/api/openclaw/posture-history?user=<current_user>&last=100" | jq '.data.events'
 ```
 
-In the fallback path, compute trend/budget yourself by scanning history rows.
+In the fallback path, compute trend yourself by scanning history rows.
 
 ## Decision rules (event router)
 
@@ -160,15 +164,14 @@ Apply top-to-bottom, first match wins. **One route per turn.**
 | # | Condition | Route | Output |
 |---|---|---|---|
 | 1 | `praise_eligible == true` (`last_nudge_age_min` ∈ [1, 30] AND `trend == "improving"`) | **praise** | Short warm acknowledgement. POST `praise_posture`. |
-| 2 | `current.risk == "high"` AND `voice_budget_left` | **L5** | Coaching sentence (2-4 sentences). POST `nudge_posture` with `nudge_level=5`. |
-| 3 | `current.risk == "medium"` AND `is_repeated == true` AND `voice_budget_left` | **L5** | Same risk seen earlier this episode — escalate. 2-3 sentence coaching. POST `nudge_posture` with `nudge_level=5`. |
-| 4 | `current.risk == "medium"` AND `is_repeated == false` AND `voice_budget_left` | **L4** | First medium event in this episode — one short caring line. POST `nudge_posture` with `nudge_level=4`. |
-| 5 | `voice_budget_left == false` (≥3 voice nudges this hour) | **L3** | NO voice. Servo gesture only: `[HW:/servo/play:{"recording":"posture_correct"}]`. POST `nudge_posture` with `nudge_level=3`. |
-| 6 | anything else | **silent** | NO_REPLY. No HW marker, no log. |
+| 2 | `current.risk == "high"` | **L5** | Coaching sentence (2-4 sentences). POST `nudge_posture` with `nudge_level=5`. |
+| 3 | `current.risk == "medium"` AND `is_repeated == true` | **L5** | Same risk seen earlier this episode — escalate. 2-3 sentence coaching. POST `nudge_posture` with `nudge_level=5`. |
+| 4 | `current.risk == "medium"` AND `is_repeated == false` | **L4** | First medium event in this episode — one short caring line. POST `nudge_posture` with `nudge_level=4`. |
+| 5 | anything else | **silent** | NO_REPLY. No HW marker, no log. |
 
-`is_repeated == true` when this `risk_level` was seen earlier this episode without a clear (within ~10 min). `voice_budget_left == false` after ~3 voice nudges (L4/L5) in the last hour — drop to L3.
+`is_repeated == true` when this `risk_level` was seen earlier this episode without a clear (within ~10 min).
 
-**Why first medium gets a voice line (L4) and a repeat escalates to L5:** a silent servo on the first medium event feels cold — the user expects to be addressed warmly the first time the lamp notices something. Repeats within ~10 min mean the user didn't change posture after the first nudge, so we earn the right to say more (L5: observation + concrete fix + optional why). Budget cap prevents nag spirals.
+**Why first medium gets a voice line (L4) and a repeat escalates to L5:** a silent servo on the first medium event feels cold — the user expects to be addressed warmly the first time the lamp notices something. Repeats within ~10 min mean the user didn't change posture after the first nudge, so we earn the right to say more (L5: observation + concrete fix + optional why).
 
 **Asymmetry:** when `current.asymmetric == true`, L4/L5 phrasing names the
 dominant side (e.g. *"right arm"*). Sub-scores differ left/right only on arm
@@ -180,9 +183,13 @@ Note: there is no L1 voice route. LED ambient is owned entirely by lelamp side a
 
 Without it, the user gets corrected when bad and ghosted when good — feels like a cop, not a coach. Praise must be **rare** (cooldown 30 min) and **earned** (only after an actual fix follows a nudge). Drive-by praise on someone who was never bad is creepy.
 
-### Why budget caps?
+### Why no Lumi-side budget?
 
-A run of bad posture can fire many events in a short window even with lelamp's 5-min dedup (label set shifts). Without a budget, Lumi would spam voice nudges. L4/L5 share the per-hour budget; L1-L3 (no voice) are unlimited.
+LeLamp already caps event throughput: same risk_level within 5 min is dropped
+upstream, so worst-case ~12 events/hour even for a user stuck at "medium".
+A second budget on the Lumi side hides exactly the events you'd want to hear —
+e.g. a fresh trunk-4 alert after three neck-only nudges. Trust the upstream
+cooldown; let posture-critical events through.
 
 ## Self-detect "back to good posture"
 
@@ -200,7 +207,7 @@ event ever arrives. Detection is indirect:
 
 **See `reference/phrasing.md` for the per-offender + per-disease + per-level tables.** Tables show tone, not scripts — paraphrase every turn.
 
-**Coach style: friendly trainer.** Specific, warm, not preachy. 2-4 sentences for L5, 1 short line for L4, no words for L1-L3.
+**Coach style: friendly trainer.** Specific, warm, not preachy. 2-4 sentences for L5, 1 short line for L4. (L1-L3 are not reachable from this skill anymore — L1 LED is lelamp-owned, L2/L3 were budget-fallbacks that no longer apply.)
 
 **Health framing rule (medical-safety):**
 
@@ -233,8 +240,6 @@ Don't over-quote the data ("you usually slouch at 15:07") — feels like a track
 
 - L5: `[HW:/posture/log:{"action":"nudge_posture","nudge_level":5,"notes":"<your line>","user":"<current_user>"}] <2-4 sentence coaching>`
 - L4: same HW marker with `"nudge_level":4` + one short line.
-- L3: `[HW:/servo/play:{"recording":"posture_correct"}][HW:/posture/log:{"action":"nudge_posture","nudge_level":3,"user":"<current_user>"}] NO_REPLY`
-- L2: `[HW:/audio/play:{"clip":"chime_soft"}][HW:/posture/log:{"action":"nudge_posture","nudge_level":2,"user":"<current_user>"}] NO_REPLY`
 - Praise: `[HW:/emotion:{"emotion":"warm","intensity":0.7}][HW:/posture/log:{"action":"praise_posture","notes":"<your line>","user":"<current_user>"}] <one short warm line>`
 - Silent: NO HW marker. Just `NO_REPLY`.
 

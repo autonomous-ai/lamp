@@ -84,9 +84,6 @@ type PostureEvent struct {
 }
 
 const (
-	// Voice budget: max L4/L5 nudges in a rolling 1h window. SKILL drops to
-	// L2/silent past this. Test value; tune after live data.
-	voiceBudgetPerHour = 3
 	// Praise eligibility window after a nudge.
 	praiseMinAgeMin = 1
 	praiseMaxAgeMin = 30
@@ -117,9 +114,8 @@ type postureCurrent struct {
 }
 
 type postureSession struct {
-	IsRepeated      bool `json:"is_repeated"`       // same risk seen earlier this episode
-	PraiseEligible  bool `json:"praise_eligible"`   // recent nudge + improving
-	VoiceBudgetLeft bool `json:"voice_budget_left"` // < voiceBudgetPerHour L4/L5 in last hour
+	IsRepeated     bool `json:"is_repeated"`     // same risk seen earlier this episode
+	PraiseEligible bool `json:"praise_eligible"` // recent nudge + improving
 }
 
 type postureToday struct {
@@ -163,9 +159,8 @@ func BuildPostureContext(user string, ev PostureEvent) string {
 			Trend:        computeTrend(events, ev.Score),
 		},
 		Session: postureSession{
-			IsRepeated:      isRepeatedEpisode(events, ev.Score, now),
-			PraiseEligible:  praiseEligible(events, ev.Score, now),
-			VoiceBudgetLeft: voiceBudgetLeft(events, now),
+			IsRepeated:     isRepeatedEpisode(events, ev.Score, now),
+			PraiseEligible: praiseEligible(events, ev.Score, now),
 		},
 		Today: postureToday{
 			TimeOfDay: timeOfDayBucket(hour),
@@ -276,22 +271,6 @@ func praiseEligible(events []posture.Event, currentScore int, now time.Time) boo
 		}
 	}
 	return false
-}
-
-// voiceBudgetLeft: count L4/L5 nudges in the last hour, allow if < budget.
-func voiceBudgetLeft(events []posture.Event, now time.Time) bool {
-	cutoff := float64(now.Add(-1 * time.Hour).Unix())
-	count := 0
-	for i := len(events) - 1; i >= 0; i-- {
-		e := events[i]
-		if e.TS < cutoff {
-			break
-		}
-		if e.Action == posture.ActionNudge && e.NudgeLevel >= 4 {
-			count++
-		}
-	}
-	return count < voiceBudgetPerHour
 }
 
 func lastActionTS(events []posture.Event, action string) float64 {
