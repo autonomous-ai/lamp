@@ -37,6 +37,13 @@ class EncryptionHTTPResponse(BaseModel):
     cipher_data: str    # base64
     tag: str            # base64
 
+    def to_raw_payload(self) -> EncryptionPayload:
+        return EncryptionPayload(
+            cipher_data=base64.b64decode(self.cipher_data),
+            iv=base64.b64decode(self.iv),
+            tag=base64.b64decode(self.tag),
+        )
+
     @staticmethod
     def from_raw_payload(payload: EncryptionPayload) -> "EncryptionHTTPResponse":
         return EncryptionHTTPResponse(
