@@ -3,6 +3,10 @@
 #
 # Paste this entire script into the browser CLI (/monitor#cli) and press Enter.
 # Safe to run multiple times.
+#
+# PREREQUISITE: run OTA first so the device has the latest code:
+#   sudo software-update lelamp   ← same-origin middleware (server.py)
+#   sudo software-update lumi     ← sameOriginOrLAN guard (/api/sensing/event)
 
 set -euo pipefail
 
@@ -88,6 +92,6 @@ fi
 
 # 6. Apply
 nginx -t && nginx -s reload
-systemctl restart lumi-lelamp
+systemctl restart lumi-lelamp lumi
 
 echo "[patch] Done. Device is patched."
