@@ -250,16 +250,7 @@ func isAllowedOrigin(origin, requestHost string) bool {
 	h := strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(origin), "https://"), "http://")
 	h = strings.SplitN(h, "/", 2)[0]
 	// Same host (any IP or .local name the device is reached on).
-	if h == requestHost {
-		return true
-	}
-	// Device's own mDNS .local name (lumi-XXXX.local).
-	if hostname, err := os.Hostname(); err == nil {
-		if h == hostname+".local" {
-			return true
-		}
-	}
-	return false
+	return h == requestHost
 }
 
 func corsMiddleware() gin.HandlerFunc {
