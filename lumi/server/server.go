@@ -253,6 +253,49 @@ func isAllowedOrigin(origin, requestHost string) bool {
 	return h == requestHost
 }
 
+func isLoopbackHost(host string) bool {
+	host = strings.Trim(host, "[]")
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func firstForwardedFor(v string) string {
+	if v == "" {
+		return ""
+	}
+	return strings.TrimSpace(strings.Split(v, ",")[0])
+}
+
+func hostOnly(addr string) string {
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		return h
+	}
+	return strings.Trim(addr, "[]")
+}
+
+// localOnlyMiddleware blocks any request whose real client IP is not loopback.
+// Checks RemoteAddr, X-Forwarded-For, and X-Real-IP so nginx-proxied LAN
+// requests are still rejected even though the TCP peer is always 127.0.0.1.
+func localOnlyMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		remoteHost := hostOnly(c.Request.RemoteAddr)
+		xff := firstForwardedFor(c.GetHeader("X-Forwarded-For"))
+		realIP := strings.TrimSpace(c.GetHeader("X-Real-IP"))
+
+		if !isLoopbackHost(remoteHost) ||
+			(xff != "" && !isLoopbackHost(xff)) ||
+			(realIP != "" && !isLoopbackHost(realIP)) {
+			c.JSON(http.StatusForbidden, serializers.ResponseError("local-only endpoint"))
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
 func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
@@ -327,7 +370,7 @@ func (s *Server) Serve(closeFn func()) error {
 	system.GET("network", s.healthHandler.NetworkInfo)
 	system.GET("dashboard", s.healthHandler.Dashboard)
 	system.POST("software-update/:target", s.softwareUpdate)
-	system.POST("exec", s.execCommand)
+	system.POST("exec", localOnlyMiddleware(), s.execCommand)
 	system.GET("shell", systemshell.ShellHandler)
 
 	device := api.Group("device")
@@ -358,23 +401,23 @@ func (s *Server) Serve(closeFn func()) error {
 	guard.POST("enable", s.sensingHandler.EnableGuard)
 	guard.POST("disable", s.sensingHandler.DisableGuard)
 	guard.GET("", s.sensingHandler.GetGuardStatus)
-	guard.POST("alert", s.sensingHandler.PostGuardAlert)
+	guard.POST("alert", sameOriginOrLAN(), s.sensingHandler.PostGuardAlert)
 
 	moodGroup := api.Group("mood")
-	moodGroup.POST("log", s.sensingHandler.PostMoodLog)
+	moodGroup.POST("log", sameOriginOrLAN(), s.sensingHandler.PostMoodLog)
 
 	wellbeingGroup := api.Group("wellbeing")
-	wellbeingGroup.POST("log", s.sensingHandler.PostWellbeingLog)
+	wellbeingGroup.POST("log", sameOriginOrLAN(), s.sensingHandler.PostWellbeingLog)
 
 	postureGroup := api.Group("posture")
-	postureGroup.POST("log", s.sensingHandler.PostPostureLog)
+	postureGroup.POST("log", sameOriginOrLAN(), s.sensingHandler.PostPostureLog)
 
 	musicSuggGroup := api.Group("music-suggestion")
-	musicSuggGroup.POST("log", s.sensingHandler.PostMusicSuggestionLog)
-	musicSuggGroup.POST("status", s.sensingHandler.PostMusicSuggestionStatus)
+	musicSuggGroup.POST("log", sameOriginOrLAN(), s.sensingHandler.PostMusicSuggestionLog)
+	musicSuggGroup.POST("status", sameOriginOrLAN(), s.sensingHandler.PostMusicSuggestionStatus)
 
 	monitor := api.Group("monitor")
-	monitor.POST("event", s.sensingHandler.PostMonitorEvent)
+	monitor.POST("event", sameOriginOrLAN(), s.sensingHandler.PostMonitorEvent)
 
 	oc := api.Group("openclaw")
 	oc.POST("tts/stop", s.openclawHandler.StopTTS)
@@ -391,7 +434,7 @@ func (s *Server) Serve(closeFn func()) error {
 	oc.GET("flow-logs", s.openclawHandler.FlowLogs)
 	oc.DELETE("flow-logs", s.openclawHandler.ClearFlowLogs)
 	oc.GET("analytics", s.openclawHandler.Analytics)
-	oc.GET("config-json", sameOriginOrLAN(), s.openclawHandler.ConfigJSON)
+	oc.GET("config-json", localOnlyMiddleware(), s.openclawHandler.ConfigJSON)
 	oc.GET("compaction-latest", s.openclawHandler.CompactionLatest)
 
 	logs := api.Group("logs")
@@ -405,7 +448,7 @@ func (s *Server) Serve(closeFn func()) error {
 	signal.Notify(stop, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
 	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%d", s.config.HttpPort),
+		Addr:    fmt.Sprintf("127.0.0.1:%d", s.config.HttpPort),
 		Handler: r,
 	}
 

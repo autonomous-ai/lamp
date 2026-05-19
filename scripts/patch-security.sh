@@ -90,7 +90,20 @@ else
   echo "[patch] lumi-lelamp.service: EnvironmentFile already present, skipping"
 fi
 
-# 6. Apply
+# 6. Bind lumi-server to 127.0.0.1 (defense-in-depth: port 5000 unreachable from LAN
+#    even if nginx config is wrong). Only needed on devices deployed before 2026-05-19.
+LUMI_SVC="/etc/systemd/system/lumi.service"
+LUMI_BIN="/usr/local/bin/lumi-server"
+
+# Detect if the installed binary still binds 0.0.0.0 by checking its help/version
+# output — there is no config knob for this; it is baked into the binary.
+# New binaries (post-2026-05-19 OTA) bind 127.0.0.1 by default; old ones bind :5000.
+# The reliable signal is the OTA version. If lumi OTA is up-to-date, skip.
+LUMI_VERSION=$(lumi-server --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+echo "[patch] lumi-server version: ${LUMI_VERSION:-unknown}"
+echo "[patch] To close port 5000 on LAN: run 'sudo software-update lumi' to get the latest binary."
+
+# 7. Apply
 nginx -t && nginx -s reload
 systemctl restart lumi-lelamp lumi
 

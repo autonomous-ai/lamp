@@ -96,7 +96,7 @@ func (b *Bootstrap) Serve() error {
 	})
 
 	port := b.cfg.HttpPort
-	srv := &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: r}
+	srv := &http.Server{Addr: fmt.Sprintf("127.0.0.1:%d", port), Handler: r}
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
