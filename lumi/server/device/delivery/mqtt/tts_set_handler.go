@@ -4,16 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"go-lamp.autonomous.ai/domain"
 	"go-lamp.autonomous.ai/internal/device"
-	"go-lamp.autonomous.ai/lib/lelamp"
 )
 
-const (
-	ttsSetStopWarmup = 2 * time.Second
-)
 
 func (h *DeviceMQTTHandler) publishTTSSetAck(status, errMsg string, data *domain.MQTTTTSSetData) {
 	ack := domain.MQTTTTSSetAck{
@@ -49,25 +44,10 @@ func (h *DeviceMQTTHandler) handleTTSSet(cmd domain.MQTTMessage) error {
 			return
 		}
 
-		// Stop the running voice pipeline so lumi-lelamp releases ALSA,
-		// then restart it — StartVoice reads stt_language/stt_model from
-		// the config.json we just saved, so STT + TTS both pick up the new config.
-		// Both calls are synchronous: nil return = pipeline is live.
-		_ = lelamp.StopVoicePipeline()
-		time.Sleep(ttsSetStopWarmup)
-		if err := lelamp.StartVoice(lelamp.VoiceStartConfig{
-			DeepgramKey:     h.config.DeepgramAPIKey,
-			LLMKey:          h.config.LLMAPIKey,
-			LLMBaseURL:      h.config.LLMBaseURL,
-			STTKey:          h.config.GetSTTAPIKey(),
-			STTBaseURL:      h.config.GetSTTBaseURL(),
-			TTSKey:          h.config.GetTTSAPIKey(),
-			TTSBaseURL:      h.config.GetTTSBaseURL(),
-			TTSVoice:        h.config.TTSVoice,
-			TTSInstructions: h.config.TTSInstructions,
-			TTSProvider:     h.config.TTSProvider,
-		}); err != nil {
-			slog.Error("tts.set: StartVoice failed", "component", "mqtt", "error", err)
+		// Restart voice pipeline via device service so Go's agent gateway
+		// state stays in sync — bypassing it caused deaf device on 2nd switch.
+		if err := h.deviceService.RestartVoicePipeline(); err != nil {
+			slog.Error("tts.set: RestartVoicePipeline failed", "component", "mqtt", "error", err)
 			h.publishTTSSetAck("failure", fmt.Sprintf("voice restart failed: %s", err), &req)
 			return
 		}
