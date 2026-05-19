@@ -285,7 +285,6 @@ func (s *Server) Serve(closeFn func()) error {
 	r.RedirectTrailingSlash = false // avoid 301 redirect loop on /network vs /network/
 	r.Use(corsMiddleware())
 	r.Use(gin.Recovery())
-	r.Use(sameOriginOrLAN())
 
 	api := r.Group("api")
 
@@ -316,7 +315,7 @@ func (s *Server) Serve(closeFn func()) error {
 	network.GET("check-internet", s.networkHandler.CheckInternet)
 
 	sensing := api.Group("sensing")
-	sensing.POST("event", s.sensingHandler.PostEvent)
+	sensing.POST("event", sameOriginOrLAN(), s.sensingHandler.PostEvent)
 	sensing.GET("snapshot/:category/:name", s.sensingHandler.GetSnapshot)
 
 	// Voice file delete (filesystem orchestration on Pi). Voice enroll
