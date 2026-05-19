@@ -461,7 +461,8 @@ func (s *Service) UpdateVoiceConfig(provider, voice, language string) error {
 			}()
 		}
 	}
-	s.RePushVoiceConfig()
+	// Voice pipeline restart is handled by the caller (tts_set MQTT handler)
+	// via StopVoicePipeline + StartVoice — do not call RePushVoiceConfig here.
 	return nil
 }
 
