@@ -8,14 +8,10 @@ import (
 
 	"go-lamp.autonomous.ai/domain"
 	"go-lamp.autonomous.ai/internal/device"
-	"go-lamp.autonomous.ai/lib/lelamp"
 )
 
 const (
-	ttsSetHealthTimeout  = 30 * time.Second
-	ttsSetHealthWarmup   = 3 * time.Second
-	ttsSetHealthInterval = 2 * time.Second
-	ttsSetMaxRetries     = 4
+	ttsSetVoiceActiveTimeout = 120 * time.Second
 )
 
 func (h *DeviceMQTTHandler) publishTTSSetAck(status, errMsg string, data *domain.MQTTTTSSetData) {
@@ -52,23 +48,12 @@ func (h *DeviceMQTTHandler) handleTTSSet(cmd domain.MQTTMessage) error {
 			return
 		}
 
-		// Wait for lumi-lelamp to come back up with the new TTS config applied.
-		// Retry up to ttsSetMaxRetries times before giving up — lelamp may need
-		// extra time for certain languages/providers (e.g. zh-CN cold start).
-		var lastErr error
-		for attempt := 1; attempt <= ttsSetMaxRetries; attempt++ {
-			warmup := ttsSetHealthWarmup
-			if attempt > 1 {
-				warmup = 0 // already past startup on retries
-			}
-			if lastErr = waitForVoice(ttsSetHealthTimeout, warmup, ttsSetHealthInterval); lastErr == nil {
-				break
-			}
-			slog.Warn("tts.set: health check timeout, retrying", "component", "mqtt", "attempt", attempt, "max", ttsSetMaxRetries)
-		}
-		if lastErr != nil {
-			slog.Error("tts.set: lumi-lelamp did not recover after retries", "component", "mqtt", "error", lastErr)
-			h.publishTTSSetAck("failure", lastErr.Error(), &req)
+		// Wait for voice to be active by listening for the first chat_response
+		// state:"final" event on the monitor bus — this fires when the agent
+		// completes a full turn, proving STT+TTS are both live.
+		if err := h.waitForVoiceActive(ttsSetVoiceActiveTimeout); err != nil {
+			slog.Error("tts.set: voice did not become active", "component", "mqtt", "error", err)
+			h.publishTTSSetAck("failure", err.Error(), &req)
 			return
 		}
 
@@ -79,17 +64,22 @@ func (h *DeviceMQTTHandler) handleTTSSet(cmd domain.MQTTMessage) error {
 	return nil
 }
 
-// waitForVoice polls lelamp /health until voice=true or timeout.
-// warmup gives systemd time to stop the old process before polling starts.
-func waitForVoice(timeout, warmup, interval time.Duration) error {
-	time.Sleep(warmup)
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		h, err := lelamp.GetHealth()
-		if err == nil && h.Voice {
-			return nil
+// waitForVoiceActive subscribes to the monitor bus and returns as soon as a
+// chat_response state:"final" event arrives — that event proves the full
+// STT→LLM→TTS pipeline completed at least one turn with the new config.
+func (h *DeviceMQTTHandler) waitForVoiceActive(timeout time.Duration) error {
+	sub, unsub := h.monitorBus.Subscribe()
+	defer unsub()
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		select {
+		case evt := <-sub:
+			if evt.Type == "chat_response" && evt.State == "final" {
+				return nil
+			}
+		case <-deadline.C:
+			return fmt.Errorf("voice pipeline did not produce a response within %s", timeout)
 		}
-		time.Sleep(interval)
 	}
-	return fmt.Errorf("lumi-lelamp voice pipeline did not recover within %s", timeout)
 }

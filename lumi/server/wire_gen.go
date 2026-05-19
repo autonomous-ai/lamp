@@ -45,7 +45,7 @@ func InitializeServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	deviceMQTTHandler := mqtthandler.ProvideDeviceMQTTHandler(configConfig, factory, deviceService, service)
+	deviceMQTTHandler := mqtthandler.ProvideDeviceMQTTHandler(configConfig, factory, deviceService, service, bus)
 	deviceGPIOHandler := http4.ProvideDeviceGPIOHandler(configConfig, service, agentGateway)
 	openClawHandler := sse.ProvideOpenClawHandler(agentGateway, bus, statusledService)
 	sensingHandler := http5.ProvideSensingHandler(agentGateway, bus, configConfig, statusledService, openClawHandler.IsSleeping)
