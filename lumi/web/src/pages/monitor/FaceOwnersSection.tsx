@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Pencil, Trash2, History, ChevronDown, ChevronRight, X } from "lucide-react";
 import { S } from "./styles";
+import { hwUrl } from "@/lib/api";
 import { HW } from "./types";
 import type { FaceOwnersDetail } from "./types";
 import { UserTimelineModal } from "./UserTimelineModal";
@@ -176,7 +177,7 @@ export function FaceOwnersSection() {
   const openFile = async (label: string, filepath: string) => {
     const isImg = /\.(jpg|jpeg|png|bmp)$/i.test(filepath);
     if (isImg) {
-      window.open(`${HW}/face/photo/${label}/${filepath}`, "_blank");
+      window.open(hwUrl(`/face/photo/${label}/${filepath}`), "_blank");
       return;
     }
     const isAudio = /\.(wav|mp3|ogg|webm)$/i.test(filepath);
@@ -831,7 +832,7 @@ export function FaceOwnersSection() {
                           style={{ position: "relative", width: 56, height: 56 }}
                         >
                           <img
-                            src={`${HW}/face/photo/${person.label}/${photo}`}
+                            src={hwUrl(`/face/photo/${person.label}/${photo}`)}
                             style={{
                               width: "100%", height: "100%",
                               objectFit: "cover",
@@ -1112,7 +1113,7 @@ export function FaceOwnersSection() {
                           }}>
                             <audio
                               controls preload="none"
-                              src={`${HW}/voice/strangers/audio/${cluster.hash}/${encodeURIComponent(s.filename)}`}
+                              src={hwUrl(`/voice/strangers/audio/${cluster.hash}/${encodeURIComponent(s.filename)}`)}
                               style={{ height: 22, flexShrink: 0, width: 180 }}
                             />
                             <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>

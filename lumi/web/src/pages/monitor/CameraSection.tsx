@@ -250,7 +250,7 @@ export function CameraSection({
                 }}>Snapshot</span>
                 <div style={{ display: "flex", gap: 3 }}>
                   <a
-                    href={cameraDisabled ? undefined : `${HW}/camera/snapshot?t=${snapTs}`}
+                    href={cameraDisabled ? undefined : hwUrl(`/camera/snapshot?t=${snapTs}`)}
                     download={`lumi-snapshot-${new Date(snapTs).toISOString().replace(/[:.]/g, "-")}.jpg`}
                     title="Download snapshot"
                     aria-disabled={cameraDisabled}
@@ -294,7 +294,7 @@ export function CameraSection({
                   </span>
                 ) : (
                   <img
-                    src={`${HW}/camera/snapshot?t=${snapTs}`}
+                    src={hwUrl(`/camera/snapshot?t=${snapTs}`)}
                     alt="snapshot"
                     style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                     onError={() => setSnapError(true)}
