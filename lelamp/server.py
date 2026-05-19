@@ -660,7 +660,13 @@ from ipaddress import ip_address, ip_network
 
 from fastapi.responses import JSONResponse
 
-_LOCAL_NETS = (ip_network("127.0.0.0/8"), ip_network("::1/128"))
+_LOCAL_NETS = (
+    ip_network("127.0.0.0/8"),
+    ip_network("::1/128"),
+    ip_network("10.0.0.0/8"),
+    ip_network("172.16.0.0/12"),
+    ip_network("192.168.0.0/16"),
+)
 
 
 def _is_local(value: str | None) -> bool:

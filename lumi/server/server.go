@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -194,6 +195,38 @@ func (s *Server) stopMQTT() {
 	}
 }
 
+// sameOriginOrLAN blocks the route for callers that are neither on the local
+// network nor sending a same-origin browser header (Origin/Referer). This lets
+// the web UI and Swagger call the endpoint from any IP, while raw curl/Postman
+// requests without an Origin header are rejected when coming from outside LAN.
+func sameOriginOrLAN() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		remoteHost, _, _ := net.SplitHostPort(c.Request.RemoteAddr)
+		if ip := net.ParseIP(remoteHost); ip != nil && (ip.IsLoopback() || ip.IsPrivate()) {
+			c.Next()
+			return
+		}
+		deviceHost := c.Request.Host
+		origin := strings.SplitN(c.GetHeader("Origin"), ",", 2)[0]
+		referer := strings.SplitN(c.GetHeader("Referer"), ",", 2)[0]
+		if goSameOrigin(origin, deviceHost) || goSameOrigin(referer, deviceHost) {
+			c.Next()
+			return
+		}
+		c.JSON(http.StatusForbidden, gin.H{"status": 0, "message": "same-origin or LAN only"})
+		c.Abort()
+	}
+}
+
+func goSameOrigin(header, host string) bool {
+	if header == "" || host == "" {
+		return false
+	}
+	h := strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(header), "https://"), "http://")
+	h = strings.SplitN(h, "/", 2)[0]
+	return h == host
+}
+
 func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
@@ -252,6 +285,7 @@ func (s *Server) Serve(closeFn func()) error {
 	r.RedirectTrailingSlash = false // avoid 301 redirect loop on /network vs /network/
 	r.Use(corsMiddleware())
 	r.Use(gin.Recovery())
+	r.Use(sameOriginOrLAN())
 
 	api := r.Group("api")
 
@@ -556,14 +590,14 @@ func (s *Server) handleSetUpCompleteChange(setupCompleted bool) {
 			}
 
 			// Init speaker volume — set to max so hardware/alsactl level is the effective control.
-				if err := s.agentGateway.SetVolume(100); err != nil {
-					slog.Warn("init volume failed", "component", "server", "error", err)
-				}
+			if err := s.agentGateway.SetVolume(100); err != nil {
+				slog.Warn("init volume failed", "component", "server", "error", err)
+			}
 
-				// Greet user now that agent + voice pipeline are ready.
-				// Prompt is localized by STTLanguage so the very first turn
-				// lands in the owner's language without relying on the agent
-				// to translate the priming message.
+			// Greet user now that agent + voice pipeline are ready.
+			// Prompt is localized by STTLanguage so the very first turn
+			// lands in the owner's language without relying on the agent
+			// to translate the priming message.
 			if _, err := s.agentGateway.SendSystemChatMessage(wakeGreetingPrompt()); err != nil {
 				slog.Warn("startup greeting failed", "component", "server", "error", err)
 			}

@@ -66,7 +66,27 @@ else:
     print("[patch] nginx /api/system/exec: already patched, skipping")
 PYEOF
 
-# 4. Apply
+# 4. Set LELAMP_MODE=production in .env (activates same-origin middleware)
+LELAMP_ENV="/opt/lelamp/.env"
+touch "$LELAMP_ENV"
+if grep -q "^LELAMP_MODE=" "$LELAMP_ENV" 2>/dev/null; then
+  sed -i "s/^LELAMP_MODE=.*/LELAMP_MODE=production/" "$LELAMP_ENV"
+  echo "[patch] LELAMP_MODE set to production"
+else
+  echo "LELAMP_MODE=production" >> "$LELAMP_ENV"
+  echo "[patch] LELAMP_MODE=production added to .env"
+fi
+
+# 5. Add EnvironmentFile to lumi-lelamp.service if missing
+if ! grep -q "^EnvironmentFile=" "$LELAMP_SVC" 2>/dev/null; then
+  sed -i '/^\[Service\]/a EnvironmentFile=\/opt\/lelamp\/.env' "$LELAMP_SVC"
+  systemctl daemon-reload
+  echo "[patch] lumi-lelamp.service: EnvironmentFile added"
+else
+  echo "[patch] lumi-lelamp.service: EnvironmentFile already present, skipping"
+fi
+
+# 6. Apply
 nginx -t && nginx -s reload
 systemctl restart lumi-lelamp
 
