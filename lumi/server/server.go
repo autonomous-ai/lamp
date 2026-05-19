@@ -259,8 +259,7 @@ func isAllowedOrigin(origin, requestHost string) bool {
 			return true
 		}
 	}
-	// Approved parent-app domain for iframe embedding.
-	return strings.HasSuffix(h, ".autonomous.ai") || h == "autonomous.ai"
+	return false
 }
 
 func corsMiddleware() gin.HandlerFunc {
