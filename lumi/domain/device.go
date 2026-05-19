@@ -177,12 +177,17 @@ const (
 	CommandInfo       = "info"
 	CommandAddChannel = "add_channel"
 	CommandOTA        = "ota"
+	CommandData       = "data"
 )
 
+// KindTTSSet is the kind field for cmd:"data" tts.set downlinks from BFF.
+const KindTTSSet = "tts.set"
+
 // Message is the standard envelope for MQTT messages from the server (fa_channel).
-// Server sends: {"cmd": "info"}, {"cmd": "add_channel", "channel": "discord", "config": {...}}
+// Server sends: {"cmd": "info"}, {"cmd": "add_channel", ...}, {"cmd": "data", "kind": "tts.set", ...}
 type MQTTMessage struct {
 	Cmd     string          `json:"cmd"`
+	Kind    string          `json:"kind"`
 	RawData json.RawMessage `json:"-"`
 	raw     []byte
 }
@@ -190,13 +195,15 @@ type MQTTMessage struct {
 // UnmarshalJSON custom unmarshals to keep the full raw payload accessible to handlers.
 func (m *MQTTMessage) UnmarshalJSON(data []byte) error {
 	type alias struct {
-		Cmd string `json:"cmd"`
+		Cmd  string `json:"cmd"`
+		Kind string `json:"kind"`
 	}
 	var a alias
 	if err := json.Unmarshal(data, &a); err != nil {
 		return err
 	}
 	m.Cmd = a.Cmd
+	m.Kind = a.Kind
 	m.raw = make([]byte, len(data))
 	copy(m.raw, data)
 	return nil
@@ -276,6 +283,29 @@ func NewMQTTInfoResponse(cfg *config.Config, msgType string, mac string) MQTTInf
 		Mac:     mac,
 		Time:    time.Now().UTC().Format(time.RFC3339Nano),
 	}
+}
+
+// MQTTTTSSetData is the nested data payload for cmd:"data", kind:"tts.set" downlinks.
+// BFF sends: {"cmd":"data","kind":"tts.set","data":{"provider":"elevenlabs","voice":"Linh","language":"vi"}}
+type MQTTTTSSetData struct {
+	Provider string `json:"provider"`
+	Voice    string `json:"voice"`
+	Language string `json:"language"`
+}
+
+// MQTTTTSSetCommand wraps the full tts.set downlink envelope for unmarshalling.
+type MQTTTTSSetCommand struct {
+	Data MQTTTTSSetData `json:"data"`
+}
+
+// MQTTTTSSetAck is published to fd_channel after applying (or failing) a tts.set downlink.
+// status: "starting" | "success" | "failure"
+type MQTTTTSSetAck struct {
+	MQTTInfoResponse
+	Kind   string          `json:"kind"`
+	Status string          `json:"status"`
+	Error  string          `json:"error,omitempty"`
+	Data   *MQTTTTSSetData `json:"data,omitempty"`
 }
 
 // ConfigResponse is returned by GET /api/device/config with current device settings.
