@@ -1,5 +1,11 @@
 export const API = "/api";
-export const HW  = "/hw";
+// HW points at the Go reverse proxy (/api/hardware/*) instead of nginx /hw/*.
+// Web never touches /hw/* directly anymore — adminAuthMiddleware on the
+// proxy gates the bearer, and Go calls LeLamp on loopback. Bearer is
+// attached automatically by the fetch interceptor in lib/api.ts (search for
+// `__lumiFetchPatched`). For <img src> / <a href> / window.open use the
+// `hwUrl()` helper which appends ?token= since those can't set headers.
+export const HW  = "/api/hardware";
 // Agent gateway base path. Currently hardcoded to "/api/openclaw" but we read
 // it through this constant so swapping providers (e.g. another runtime) is a
 // one-line change here. Existing callers still write `${API}/openclaw/…`
