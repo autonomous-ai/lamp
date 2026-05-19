@@ -375,7 +375,7 @@ func (s *Server) Serve(closeFn func()) error {
 	oc.GET("flow-logs", s.openclawHandler.FlowLogs)
 	oc.DELETE("flow-logs", s.openclawHandler.ClearFlowLogs)
 	oc.GET("analytics", s.openclawHandler.Analytics)
-	oc.GET("config-json", s.openclawHandler.ConfigJSON)
+	oc.GET("config-json", sameOriginOrLAN(), s.openclawHandler.ConfigJSON)
 	oc.GET("compaction-latest", s.openclawHandler.CompactionLatest)
 
 	logs := api.Group("logs")
