@@ -120,21 +120,24 @@ func matchChitchat(text string) *Result {
 	for _, r := range chitchatRules {
 		for lang, phrases := range i18n.InputPhrases(r.reply) {
 			for _, p := range phrases {
-				// Match if text equals the phrase OR starts with it
-				// followed by a word boundary (space, punctuation, or
-				// end-of-string after the phrase + a short filler).
-				if t == p || strings.HasPrefix(t, p+" ") || strings.HasPrefix(t, p+",") {
-					reply := i18n.PickIn(r.reply, lang)
-					if reply == "" {
-						continue
-					}
-					post("/emotion", fmt.Sprintf(`{"emotion":"%s","intensity":0.7}`, r.emotion))
-					return &Result{
-						TTSText: reply,
-						Emotion: r.emotion,
-						Rule:    "chitchat_" + r.intent,
-						Actions: []string{"POST /emotion " + r.emotion},
-					}
+				// Substring match — exact / prefix / suffix all hit. The
+				// length gate above (≤5 words) and command-verb reject
+				// already bound false positives, so Contains is safe and
+				// catches real speech variation: "chào nha", "lumi chào
+				// em", "cảm ơn rất nhiều", "thanks man", etc.
+				if !strings.Contains(t, p) {
+					continue
+				}
+				reply := i18n.PickIn(r.reply, lang)
+				if reply == "" {
+					continue
+				}
+				post("/emotion", fmt.Sprintf(`{"emotion":"%s","intensity":0.7}`, r.emotion))
+				return &Result{
+					TTSText: reply,
+					Emotion: r.emotion,
+					Rule:    "chitchat_" + r.intent,
+					Actions: []string{"POST /emotion " + r.emotion},
 				}
 			}
 		}

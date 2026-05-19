@@ -76,3 +76,18 @@ func ChitchatCommandWords() []string {
 	}
 	return out
 }
+
+// chitchatWakeWords are name tokens the user prepends before chitchat — the
+// wake word itself plus common STT mis-transcriptions ("Lumi" → "Làmi" /
+// "Lami" / "Lumy"). Stripped from the head of normalized chitchat input so
+// "Lumi xin chào" / "Làmi xin chào" match the same "xin chào" rule.
+var chitchatWakeWords = []string{
+	"lumi", "loomi", "lumy", "luumi", "lami", "làmi", "noah",
+}
+
+// ChitchatWakeWords returns the wake-word list for chitchat input
+// normalization. Caller strips a leading match (followed by space or comma)
+// before phrase comparison.
+func ChitchatWakeWords() []string {
+	return chitchatWakeWords
+}
