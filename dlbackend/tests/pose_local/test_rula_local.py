@@ -85,10 +85,10 @@ class TestAlignToVertical:
         kps = _upright_skeleton_3d()
         aligned = align_to_vertical(kps)
         trunk = aligned[H36MJoint.THORAX] - aligned[H36MJoint.SPINE]
-        # After alignment, trunk should point in +Z direction
+        # After alignment, trunk should point in -Y direction (up in image coords)
         assert abs(trunk[0]) < 1.0
-        assert abs(trunk[1]) < 1.0
-        assert trunk[2] > 0
+        assert trunk[1] < 0
+        assert abs(trunk[2]) < 1.0
 
     def test_tilted_skeleton_aligned(self):
         kps = _upright_skeleton_3d()
@@ -103,10 +103,10 @@ class TestAlignToVertical:
         aligned = align_to_vertical(kps)
         trunk = aligned[H36MJoint.THORAX] - aligned[H36MJoint.SPINE]
         trunk_norm = trunk / (np.linalg.norm(trunk) + 1e-8)
-        # Should be close to [0, 0, 1]
+        # Should be close to [0, -1, 0]
         assert abs(trunk_norm[0]) < 0.05
-        assert abs(trunk_norm[1]) < 0.05
-        assert trunk_norm[2] > 0.95
+        assert trunk_norm[1] < -0.95
+        assert abs(trunk_norm[2]) < 0.05
 
 
 class TestRULAAssessor:
