@@ -467,26 +467,24 @@ func (s *Service) UpdateVoiceConfig(provider, voice, language string) error {
 	return nil
 }
 
-// RestartVoicePipeline stops and restarts the lumi-lelamp voice pipeline via the
-// agent gateway so Go's internal state stays in sync with the new TTS/STT config.
+// RestartVoicePipeline stops and restarts the lumi-lelamp voice pipeline with
+// the current config. Calls lelamp.StartVoice directly so it works regardless
+// of STT provider (Deepgram or AutonomousSTT).
 func (s *Service) RestartVoicePipeline() error {
 	_ = lelamp.StopVoicePipeline()
 	time.Sleep(2 * time.Second)
-	if s.agentGateway == nil {
-		return fmt.Errorf("agent gateway not initialized")
-	}
-	return s.agentGateway.StartLeLampVoice(
-		s.config.DeepgramAPIKey,
-		s.config.LLMAPIKey,
-		s.config.GetSTTAPIKey(),
-		s.config.GetTTSAPIKey(),
-		s.config.LLMBaseURL,
-		s.config.GetSTTBaseURL(),
-		s.config.GetTTSBaseURL(),
-		s.config.TTSVoice,
-		s.config.TTSInstructions,
-		s.config.TTSProvider,
-	)
+	return lelamp.StartVoice(lelamp.VoiceStartConfig{
+		DeepgramKey:     s.config.DeepgramAPIKey,
+		LLMKey:          s.config.LLMAPIKey,
+		LLMBaseURL:      s.config.LLMBaseURL,
+		STTKey:          s.config.GetSTTAPIKey(),
+		STTBaseURL:      s.config.GetSTTBaseURL(),
+		TTSKey:          s.config.GetTTSAPIKey(),
+		TTSBaseURL:      s.config.GetTTSBaseURL(),
+		TTSVoice:        s.config.TTSVoice,
+		TTSInstructions: s.config.TTSInstructions,
+		TTSProvider:     s.config.TTSProvider,
+	})
 }
 
 // RePushVoiceConfig restarts lumi-lelamp so it picks up new TTS config from config.json.
