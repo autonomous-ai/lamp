@@ -8,7 +8,6 @@ import (
 
 	"go-lamp.autonomous.ai/domain"
 	"go-lamp.autonomous.ai/internal/device"
-	"go-lamp.autonomous.ai/internal/monitor"
 	"go-lamp.autonomous.ai/internal/network"
 	"go-lamp.autonomous.ai/lib/mqtt"
 	"go-lamp.autonomous.ai/server/config"
@@ -20,17 +19,15 @@ type DeviceMQTTHandler struct {
 	mqttFactory    *mqtt.Factory
 	deviceService  *device.Service
 	networkService *network.Service
-	monitorBus     *monitor.Bus
 }
 
 // ProvideDeviceMQTTHandler creates DeviceMQTTHandler with all command handlers.
-func ProvideDeviceMQTTHandler(cfg *config.Config, mqttFactory *mqtt.Factory, ds *device.Service, ns *network.Service, bus *monitor.Bus) DeviceMQTTHandler {
+func ProvideDeviceMQTTHandler(cfg *config.Config, mqttFactory *mqtt.Factory, ds *device.Service, ns *network.Service) DeviceMQTTHandler {
 	return DeviceMQTTHandler{
 		config:         cfg,
 		mqttFactory:    mqttFactory,
 		deviceService:  ds,
 		networkService: ns,
-		monitorBus:     bus,
 	}
 }
 
