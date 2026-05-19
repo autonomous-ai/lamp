@@ -14,7 +14,6 @@ import (
 	"go-lamp.autonomous.ai/internal/beclient"
 	"go-lamp.autonomous.ai/internal/network"
 	"go-lamp.autonomous.ai/lib/i18n"
-	"go-lamp.autonomous.ai/lib/lelamp"
 	"go-lamp.autonomous.ai/server/config"
 )
 
@@ -462,29 +461,8 @@ func (s *Service) UpdateVoiceConfig(provider, voice, language string) error {
 			}()
 		}
 	}
-	// Voice pipeline restart is handled by the caller (tts_set MQTT handler)
-	// via StopVoicePipeline + StartVoice — do not call RePushVoiceConfig here.
+	s.RePushVoiceConfig()
 	return nil
-}
-
-// RestartVoicePipeline stops and restarts the lumi-lelamp voice pipeline with
-// the current config. Calls lelamp.StartVoice directly so it works regardless
-// of STT provider (Deepgram or AutonomousSTT).
-func (s *Service) RestartVoicePipeline() error {
-	_ = lelamp.StopVoicePipeline()
-	time.Sleep(2 * time.Second)
-	return lelamp.StartVoice(lelamp.VoiceStartConfig{
-		DeepgramKey:     s.config.DeepgramAPIKey,
-		LLMKey:          s.config.LLMAPIKey,
-		LLMBaseURL:      s.config.LLMBaseURL,
-		STTKey:          s.config.GetSTTAPIKey(),
-		STTBaseURL:      s.config.GetSTTBaseURL(),
-		TTSKey:          s.config.GetTTSAPIKey(),
-		TTSBaseURL:      s.config.GetTTSBaseURL(),
-		TTSVoice:        s.config.TTSVoice,
-		TTSInstructions: s.config.TTSInstructions,
-		TTSProvider:     s.config.TTSProvider,
-	})
 }
 
 // RePushVoiceConfig restarts lumi-lelamp so it picks up new TTS config from config.json.

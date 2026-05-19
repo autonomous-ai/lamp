@@ -2,7 +2,6 @@ package mqtthandler
 
 import (
 	"encoding/json"
-	"fmt"
 	"log/slog"
 
 	"go-lamp.autonomous.ai/domain"
@@ -43,15 +42,8 @@ func (h *DeviceMQTTHandler) handleTTSSet(cmd domain.MQTTMessage) error {
 			h.publishTTSSetAck("failure", err.Error(), &req)
 			return
 		}
-
-		// Restart voice pipeline via device service so Go's agent gateway
-		// state stays in sync — bypassing it caused deaf device on 2nd switch.
-		if err := h.deviceService.RestartVoicePipeline(); err != nil {
-			slog.Error("tts.set: RestartVoicePipeline failed", "component", "mqtt", "error", err)
-			h.publishTTSSetAck("failure", fmt.Sprintf("voice restart failed: %s", err), &req)
-			return
-		}
-
+		// UpdateVoiceConfig saves config + kicks systemctl restart lumi-lelamp async.
+		// ACK success immediately — BFF doesn't need to wait for lelamp to come back.
 		slog.Info("tts.set: applied", "component", "mqtt", "provider", req.Provider, "voice", req.Voice, "language", req.Language)
 		h.publishTTSSetAck("success", "", &req)
 	}()
