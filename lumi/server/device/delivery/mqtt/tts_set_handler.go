@@ -15,6 +15,7 @@ const (
 	ttsSetHealthTimeout  = 30 * time.Second
 	ttsSetHealthWarmup   = 3 * time.Second
 	ttsSetHealthInterval = 2 * time.Second
+	ttsSetMaxRetries     = 4
 )
 
 func (h *DeviceMQTTHandler) publishTTSSetAck(status, errMsg string, data *domain.MQTTTTSSetData) {
@@ -52,9 +53,22 @@ func (h *DeviceMQTTHandler) handleTTSSet(cmd domain.MQTTMessage) error {
 		}
 
 		// Wait for lumi-lelamp to come back up with the new TTS config applied.
-		if err := waitForVoice(ttsSetHealthTimeout, ttsSetHealthWarmup, ttsSetHealthInterval); err != nil {
-			slog.Error("tts.set: lumi-lelamp did not recover", "component", "mqtt", "error", err)
-			h.publishTTSSetAck("failure", err.Error(), &req)
+		// Retry up to ttsSetMaxRetries times before giving up — lelamp may need
+		// extra time for certain languages/providers (e.g. zh-CN cold start).
+		var lastErr error
+		for attempt := 1; attempt <= ttsSetMaxRetries; attempt++ {
+			warmup := ttsSetHealthWarmup
+			if attempt > 1 {
+				warmup = 0 // already past startup on retries
+			}
+			if lastErr = waitForVoice(ttsSetHealthTimeout, warmup, ttsSetHealthInterval); lastErr == nil {
+				break
+			}
+			slog.Warn("tts.set: health check timeout, retrying", "component", "mqtt", "attempt", attempt, "max", ttsSetMaxRetries)
+		}
+		if lastErr != nil {
+			slog.Error("tts.set: lumi-lelamp did not recover after retries", "component", "mqtt", "error", lastErr)
+			h.publishTTSSetAck("failure", lastErr.Error(), &req)
 			return
 		}
 
