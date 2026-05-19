@@ -201,8 +201,18 @@ func (s *Server) stopMQTT() {
 // requests without an Origin header are rejected when coming from outside LAN.
 func sameOriginOrLAN() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		remoteHost, _, _ := net.SplitHostPort(c.Request.RemoteAddr)
-		if ip := net.ParseIP(remoteHost); ip != nil && (ip.IsLoopback() || ip.IsPrivate()) {
+		// nginx proxies to Go on localhost, so RemoteAddr is always 127.0.0.1.
+		// Use X-Real-IP (set by nginx) to get the real client IP.
+		clientIP := strings.TrimSpace(c.GetHeader("X-Real-IP"))
+		if clientIP == "" {
+			// Fallback: first entry of X-Forwarded-For
+			clientIP = strings.TrimSpace(strings.SplitN(c.GetHeader("X-Forwarded-For"), ",", 2)[0])
+		}
+		if clientIP == "" {
+			remoteHost, _, _ := net.SplitHostPort(c.Request.RemoteAddr)
+			clientIP = remoteHost
+		}
+		if ip := net.ParseIP(clientIP); ip != nil && (ip.IsLoopback() || ip.IsPrivate()) {
 			c.Next()
 			return
 		}
