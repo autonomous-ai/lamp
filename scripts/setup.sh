@@ -744,6 +744,10 @@ server {
   # Without these headers, OpenClaw sees the loopback peer (nginx) and
   # accepts the request as local.
   location = /gw {
+    allow 127.0.0.1;
+    allow ::1;
+    deny all;
+
     proxy_pass http://openclaw/;
     proxy_http_version 1.1;
     proxy_set_header Upgrade \$http_upgrade;
@@ -752,6 +756,10 @@ server {
   }
 
   location /gw/ {
+    allow 127.0.0.1;
+    allow ::1;
+    deny all;
+
     proxy_pass http://openclaw/;
     proxy_http_version 1.1;
     proxy_set_header Upgrade \$http_upgrade;

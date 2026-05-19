@@ -70,6 +70,44 @@ else:
     print("[patch] nginx /api/system/exec: already patched, skipping")
 PYEOF
 
+# 3b. nginx /gw and /gw/: add allow/deny if missing (OpenClaw gateway local-only)
+python3 - "$NGINX_CONF" <<'PYEOF'
+import sys
+path = sys.argv[1]
+with open(path) as f:
+    content = f.read()
+
+patched_any = False
+for marker, old, new in (
+    (
+        "location = /gw {",
+        "  location = /gw {\n    proxy_pass http://openclaw/;",
+        "  location = /gw {\n    allow 127.0.0.1;\n    allow ::1;\n    deny all;\n\n    proxy_pass http://openclaw/;",
+    ),
+    (
+        "location /gw/ {",
+        "  location /gw/ {\n    proxy_pass http://openclaw/;",
+        "  location /gw/ {\n    allow 127.0.0.1;\n    allow ::1;\n    deny all;\n\n    proxy_pass http://openclaw/;",
+    ),
+):
+    if marker not in content:
+        print(f"[patch] nginx {marker.split()[1]}: block not found, skipping")
+        continue
+    if new in content:
+        print(f"[patch] nginx {marker.split()[1]}: already patched, skipping")
+        continue
+    if old in content:
+        content = content.replace(old, new)
+        patched_any = True
+        print(f"[patch] nginx {marker.split()[1]}: allow/deny added")
+    else:
+        print(f"[patch] nginx {marker.split()[1]}: block shape differs, may need manual check")
+
+if patched_any:
+    with open(path, "w") as f:
+        f.write(content)
+PYEOF
+
 # 4. Set LELAMP_MODE=production in .env (activates same-origin middleware)
 LELAMP_ENV="/opt/lelamp/.env"
 touch "$LELAMP_ENV"

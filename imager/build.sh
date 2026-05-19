@@ -1002,6 +1002,10 @@ server {
     proxy_set_header X-Forwarded-Prefix /hw;
   }
   location /gw/ {
+    allow 127.0.0.1;
+    allow ::1;
+    deny all;
+
     proxy_pass http://openclaw/;
     proxy_http_version 1.1;
     proxy_set_header Upgrade \$http_upgrade;
