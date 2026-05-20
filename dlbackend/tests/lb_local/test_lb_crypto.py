@@ -18,9 +18,9 @@ from fastapi.testclient import TestClient
 from core.crypto.rsa_aes import AESGCMSession, RSAAESCrypto
 from core.models.crypto import AESGCMPlainPayload
 from lbserver.models import (
-    EncryptionHTTPRequest,
-    EncryptionHTTPResponse,
-    WSEncryptedMessage,
+    CipherHTTPRequest,
+    CipherHTTPResponse,
+    WSCipherMessage,
 )
 
 
@@ -37,9 +37,9 @@ def _make_session(crypto: RSAAESCrypto) -> tuple[AESGCMSession, bytes]:
 
 
 def _encrypt_body(session: AESGCMSession, encrypted_key: bytes, plain: bytes) -> bytes:
-    """Build an EncryptionHTTPRequest JSON from plain bytes."""
+    """Build an CipherHTTPRequest JSON from plain bytes."""
     encrypted = session.encrypt(AESGCMPlainPayload(plain_data=plain))
-    req = EncryptionHTTPRequest(
+    req = CipherHTTPRequest(
         encrypted_key=base64.b64encode(encrypted_key).decode(),
         nonce=base64.b64encode(encrypted.nonce).decode(),
         cipher_data=base64.b64encode(encrypted.cipher_data).decode(),
@@ -48,8 +48,8 @@ def _encrypt_body(session: AESGCMSession, encrypted_key: bytes, plain: bytes) ->
 
 
 def _decrypt_response(session: AESGCMSession, content: bytes) -> bytes:
-    """Decrypt an EncryptionHTTPResponse JSON back to plain bytes."""
-    enc_resp = EncryptionHTTPResponse.model_validate_json(content)
+    """Decrypt an CipherHTTPResponse JSON back to plain bytes."""
+    enc_resp = CipherHTTPResponse.model_validate_json(content)
     payload = enc_resp.to_raw_payload()
     return session.decrypt(payload).plain_data
 
@@ -165,7 +165,7 @@ class TestHTTPEncryption:
         session, encrypted_key = _make_session(crypto)
         encrypted = session.encrypt(AESGCMPlainPayload(plain_data=b"data"))
 
-        req = EncryptionHTTPRequest(
+        req = CipherHTTPRequest(
             encrypted_key=base64.b64encode(encrypted_key).decode(),
             nonce=base64.b64encode(encrypted.nonce).decode(),
             cipher_data=base64.b64encode(encrypted.cipher_data + b"\xff").decode(),
@@ -267,12 +267,12 @@ class TestWSEncryption:
             # Send encrypted message
             plain = json.dumps({"type": "frame", "task": "pose", "frame_b64": "abc"})
             encrypted = session.encrypt(AESGCMPlainPayload(plain_data=plain.encode()))
-            ws_msg = WSEncryptedMessage.from_raw_payload(encrypted)
+            ws_msg = WSCipherMessage.from_raw_payload(encrypted)
             ws.send_text(ws_msg.model_dump_json())
 
             # Receive encrypted response (echo)
             raw_resp = ws.receive_text()
-            enc_resp = WSEncryptedMessage.model_validate_json(raw_resp)
+            enc_resp = WSCipherMessage.model_validate_json(raw_resp)
             decrypted = session.decrypt(enc_resp.to_raw_payload())
             assert json.loads(decrypted.plain_data) == json.loads(plain)
 

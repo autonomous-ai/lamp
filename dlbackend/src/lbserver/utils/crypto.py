@@ -8,12 +8,12 @@ from pydantic import ValidationError
 
 from config import settings
 from core.models.crypto import AESGCMPlainPayload
-from lbserver.models import EncryptionHTTPRequest, EncryptionHTTPResponse
+from lbserver.models import CipherHTTPRequest, CipherHTTPResponse
 from lbserver.utils.state import get_crypto
 
 
 def try_decrypt_http_body(body: bytes) -> tuple[bytes, bytes | None]:
-    """If body is an EncryptionHTTPRequest, decrypt it.
+    """If body is an CipherHTTPRequest, decrypt it.
 
     Returns:
         (plain_body, encrypted_key) — encrypted_key is set if decrypted, None if plain.
@@ -23,7 +23,7 @@ def try_decrypt_http_body(body: bytes) -> tuple[bytes, bytes | None]:
         return body, None
 
     try:
-        req = EncryptionHTTPRequest.model_validate_json(body)
+        req = CipherHTTPRequest.model_validate_json(body)
     except (ValidationError, ValueError):
         if settings.crypto.require_encryption:
             raise HTTPException(status_code=400, detail="Encryption required")
@@ -52,5 +52,5 @@ def encrypt_http_response(content: bytes, encrypted_key: bytes) -> bytes:
 
     session = crypto.create_session(encrypted_key)
     encrypted = session.encrypt(AESGCMPlainPayload(plain_data=content))
-    resp = EncryptionHTTPResponse.from_raw_payload(encrypted)
+    resp = CipherHTTPResponse.from_raw_payload(encrypted)
     return resp.model_dump_json().encode()

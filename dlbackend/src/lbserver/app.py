@@ -6,8 +6,8 @@ and /_internal/ → :8000 (old DL server), stripping the prefix.
 
 When crypto is enabled, the LB handles encryption/decryption:
 - GET /api/dl/public-key returns the RSA public key
-- HTTP: EncryptionHTTPRequest decrypted before forwarding, response encrypted
-- WS: WSKeyExchangeRequest first, then WSEncryptedMessage both directions
+- HTTP: CipherHTTPRequest decrypted before forwarding, response encrypted
+- WS: WSKeyExchangeRequest first, then WSCipherMessage both directions
 """
 
 import argparse
@@ -25,7 +25,7 @@ from pydantic import ValidationError
 from config import settings
 from core.crypto.rsa_aes import AESGCMSession, RSAAESCrypto
 from core.models.crypto import AESGCMPlainPayload
-from lbserver.models import WSEncryptedMessage, WSKeyExchangeRequest
+from lbserver.models import WSCipherMessage, WSKeyExchangeRequest
 from lbserver.routes.crypto import router as crypto_router
 from lbserver.utils import RoundRobin
 from lbserver.utils.crypto import encrypt_http_response, try_decrypt_http_body
@@ -177,7 +177,7 @@ async def proxy_ws(client_ws: WebSocket, path: str) -> None:
 
                         if session is not None:
                             try:
-                                enc_msg = WSEncryptedMessage.model_validate_json(data)
+                                enc_msg = WSCipherMessage.model_validate_json(data)
                                 result = session.decrypt(enc_msg.to_raw_payload())
                                 data = result.plain_data.decode()
                             except ValidationError:
@@ -197,7 +197,7 @@ async def proxy_ws(client_ws: WebSocket, path: str) -> None:
                         if isinstance(msg, str):
                             if session is not None:
                                 encrypted = session.encrypt(AESGCMPlainPayload(plain_data=msg.encode()))
-                                msg = WSEncryptedMessage.from_raw_payload(encrypted).model_dump_json()
+                                msg = WSCipherMessage.from_raw_payload(encrypted).model_dump_json()
                             await client_ws.send_text(msg)
                         else:
                             await client_ws.send_bytes(msg)

@@ -13,7 +13,7 @@ from core.models.crypto import AESGCMCipherPayload
 # ---------------------------------------------------------------------------
 
 
-class EncryptionHTTPRequest(BaseModel):
+class CipherHTTPRequest(BaseModel):
     """HTTP request with encrypted payload (includes RSA-encrypted AES key)."""
 
     encrypted_key: str  # base64
@@ -28,7 +28,7 @@ class EncryptionHTTPRequest(BaseModel):
         ), base64.b64decode(self.encrypted_key)
 
 
-class EncryptionHTTPResponse(BaseModel):
+class CipherHTTPResponse(BaseModel):
     """HTTP response with encrypted payload (AES-only, client already has key)."""
 
     nonce: str          # base64
@@ -41,8 +41,8 @@ class EncryptionHTTPResponse(BaseModel):
         )
 
     @staticmethod
-    def from_raw_payload(payload: AESGCMCipherPayload) -> "EncryptionHTTPResponse":
-        return EncryptionHTTPResponse(
+    def from_raw_payload(payload: AESGCMCipherPayload) -> "CipherHTTPResponse":
+        return CipherHTTPResponse(
             nonce=base64.b64encode(payload.nonce).decode(),
             cipher_data=base64.b64encode(payload.cipher_data).decode(),
         )
@@ -63,7 +63,7 @@ class WSKeyExchangeRequest(BaseModel):
         return base64.b64decode(self.encrypted_key)
 
 
-class WSEncryptedMessage(BaseModel):
+class WSCipherMessage(BaseModel):
     """WS encrypted message (after key exchange, both directions)."""
 
     type: Literal["encrypted"]
@@ -77,8 +77,8 @@ class WSEncryptedMessage(BaseModel):
         )
 
     @staticmethod
-    def from_raw_payload(payload: AESGCMCipherPayload) -> "WSEncryptedMessage":
-        return WSEncryptedMessage(
+    def from_raw_payload(payload: AESGCMCipherPayload) -> "WSCipherMessage":
+        return WSCipherMessage(
             type="encrypted",
             nonce=base64.b64encode(payload.nonce).decode(),
             cipher_data=base64.b64encode(payload.cipher_data).decode(),

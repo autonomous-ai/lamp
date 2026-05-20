@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from core.crypto.rsa_aes import RSAAESCrypto
 from core.models.crypto import AESGCMPlainPayload
-from lbserver.models import EncryptionHTTPRequest
+from lbserver.models import CipherHTTPRequest
 
 
 def _mock_response(request: httpx.Request) -> httpx.Response:
@@ -155,7 +155,7 @@ class TestHTTPEncryptionPipeline:
         session = AESGCMSession(session_key)
         encrypted = session.encrypt(AESGCMPlainPayload(plain_data=plain_body))
 
-        req = EncryptionHTTPRequest(
+        req = CipherHTTPRequest(
             encrypted_key=base64.b64encode(encrypted_key).decode(),
             nonce=base64.b64encode(encrypted.nonce).decode(),
             cipher_data=base64.b64encode(encrypted.cipher_data).decode(),
@@ -189,7 +189,7 @@ class TestHTTPEncryptionPipeline:
         plain_body = json.dumps({"test": "data"}).encode()
         encrypted = session.encrypt(AESGCMPlainPayload(plain_data=plain_body))
 
-        req = EncryptionHTTPRequest(
+        req = CipherHTTPRequest(
             encrypted_key=base64.b64encode(encrypted_key).decode(),
             nonce=base64.b64encode(encrypted.nonce).decode(),
             cipher_data=base64.b64encode(encrypted.cipher_data).decode(),
@@ -203,8 +203,8 @@ class TestHTTPEncryptionPipeline:
         assert resp.status_code == 200
 
         # Decrypt the response with the same session key
-        from lbserver.models import EncryptionHTTPResponse
-        enc_resp = EncryptionHTTPResponse.model_validate_json(resp.content)
+        from lbserver.models import CipherHTTPResponse
+        enc_resp = CipherHTTPResponse.model_validate_json(resp.content)
         decrypted = session.decrypt(enc_resp.to_raw_payload())
         resp_json = json.loads(decrypted.plain_data)
 
