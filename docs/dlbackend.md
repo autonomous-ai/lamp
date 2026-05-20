@@ -398,7 +398,7 @@ GET /api/crypto/public-key
 → 404 if crypto is disabled
 ```
 
-LeLamp fetches this at startup to encrypt session keys. Alternatively, the PEM can be provided via `DL_PUBLIC_KEY_PEM` env var (skips the fetch).
+LeLamp fetches this at startup to encrypt session keys. Alternatively, the key can be loaded from a local PEM file via `DL_PUBLIC_KEY_FILE` (skips the fetch).
 
 ### HTTP Encryption
 
@@ -461,7 +461,8 @@ If key exchange is skipped and `CRYPTO__REQUIRE_ENCRYPTION=false`, messages pass
 |---|---|---|
 | `LELAMP_DL_ENCRYPTION` | `false` | Enable client-side encryption |
 | `LELAMP_DL_ENCRYPTION_REQUIRED` | `false` | Fail if encryption setup fails (no plaintext fallback) |
-| `DL_PUBLIC_KEY_PEM` | _(empty)_ | RSA public key PEM string (skips fetch from LB if set) |
+| `DL_PUBLIC_KEY_FILE` | _(empty)_ | Path to RSA public key PEM file (skips fetch from LB if set) |
+| `DL_PUBLIC_KEY_ENDPOINT` | `/crypto/public-key` | Path appended to `DL_BACKEND_URL` to fetch the public key |
 
 ### Key Files
 
