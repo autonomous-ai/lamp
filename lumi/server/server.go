@@ -338,6 +338,23 @@ var hardwareProxy = func() http.Handler {
 // Web monitor admin pages must include this header until a proper login UI
 // lands; pre-login web bootstrap can still read GET /api/device/config (kept
 // open via sameOriginOrLAN) to fetch the token.
+// setupOnlyMiddleware blocks POST /api/device/setup once provisioning is
+// complete. After setup the device should be edited via PUT /api/device/config
+// (admin-auth gated), not re-provisioned — leaving setup open means a caller
+// who reaches the endpoint can swap WiFi/channels/LLM keys and rebind the
+// lamp to attacker infrastructure. Re-setup intentionally requires a manual
+// reset (flip set_up_completed false on-device).
+func setupOnlyMiddleware(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if cfg.SetUpCompleted {
+			c.JSON(http.StatusForbidden, serializers.ResponseError("setup already completed; use PUT /api/device/config to edit"))
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
 func adminAuthMiddleware(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		expected := cfg.LLMAPIKey
@@ -446,7 +463,7 @@ func (s *Server) Serve(closeFn func()) error {
 	system.GET("shell", systemshell.ShellHandler)
 
 	device := api.Group("device")
-	device.POST("setup", s.deviceHandler.Setup)
+	device.POST("setup", setupOnlyMiddleware(s.config), s.deviceHandler.Setup)
 	device.GET("setup/status", s.deviceHandler.SetupStatus)
 	device.POST("channel", adminAuthMiddleware(s.config), s.deviceHandler.ChangeChannel)
 	// GET kept open (sameOriginOrLAN at nginx + Origin check) so web can
