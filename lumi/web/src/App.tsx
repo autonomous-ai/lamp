@@ -64,15 +64,20 @@ function SetupGate() {
 }
 
 // AuthGate wraps protected routes. Hits GET /api/device/config to probe
-// session state. 401 → bounce to /login (preserving the original path so
-// post-login navigation lands there). 200 → render children. Anything else
-// → render children too (network blip shouldn't lock the user out).
+// session state and route accordingly:
 //
-// We also detect the "not yet provisioned" path: if the response carries
-// has_admin_password=false the operator has never set a password, so we
-// route to /setup instead. checkInternet() can be unreliable from the
-// browser's perspective (LAN-only devices report no internet but are
-// fully provisioned), so a config probe is the more direct signal.
+//   - 200 + has_admin_password=true  → render children (authed)
+//   - 200 + has_admin_password=false → /setup (provisioned but admin not set —
+//                                       migration window for devices upgrading
+//                                       from pre-Login-UI builds)
+//   - 401                            → /login (session missing/expired,
+//                                       admin is configured)
+//   - 503                            → /setup (admin auth not configured =
+//                                       fresh device, never been set up)
+//   - anything else                  → render children (network blip
+//                                       shouldn't lock the user out; the next
+//                                       admin call will surface the real
+//                                       error)
 function AuthGate({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const [state, setState] = useState<"checking" | "ok" | "login" | "setup">("checking");
@@ -90,9 +95,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       } catch (err) {
         if (cancelled) return;
         const status = (err as { status?: number })?.status;
-        // 401 = no/expired session. Anything else (5xx, network) → let the
-        // user proceed; the next admin call will surface the real error.
-        if (status === 401 || status === 503) setState("login");
+        if (status === 401) setState("login");
+        else if (status === 503) setState("setup");
         else setState("ok");
       }
     })();
@@ -109,6 +113,19 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+// RootRedirect lands operators on the right page for their auth state.
+// Probes /api/device/config via AuthGate; on success it navigates to /monitor
+// (the canonical "logged-in landing"). Unauthed → /login. Fresh → /setup.
+// Lives at `/` so opening the root URL doesn't drop straight into the Setup
+// form regardless of auth state.
+function RootRedirect() {
+  return (
+    <AuthGate>
+      <Navigate to="/monitor" replace />
+    </AuthGate>
+  );
+}
+
 // On every mount, scrub secret query params from the URL so they don't
 // survive in browser history or address bar after the page reads them.
 function useScrubSecrets() {
@@ -122,7 +139,7 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<SetupGate />} />
+        <Route path="/" element={<RootRedirect />} />
         <Route path="/setup" element={<SetupGate />} />
         <Route path="/login" element={<Login />} />
         <Route path="/monitor" element={<AuthGate><Monitor /></AuthGate>} />
