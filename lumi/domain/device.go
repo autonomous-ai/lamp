@@ -265,23 +265,29 @@ type MQTTRemoveChannelResponse struct {
 // DeviceMessage is the base response published to fd_channel.
 // All messages MUST include these required fields per spec.
 type MQTTInfoResponse struct {
-	Device  string `json:"device"`
-	Type    string `json:"type"`
-	Version string `json:"version"`
-	ID      string `json:"id"`
-	Mac     string `json:"mac"`
-	Time    string `json:"time"`
+	Device      string `json:"device"`
+	Type        string `json:"type"`
+	Version     string `json:"version"`
+	ID          string `json:"id"`
+	Mac         string `json:"mac"`
+	Time        string `json:"time"`
+	TTSProvider string `json:"tts_provider,omitempty"`
+	TTSVoice    string `json:"tts_voice,omitempty"`
+	STTLanguage string `json:"stt_language,omitempty"`
 }
 
 // NewDeviceMessage creates a base message with required fields populated from config.
 func NewMQTTInfoResponse(cfg *config.Config, msgType string, mac string) MQTTInfoResponse {
 	return MQTTInfoResponse{
-		Device:  "ai_lumi",
-		Type:    msgType,
-		Version: config.LumiVersion,
-		ID:      cfg.DeviceID,
-		Mac:     mac,
-		Time:    time.Now().UTC().Format(time.RFC3339Nano),
+		Device:      "ai_lumi",
+		Type:        msgType,
+		Version:     config.LumiVersion,
+		ID:          cfg.DeviceID,
+		Mac:         mac,
+		Time:        time.Now().UTC().Format(time.RFC3339Nano),
+		TTSProvider: cfg.TTSProvider,
+		TTSVoice:    cfg.TTSVoice,
+		STTLanguage: cfg.STTLanguage,
 	}
 }
 
