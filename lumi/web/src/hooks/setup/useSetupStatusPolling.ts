@@ -135,9 +135,16 @@ export function useSetupStatusPolling({
   // 800ms and back off so the redirect lands sub-second when mDNS is healthy
   // without spamming the network forever on Android-blocked cases.
   useEffect(() => {
-    if (!lumiMdnsHost) return;
     if (typeof window === "undefined") return;
-    if (window.location.hostname !== "192.168.100.1") return;
+    if (!lumiMdnsHost) {
+      console.info("[setup] pre-submit canonical-URL upgrade: skip — no lumiMdnsHost yet");
+      return;
+    }
+    if (window.location.hostname !== "192.168.100.1") {
+      console.info("[setup] pre-submit canonical-URL upgrade: skip — not on AP IP", window.location.hostname);
+      return;
+    }
+    console.info(`[setup] pre-submit canonical-URL upgrade: probing http://${lumiMdnsHost}.local/api/health`);
     let cancelled = false;
     let attempt = 0;
     const base = `http://${lumiMdnsHost}.local`;
@@ -151,8 +158,8 @@ export function useSetupStatusPolling({
         console.info(`[setup] mDNS reachable after ${attempt} probe(s) — redirecting to ${target}`);
         window.location.replace(target);
         return;
-      } catch {
-        /* mDNS not resolvable from this client (Android Chrome, blocked LAN) */
+      } catch (err) {
+        console.info(`[setup] probe attempt ${attempt} failed`, err);
       }
       if (cancelled) return;
       // Back-off: 800ms × 4 then 2s × ∞ — fast initial retries when mDNS is

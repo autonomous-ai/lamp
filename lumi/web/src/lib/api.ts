@@ -116,7 +116,14 @@ if (typeof window !== "undefined" && !(window as unknown as { __lumiFetchPatched
     if (!isApiCall) return origFetch(input, init);
 
     const headers = new Headers(init?.headers);
-    if (apiToken && !headers.has("Authorization")) {
+    // CORS spec forbids non-safelisted headers (Authorization is one) on
+    // `mode: "no-cors"` requests — adding it makes Chrome throw TypeError
+    // before the request even leaves the page. The mDNS probe in
+    // useSetupStatusPolling deliberately uses no-cors to ping a cross-origin
+    // .local host, so skip the bearer there. The opaque response carries
+    // no auth value anyway.
+    const isNoCors = init?.mode === "no-cors";
+    if (!isNoCors && apiToken && !headers.has("Authorization")) {
       headers.set("Authorization", `Bearer ${apiToken}`);
     }
     return origFetch(input, { ...init, headers, credentials: "include" });
