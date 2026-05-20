@@ -20,6 +20,8 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env", override=False)
 
 from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 import lelamp.app_state as state
 from lelamp.config import (
@@ -561,8 +563,21 @@ app = FastAPI(
     if (Path(__file__).parent / "VERSION_LELAMP").exists()
     else "dev",
     lifespan=lifespan,
-    docs_url="/docs",
+    # Built-in /docs disabled; a custom handler below serves the Swagger HTML
+    # without inline <script> so Lumi nginx can keep CSP `script-src 'self'`
+    # (no `'unsafe-inline'`). /redoc stays on the default since it's not the
+    # endpoint the in-iframe browser flow uses.
+    docs_url=None,
     redoc_url="/redoc",
+    # `servers` tells Swagger UI which base URL to prepend on "Try it out".
+    # In the browser context the iframe lives at /api/hardware/docs and admin
+    # auth gates /api/hardware/* via Lumi's reverse proxy; in the loopback /
+    # SSH-tunnel context calls go directly to LeLamp. Operator can switch
+    # between them via the Swagger UI dropdown.
+    servers=[
+        {"url": "/api/hardware", "description": "Via Lumi admin proxy (browser)"},
+        {"url": "/", "description": "Direct (loopback / SSH tunnel)"},
+    ],
     openapi_tags=[
         {
             "name": "Servo",
@@ -638,6 +653,47 @@ except Exception as _speaker_import_err:  # noqa: BLE001
     logger.warning(
         "Speaker recognition router disabled: %s", _speaker_import_err
     )
+
+
+# Self-hosted Swagger UI assets. Lumi nginx CSP keeps `script-src 'self'` so
+# the bundled JS/CSS load from this same origin (no cdn.jsdelivr.net). The
+# /docs handler below serves the HTML; its <script> tags reference these
+# files via relative paths.
+_STATIC_DIR = Path(__file__).parent / "static"
+if _STATIC_DIR.is_dir():
+    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+else:
+    logger.warning("Swagger UI static dir missing: %s", _STATIC_DIR)
+
+
+@app.get("/docs", include_in_schema=False)
+def custom_swagger_ui() -> HTMLResponse:
+    """Serve Swagger UI with no inline <script>.
+
+    Built-in `app.docs_url` injects an inline `<script>const ui = SwaggerUIBundle(...)</script>`
+    block which forces Lumi nginx CSP to allow `'unsafe-inline'` for scripts.
+    Externalising the init into `/static/swagger-init.js` lets the CSP stay
+    strict (`script-src 'self'`). Relative URLs (`./openapi.json`,
+    `./static/...`) make the page work both via the Lumi proxy iframe and
+    direct loopback access.
+    """
+    html = (
+        "<!doctype html>\n"
+        '<html lang="en">\n'
+        "<head>\n"
+        '  <meta charset="utf-8">\n'
+        '  <meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        f"  <title>{app.title} - Swagger UI</title>\n"
+        '  <link rel="stylesheet" href="./static/swagger-ui.css">\n'
+        "</head>\n"
+        "<body>\n"
+        '  <div id="swagger-ui"></div>\n'
+        '  <script src="./static/swagger-ui-bundle.js"></script>\n'
+        '  <script src="./static/swagger-init.js"></script>\n'
+        "</body>\n"
+        "</html>\n"
+    )
+    return HTMLResponse(content=html)
 
 
 class ProxyPrefixMiddleware:

@@ -202,9 +202,10 @@ if "Content-Security-Policy" in content:
     # Headers already present from an earlier patch run. Upgrade in place:
     #   - DENY → SAMEORIGIN (allow same-origin iframe embedding)
     #   - frame-ancestors 'none' → 'self' (CSP mirror of SAMEORIGIN)
-    #   - whitelist cdn.jsdelivr.net + fastapi.tiangolo.com so LeLamp Swagger
-    #     UI iframe (/hw/docs, /api/hardware/docs) renders. External sites
-    #     still can't frame the device or run other scripts.
+    #   - Strict CSP: revert any prior CDN whitelist + `'unsafe-inline'`
+    #     script-src that an earlier patch added. LeLamp now self-hosts the
+    #     Swagger UI bundle (Lumi proxies it via /api/hardware/static/*) so
+    #     no CDN allow-list is required.
     new_content = content
     new_content = new_content.replace(
         'add_header X-Frame-Options "DENY"',
@@ -214,28 +215,39 @@ if "Content-Security-Policy" in content:
         "frame-ancestors 'none'",
         "frame-ancestors 'self'",
     )
+    # Revert script-src to strict 'self' (drop 'unsafe-inline' + CDN).
     new_content = new_content.replace(
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;",
         "script-src 'self';",
+    )
+    new_content = new_content.replace(
         "script-src 'self' https://cdn.jsdelivr.net;",
+        "script-src 'self';",
     )
+    # Revert style-src to base (keep 'unsafe-inline' for React style props).
     new_content = new_content.replace(
-        "style-src 'self' 'unsafe-inline';",
         "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;",
+        "style-src 'self' 'unsafe-inline';",
     )
+    # Revert img-src (drop FastAPI favicon allow).
     new_content = new_content.replace(
-        "img-src 'self' data: blob:;",
         "img-src 'self' data: blob: https://fastapi.tiangolo.com;",
+        "img-src 'self' data: blob:;",
     )
-    # font-src wasn't in the original CSP — add only if missing.
-    if "font-src" not in new_content:
-        new_content = new_content.replace(
-            "media-src 'self' blob:;",
-            "font-src 'self' data: https://cdn.jsdelivr.net; media-src 'self' blob:;",
-        )
+    # Revert font-src CDN whitelist; keep data: for embedded fonts.
+    new_content = new_content.replace(
+        "font-src 'self' data: https://cdn.jsdelivr.net;",
+        "font-src 'self' data:;",
+    )
+    # Revert connect-src CDN whitelist.
+    new_content = new_content.replace(
+        "connect-src 'self' ws: wss: https://cdn.jsdelivr.net;",
+        "connect-src 'self' ws: wss:;",
+    )
     if new_content != content:
         with open(path, "w") as f:
             f.write(new_content)
-        print("[patch] nginx security headers: upgraded (SAMEORIGIN + Swagger CDN whitelist)")
+        print("[patch] nginx security headers: upgraded to strict CSP (no CDN whitelist, no 'unsafe-inline' script-src)")
     else:
         print("[patch] nginx security headers: already up-to-date, skipping")
     sys.exit(0)

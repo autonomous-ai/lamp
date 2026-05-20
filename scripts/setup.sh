@@ -698,14 +698,11 @@ server {
   add_header X-Content-Type-Options "nosniff" always;
   add_header Referrer-Policy "no-referrer" always;
   add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
-  # cdn.jsdelivr.net + fastapi.tiangolo.com whitelisted so LeLamp's Swagger UI
-  # iframe renders. `'unsafe-inline'` on script-src is needed for FastAPI's
-  # auto-generated inline `<script>const ui = SwaggerUIBundle({...})</script>`
-  # bootstrap block. Trade-off accepted: dev-tooling iframe > strict CSP. CDN
-  # added to connect-src so Swagger UI can fetch source maps without console
-  # noise. React app uses external bundle so this doesn't affect main UI XSS
-  # surface other than allowing inline scripts globally — keep an eye on it.
-  add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: blob: https://fastapi.tiangolo.com; font-src 'self' data: https://cdn.jsdelivr.net; media-src 'self' blob:; connect-src 'self' ws: wss: https://cdn.jsdelivr.net; frame-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'" always;
+  # Strict CSP. LeLamp self-hosts Swagger UI assets under /static/ (served
+  # via the Lumi /api/hardware/* proxy) so no CDN whitelist or
+  # `'unsafe-inline'` is needed for the in-iframe docs to render. React app
+  # 'unsafe-inline' stays only on style-src for its inline style props.
+  add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; connect-src 'self' ws: wss:; frame-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'" always;
 
   location / {
     try_files \$uri /index.html;
