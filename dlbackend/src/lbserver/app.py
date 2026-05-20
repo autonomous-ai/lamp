@@ -91,7 +91,7 @@ async def proxy_http(request: Request, path: str) -> Response:
 
     headers: dict[str, str] = {
         k: v for k, v in request.headers.items()
-        if k.lower() not in ("host", "transfer-encoding")
+        if k.lower() not in ("host", "transfer-encoding", "content-length")
     }
 
     body: bytes = await request.body()
