@@ -6,7 +6,7 @@ import pytest
 from cryptography.exceptions import InvalidTag
 
 from core.crypto.rsa_aes import AESGCMSession, RSAAESCrypto
-from core.models.crypto import DecryptionPayload, EncryptionPayload
+from core.models.crypto import AESGCMCipherPayload, AESGCMPlainPayload, RSAAESCipherPayload, RSAAESPlainPayload
 
 
 class TestAESGCMSession:
@@ -15,29 +15,28 @@ class TestAESGCMSession:
         session = AESGCMSession(key)
         original = b"hello world"
 
-        encrypted = session.encrypt(DecryptionPayload(plain_data=original))
+        encrypted = session.encrypt(AESGCMPlainPayload(plain_data=original))
         decrypted = session.decrypt(encrypted)
         assert decrypted.plain_data == original
 
-    def test_different_iv_per_encrypt(self):
+    def test_different_nonce_per_encrypt(self):
         key = os.urandom(32)
         session = AESGCMSession(key)
-        payload = DecryptionPayload(plain_data=b"same data")
+        payload = AESGCMPlainPayload(plain_data=b"same data")
 
         enc1 = session.encrypt(payload)
         enc2 = session.encrypt(payload)
-        assert enc1.iv != enc2.iv
+        assert enc1.nonce != enc2.nonce
         assert enc1.cipher_data != enc2.cipher_data
 
     def test_tampered_ciphertext_fails(self):
         key = os.urandom(32)
         session = AESGCMSession(key)
-        encrypted = session.encrypt(DecryptionPayload(plain_data=b"secret"))
+        encrypted = session.encrypt(AESGCMPlainPayload(plain_data=b"secret"))
 
-        tampered = EncryptionPayload(
+        tampered = AESGCMCipherPayload(
             cipher_data=encrypted.cipher_data + b"\x00",
-            iv=encrypted.iv,
-            tag=encrypted.tag,
+            nonce=encrypted.nonce,
         )
         with pytest.raises(InvalidTag):
             session.decrypt(tampered)
@@ -48,7 +47,7 @@ class TestAESGCMSession:
         session1 = AESGCMSession(key1)
         session2 = AESGCMSession(key2)
 
-        encrypted = session1.encrypt(DecryptionPayload(plain_data=b"secret"))
+        encrypted = session1.encrypt(AESGCMPlainPayload(plain_data=b"secret"))
         with pytest.raises(InvalidTag):
             session2.decrypt(encrypted)
 
@@ -57,7 +56,7 @@ class TestAESGCMSession:
         session = AESGCMSession(key)
         original = os.urandom(1_000_000)
 
-        encrypted = session.encrypt(DecryptionPayload(plain_data=original))
+        encrypted = session.encrypt(AESGCMPlainPayload(plain_data=original))
         decrypted = session.decrypt(encrypted)
         assert decrypted.plain_data == original
 
@@ -74,7 +73,7 @@ class TestRSAAESCrypto:
 
         session = crypto.create_session(encrypted_key)
         original = b"test data"
-        encrypted = session.encrypt(DecryptionPayload(plain_data=original))
+        encrypted = session.encrypt(AESGCMPlainPayload(plain_data=original))
         decrypted = session.decrypt(encrypted)
         assert decrypted.plain_data == original
 
@@ -84,8 +83,8 @@ class TestRSAAESCrypto:
         encrypted_key = self._encrypt_session_key(crypto, session_key)
 
         original = b"hello from hybrid"
-        encrypted = crypto.encrypt(DecryptionPayload(plain_data=original), encrypted_key=encrypted_key)
-        decrypted = crypto.decrypt(encrypted, encrypted_key=encrypted_key)
+        encrypted = crypto.encrypt(RSAAESPlainPayload(encrypted_key=encrypted_key, plain_data=original))
+        decrypted = crypto.decrypt(encrypted)
         assert decrypted.plain_data == original
 
     def test_public_key_pem(self):
@@ -116,9 +115,14 @@ class TestRSAAESCrypto:
         encrypted_key = self._encrypt_session_key(crypto, session_key)
 
         original = b"secret"
-        encrypted = crypto.encrypt(DecryptionPayload(plain_data=original), encrypted_key=encrypted_key)
+        encrypted = crypto.encrypt(RSAAESPlainPayload(encrypted_key=encrypted_key, plain_data=original))
 
         other_key = os.urandom(32)
         other_encrypted_key = self._encrypt_session_key(crypto, other_key)
+        tampered = RSAAESCipherPayload(
+            encrypted_key=other_encrypted_key,
+            cipher_data=encrypted.cipher_data,
+            nonce=encrypted.nonce,
+        )
         with pytest.raises(InvalidTag):
-            crypto.decrypt(encrypted, encrypted_key=other_encrypted_key)
+            crypto.decrypt(tampered)

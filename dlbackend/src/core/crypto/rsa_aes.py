@@ -9,6 +9,7 @@ session key (fresh IV per message).
 import logging
 import os
 from pathlib import Path
+from typing import cast
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
@@ -17,37 +18,41 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from typing_extensions import override
 
 from core.crypto.base import CryptoBase
-from core.crypto.constants import GCM_IV_SIZE, GCM_TAG_SIZE
-from core.models.crypto import DecryptionPayload, EncryptionPayload
+from core.crypto.constants import GCM_NONCE_SIZE
+from core.models.crypto import (
+    AESGCMCipherPayload,
+    AESGCMPlainPayload,
+    RSAAESCipherPayload,
+    RSAAESPlainPayload,
+)
 
 logger = logging.getLogger(__name__)
 
 
-class AESGCMSession(CryptoBase[EncryptionPayload, DecryptionPayload]):
+class AESGCMSession(CryptoBase[AESGCMCipherPayload, AESGCMPlainPayload]):
     """AES-256-GCM session with a shared symmetric key."""
 
     def __init__(self, session_key: bytes) -> None:
         self._session_key: bytes = session_key
 
     @override
-    def encrypt(self, payload: DecryptionPayload) -> EncryptionPayload:
-        iv = os.urandom(GCM_IV_SIZE)
+    def encrypt(self, payload: AESGCMPlainPayload) -> AESGCMCipherPayload:
+        nonce = os.urandom(GCM_NONCE_SIZE)
         aesgcm = AESGCM(self._session_key)
-        ct_with_tag = aesgcm.encrypt(iv, payload.plain_data, None)
-        return EncryptionPayload(
-            cipher_data=ct_with_tag[:-GCM_TAG_SIZE],
-            iv=iv,
-            tag=ct_with_tag[-GCM_TAG_SIZE:],
+        cipher_data = aesgcm.encrypt(nonce, payload.plain_data, None)
+        return AESGCMCipherPayload(
+            cipher_data=cipher_data,
+            nonce=nonce,
         )
 
     @override
-    def decrypt(self, payload: EncryptionPayload) -> DecryptionPayload:
+    def decrypt(self, payload: AESGCMCipherPayload) -> AESGCMPlainPayload:
         aesgcm = AESGCM(self._session_key)
-        plaintext = aesgcm.decrypt(payload.iv, payload.cipher_data + payload.tag, None)
-        return DecryptionPayload(plain_data=plaintext)
+        plaintext = aesgcm.decrypt(payload.nonce, payload.cipher_data, None)
+        return AESGCMPlainPayload(plain_data=plaintext)
 
 
-class RSAAESCrypto(CryptoBase[EncryptionPayload, DecryptionPayload]):
+class RSAAESCrypto(CryptoBase[RSAAESCipherPayload, RSAAESPlainPayload]):
     """RSA + AES-256-GCM hybrid encryption.
 
     RSA-OAEP for key exchange, AES-256-GCM for data.
@@ -88,12 +93,13 @@ class RSAAESCrypto(CryptoBase[EncryptionPayload, DecryptionPayload]):
 
             if private_path.exists() and public_path.exists():
                 logger.info("Loading RSA key pair from %s", key_dir)
-                private_key: RSAPrivateKey = serialization.load_pem_private_key(
-                    private_path.read_bytes(), password=None
-                )  # type: ignore[assignment]
-                public_key: RSAPublicKey = serialization.load_pem_public_key(
-                    public_path.read_bytes()
-                )  # type: ignore[assignment]
+                private_key: RSAPrivateKey = cast(
+                    RSAPrivateKey,
+                    serialization.load_pem_private_key(private_path.read_bytes(), password=None),
+                )
+                public_key: RSAPublicKey = cast(
+                    RSAPublicKey, serialization.load_pem_public_key(public_path.read_bytes())
+                )
                 return private_key, public_key
 
         # Generate new key pair
@@ -150,17 +156,24 @@ class RSAAESCrypto(CryptoBase[EncryptionPayload, DecryptionPayload]):
     # -----------------------------------------------------------------------
 
     @override
-    def encrypt(
-        self, payload: DecryptionPayload, *, encrypted_key: bytes
-    ) -> EncryptionPayload:
+    def encrypt(self, payload: RSAAESPlainPayload) -> RSAAESCipherPayload:
         """RSA-decrypt the AES key, then AES-GCM encrypt the payload."""
-        session = self.create_session(encrypted_key)
-        return session.encrypt(payload)
+        session = self.create_session(payload.encrypted_key)
+        cipher_payload = session.encrypt(AESGCMPlainPayload(plain_data=payload.plain_data))
+        return RSAAESCipherPayload(
+            encrypted_key=payload.encrypted_key,
+            cipher_data=cipher_payload.cipher_data,
+            nonce=cipher_payload.nonce,
+        )
 
     @override
-    def decrypt(
-        self, payload: EncryptionPayload, *, encrypted_key: bytes
-    ) -> DecryptionPayload:
+    def decrypt(self, payload: RSAAESCipherPayload) -> RSAAESPlainPayload:
         """RSA-decrypt the AES key, then AES-GCM decrypt the payload."""
-        session = self.create_session(encrypted_key)
-        return session.decrypt(payload)
+        session = self.create_session(payload.encrypted_key)
+        plain_payload = session.decrypt(
+            AESGCMCipherPayload(cipher_data=payload.cipher_data, nonce=payload.nonce)
+        )
+        return RSAAESPlainPayload(
+            encrypted_key=payload.encrypted_key,
+            plain_data=plain_payload.plain_data,
+        )

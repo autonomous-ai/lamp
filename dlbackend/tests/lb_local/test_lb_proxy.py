@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core.crypto.rsa_aes import RSAAESCrypto
-from core.models.crypto import DecryptionPayload
+from core.models.crypto import AESGCMPlainPayload
 from lbserver.models import EncryptionHTTPRequest
 
 
@@ -153,13 +153,12 @@ class TestHTTPEncryptionPipeline:
 
         from core.crypto.rsa_aes import AESGCMSession
         session = AESGCMSession(session_key)
-        encrypted = session.encrypt(DecryptionPayload(plain_data=plain_body))
+        encrypted = session.encrypt(AESGCMPlainPayload(plain_data=plain_body))
 
         req = EncryptionHTTPRequest(
             encrypted_key=base64.b64encode(encrypted_key).decode(),
-            iv=base64.b64encode(encrypted.iv).decode(),
+            nonce=base64.b64encode(encrypted.nonce).decode(),
             cipher_data=base64.b64encode(encrypted.cipher_data).decode(),
-            tag=base64.b64encode(encrypted.tag).decode(),
         )
         return req.model_dump_json().encode()
 
@@ -174,21 +173,13 @@ class TestHTTPEncryptionPipeline:
         )
         assert resp.status_code == 200
 
-        # Backend received the decrypted plain body
+        # Response is encrypted — verify it has the encrypted structure
         resp_data = json.loads(resp.content)
-        # Response is encrypted — decrypt it
-        from lbserver.models import EncryptionHTTPResponse
-        enc_resp = EncryptionHTTPResponse.model_validate(resp_data)
-        session_key = os.urandom(32)  # need the same key
-
-        # Actually, we can't decrypt the response without knowing the session key
-        # the LB used. But we can verify the response has the encrypted structure.
-        assert "iv" in resp_data
+        assert "nonce" in resp_data
         assert "cipher_data" in resp_data
-        assert "tag" in resp_data
 
     def test_encrypted_response_decryptable(self, lb_client_with_crypto, crypto):
-        """Full round-trip: encrypt request → LB decrypts → backend responds → LB encrypts → client decrypts."""
+        """Full round-trip: encrypt request -> LB decrypts -> backend responds -> LB encrypts -> client decrypts."""
         session_key = os.urandom(32)
         encrypted_key = crypto._public_key.encrypt(session_key, RSAAESCrypto.PADDING)
 
@@ -196,13 +187,12 @@ class TestHTTPEncryptionPipeline:
         session = AESGCMSession(session_key)
 
         plain_body = json.dumps({"test": "data"}).encode()
-        encrypted = session.encrypt(DecryptionPayload(plain_data=plain_body))
+        encrypted = session.encrypt(AESGCMPlainPayload(plain_data=plain_body))
 
         req = EncryptionHTTPRequest(
             encrypted_key=base64.b64encode(encrypted_key).decode(),
-            iv=base64.b64encode(encrypted.iv).decode(),
+            nonce=base64.b64encode(encrypted.nonce).decode(),
             cipher_data=base64.b64encode(encrypted.cipher_data).decode(),
-            tag=base64.b64encode(encrypted.tag).decode(),
         )
 
         resp = lb_client_with_crypto.post(
@@ -215,16 +205,7 @@ class TestHTTPEncryptionPipeline:
         # Decrypt the response with the same session key
         from lbserver.models import EncryptionHTTPResponse
         enc_resp = EncryptionHTTPResponse.model_validate_json(resp.content)
-        resp_payload = enc_resp.to_raw_payload() if hasattr(enc_resp, "to_raw_payload") else None
-
-        # Manually build EncryptionPayload and decrypt
-        from core.models.crypto import EncryptionPayload
-        resp_encrypted = EncryptionPayload(
-            cipher_data=base64.b64decode(enc_resp.cipher_data),
-            iv=base64.b64decode(enc_resp.iv),
-            tag=base64.b64decode(enc_resp.tag),
-        )
-        decrypted = session.decrypt(resp_encrypted)
+        decrypted = session.decrypt(enc_resp.to_raw_payload())
         resp_json = json.loads(decrypted.plain_data)
 
         # The mock backend echoes back — verify we got valid JSON

@@ -24,7 +24,7 @@ from pydantic import ValidationError
 
 from config import settings
 from core.crypto.rsa_aes import AESGCMSession, RSAAESCrypto
-from core.models.crypto import DecryptionPayload
+from core.models.crypto import AESGCMPlainPayload
 from lbserver.models import WSEncryptedMessage, WSKeyExchangeRequest
 from lbserver.routes.crypto import router as crypto_router
 from lbserver.utils import RoundRobin
@@ -196,7 +196,7 @@ async def proxy_ws(client_ws: WebSocket, path: str) -> None:
                     async for msg in backend_ws:
                         if isinstance(msg, str):
                             if session is not None:
-                                encrypted = session.encrypt(DecryptionPayload(plain_data=msg.encode()))
+                                encrypted = session.encrypt(AESGCMPlainPayload(plain_data=msg.encode()))
                                 msg = WSEncryptedMessage.from_raw_payload(encrypted).model_dump_json()
                             await client_ws.send_text(msg)
                         else:

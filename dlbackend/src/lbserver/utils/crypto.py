@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from config import settings
-from core.models.crypto import DecryptionPayload
+from core.models.crypto import AESGCMPlainPayload
 from lbserver.models import EncryptionHTTPRequest, EncryptionHTTPResponse
 from lbserver.utils.state import get_crypto
 
@@ -32,7 +32,8 @@ def try_decrypt_http_body(body: bytes) -> tuple[bytes, bytes | None]:
     payload, encrypted_key = req.to_raw_payload()
 
     try:
-        result = crypto.decrypt(payload, encrypted_key=encrypted_key)
+        session = crypto.create_session(encrypted_key)
+        result = session.decrypt(payload)
         return result.plain_data, encrypted_key
     except InvalidTag:
         raise HTTPException(
@@ -49,7 +50,7 @@ def encrypt_http_response(content: bytes, encrypted_key: bytes) -> bytes:
     if crypto is None:
         raise RuntimeError("Cannot encrypt response: crypto not initialized")
 
-    payload = DecryptionPayload(plain_data=content)
-    encrypted = crypto.encrypt(payload, encrypted_key=encrypted_key)
+    session = crypto.create_session(encrypted_key)
+    encrypted = session.encrypt(AESGCMPlainPayload(plain_data=content))
     resp = EncryptionHTTPResponse.from_raw_payload(encrypted)
     return resp.model_dump_json().encode()

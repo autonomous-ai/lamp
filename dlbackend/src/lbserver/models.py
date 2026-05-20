@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from core.models.crypto import EncryptionPayload
+from core.models.crypto import AESGCMCipherPayload
 
 
 # ---------------------------------------------------------------------------
@@ -17,39 +17,34 @@ class EncryptionHTTPRequest(BaseModel):
     """HTTP request with encrypted payload (includes RSA-encrypted AES key)."""
 
     encrypted_key: str  # base64
-    iv: str             # base64
+    nonce: str          # base64
     cipher_data: str    # base64
-    tag: str            # base64
 
-    def to_raw_payload(self) -> tuple[EncryptionPayload, bytes]:
+    def to_raw_payload(self) -> tuple[AESGCMCipherPayload, bytes]:
         """Convert to raw dataclass payload + encrypted_key bytes."""
-        return EncryptionPayload(
+        return AESGCMCipherPayload(
             cipher_data=base64.b64decode(self.cipher_data),
-            iv=base64.b64decode(self.iv),
-            tag=base64.b64decode(self.tag),
+            nonce=base64.b64decode(self.nonce),
         ), base64.b64decode(self.encrypted_key)
 
 
 class EncryptionHTTPResponse(BaseModel):
     """HTTP response with encrypted payload (AES-only, client already has key)."""
 
-    iv: str             # base64
+    nonce: str          # base64
     cipher_data: str    # base64
-    tag: str            # base64
 
-    def to_raw_payload(self) -> EncryptionPayload:
-        return EncryptionPayload(
+    def to_raw_payload(self) -> AESGCMCipherPayload:
+        return AESGCMCipherPayload(
             cipher_data=base64.b64decode(self.cipher_data),
-            iv=base64.b64decode(self.iv),
-            tag=base64.b64decode(self.tag),
+            nonce=base64.b64decode(self.nonce),
         )
 
     @staticmethod
-    def from_raw_payload(payload: EncryptionPayload) -> "EncryptionHTTPResponse":
+    def from_raw_payload(payload: AESGCMCipherPayload) -> "EncryptionHTTPResponse":
         return EncryptionHTTPResponse(
-            iv=base64.b64encode(payload.iv).decode(),
+            nonce=base64.b64encode(payload.nonce).decode(),
             cipher_data=base64.b64encode(payload.cipher_data).decode(),
-            tag=base64.b64encode(payload.tag).decode(),
         )
 
 
@@ -72,22 +67,19 @@ class WSEncryptedMessage(BaseModel):
     """WS encrypted message (after key exchange, both directions)."""
 
     type: Literal["encrypted"]
-    iv: str             # base64
+    nonce: str          # base64
     cipher_data: str    # base64
-    tag: str            # base64
 
-    def to_raw_payload(self) -> EncryptionPayload:
-        return EncryptionPayload(
+    def to_raw_payload(self) -> AESGCMCipherPayload:
+        return AESGCMCipherPayload(
             cipher_data=base64.b64decode(self.cipher_data),
-            iv=base64.b64decode(self.iv),
-            tag=base64.b64decode(self.tag),
+            nonce=base64.b64decode(self.nonce),
         )
 
     @staticmethod
-    def from_raw_payload(payload: EncryptionPayload) -> "WSEncryptedMessage":
+    def from_raw_payload(payload: AESGCMCipherPayload) -> "WSEncryptedMessage":
         return WSEncryptedMessage(
             type="encrypted",
-            iv=base64.b64encode(payload.iv).decode(),
+            nonce=base64.b64encode(payload.nonce).decode(),
             cipher_data=base64.b64encode(payload.cipher_data).decode(),
-            tag=base64.b64encode(payload.tag).decode(),
         )
