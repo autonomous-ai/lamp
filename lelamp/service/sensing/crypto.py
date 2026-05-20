@@ -1,8 +1,7 @@
 """Client-side RSA+AES-GCM encryption for DL backend communication.
 
 Mirrors the wire format defined in dlbackend/src/lbserver/models.py.
-Public key can be provided via DL_PUBLIC_KEY_PEM env var or fetched from
-the load balancer's GET /api/dl/public-key endpoint.
+Public key can be loaded from a local PEM file or fetched from the load balancer.
 """
 
 import base64
@@ -134,9 +133,8 @@ def load_public_key(pem: str) -> RSAPublicKey:
     return key
 
 
-def fetch_public_key(base_url: str, api_key: str = "") -> RSAPublicKey | None:
-    """Fetch the RSA public key from the LB's /api/dl/public-key endpoint."""
-    url = base_url.rstrip("/") + "/api/dl/public-key"
+def fetch_public_key(url: str, api_key: str = "") -> RSAPublicKey | None:
+    """Fetch the RSA public key from the given URL."""
     try:
         resp = requests.get(url, headers={"X-API-Key": api_key}, timeout=5)
         if resp.status_code != 200:
@@ -152,16 +150,22 @@ def fetch_public_key(base_url: str, api_key: str = "") -> RSAPublicKey | None:
         return None
 
 
-def resolve_public_key(base_url: str, api_key: str = "") -> RSAPublicKey | None:
-    """Resolve the public key: env var DL_PUBLIC_KEY_PEM first, then fetch from LB."""
-    pem_env = os.environ.get("DL_PUBLIC_KEY_PEM", "").strip()
-    if pem_env:
-        try:
-            return load_public_key(pem_env)
-        except Exception:
-            logger.warning("Invalid DL_PUBLIC_KEY_PEM env var", exc_info=True)
+def resolve_public_key(public_key_url: str, api_key: str = "", key_file: str = "") -> RSAPublicKey | None:
+    """Resolve the public key: local file first, then fetch from URL.
 
-    if base_url:
-        return fetch_public_key(base_url, api_key)
+    Args:
+        public_key_url: Full URL to the public-key endpoint.
+        api_key: API key sent as ``X-API-Key`` header.
+        key_file: Path to a local PEM file containing the RSA public key.
+    """
+    if key_file:
+        try:
+            pem = open(key_file).read()
+            return load_public_key(pem)
+        except Exception:
+            logger.warning("Failed to load public key from %s", key_file, exc_info=True)
+
+    if public_key_url:
+        return fetch_public_key(public_key_url, api_key)
 
     return None
