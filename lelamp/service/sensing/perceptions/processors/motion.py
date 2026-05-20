@@ -170,7 +170,7 @@ class RemoteMotionChecker:
         if self._ws_session is None:
             raise RuntimeError("Cannot setup crypto without a WS connection")
 
-        public_key = resolve_public_key(config.DL_BACKEND_URL, config.DL_API_KEY)
+        public_key = resolve_public_key(config.DL_PUBLIC_KEY_URL, config.DL_API_KEY, config.DL_PUBLIC_KEY_FILE)
         if public_key is None:
             if config.DL_ENCRYPTION_REQUIRED:
                 raise RuntimeError("Encryption required but no public key available")

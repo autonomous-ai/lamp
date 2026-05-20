@@ -252,7 +252,7 @@ GET /api/crypto/public-key
 → 404 nếu crypto bị tắt
 ```
 
-LeLamp lấy key này khi khởi động để mã hóa session keys. Hoặc có thể cung cấp PEM qua biến `DL_PUBLIC_KEY_PEM` (bỏ qua việc fetch).
+LeLamp lấy key này khi khởi động để mã hóa session keys. Hoặc có thể load từ file PEM local qua biến `DL_PUBLIC_KEY_FILE` (bỏ qua việc fetch).
 
 ### Mã hóa HTTP
 
@@ -315,7 +315,8 @@ Nếu bỏ qua trao đổi khóa và `CRYPTO__REQUIRE_ENCRYPTION=false`, message
 |---|---|---|
 | `LELAMP_DL_ENCRYPTION` | `false` | Bật mã hóa phía client |
 | `LELAMP_DL_ENCRYPTION_REQUIRED` | `false` | Thất bại nếu thiết lập mã hóa lỗi (không fallback plaintext) |
-| `DL_PUBLIC_KEY_PEM` | _(rỗng)_ | RSA public key PEM (nếu đặt, bỏ qua fetch từ LB) |
+| `DL_PUBLIC_KEY_FILE` | _(rỗng)_ | Đường dẫn file PEM chứa RSA public key (nếu đặt, bỏ qua fetch từ LB) |
+| `DL_PUBLIC_KEY_ENDPOINT` | `/crypto/public-key` | Path nối vào `DL_BACKEND_URL` để fetch public key |
 
 ## Triển khai
 
