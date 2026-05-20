@@ -1,5 +1,51 @@
+import { useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { SecretUpdateField } from "@/components/SecretUpdateField";
 import { C, Field, PasswordField, SectionCard } from "./shared";
+
+// MaskedReadField renders a read-only value masked behind ••••, with an eye
+// toggle to reveal it. Used for the MAC field — operators are confused when
+// they see the literal "Lumi-XXXX" placeholder, but most owners don't need
+// to see the hardware-derived ID either. Eye reveal stays available for ops.
+function MaskedReadField({ label, id, value, placeholder }: {
+  label: string; id: string; value: string; placeholder?: string;
+}) {
+  const [show, setShow] = useState(false);
+  const hasValue = !!value;
+  const displayed = hasValue ? (show ? value : "•".repeat(Math.min(12, value.length || 8))) : (placeholder ?? "");
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <label htmlFor={id} style={{ display: "block", fontSize: 11, color: C.textDim, marginBottom: 5 }}>{label}</label>
+      <div style={{ position: "relative" }}>
+        <input
+          id={id} type="text" value={displayed} readOnly
+          style={{
+            width: "100%", boxSizing: "border-box",
+            background: C.bg, border: `1px solid ${C.border}`,
+            borderRadius: 7, padding: "8px 38px 8px 11px",
+            fontSize: 12.5, color: hasValue ? C.textDim : C.textMuted,
+            outline: "none", cursor: "default",
+            fontFamily: "ui-monospace, monospace",
+          }}
+        />
+        {hasValue && (
+          <button
+            type="button" onClick={() => setShow((v) => !v)} tabIndex={-1}
+            aria-label={show ? "Hide MAC" : "Show MAC"}
+            style={{
+              position: "absolute", right: 0, top: 0, height: "100%",
+              padding: "0 11px", background: "none", border: "none",
+              color: C.textMuted, cursor: "pointer",
+              display: "flex", alignItems: "center",
+            }}
+          >
+            {show ? <EyeOff size={14} /> : <Eye size={14} />}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function DeviceSection({
   active, deviceId, setDeviceId, mac,
@@ -33,7 +79,7 @@ export function DeviceSection({
   return (
     <SectionCard id="device" title="Device" active={active}>
       <Field label="Device ID" id="device_id" value={deviceId} onChange={setDeviceId} placeholder="lumi-001" readOnly />
-      <Field label="MAC" id="mac" value={mac ?? ""} onChange={() => {}} placeholder="Lumi-XXXX" readOnly />
+      <MaskedReadField label="MAC" id="mac" value={mac ?? ""} placeholder="not available" />
       {showAdminPasswordFields && (
         <>
           <div style={{

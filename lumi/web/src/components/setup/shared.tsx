@@ -254,11 +254,16 @@ export function ConfiguredHint({ label, editPath = "/edit" }: { label: string; e
 }
 
 export function SectionCard({ id, title, active, children }: { id: SectionId; title: string; active: boolean; children: React.ReactNode }) {
-  if (!active) return null;
+  // Stay mounted when inactive (display:none) so form inputs keep their
+  // refs and any controlled state remains live. Sidebar tabs gate visibility
+  // only; URL query params + parent useState still drive submitted values
+  // even when the section isn't on screen. Matches the `?debug=true/false`
+  // contract: hide from view, don't unmount.
   return (
     <div
       id={`section-${id}`}
       style={{
+        display: active ? "block" : "none",
         background: C.card, border: `1px solid ${C.border}`,
         borderRadius: 12, padding: "18px 20px", marginBottom: 16,
       }}
