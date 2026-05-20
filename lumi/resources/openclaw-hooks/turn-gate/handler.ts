@@ -35,3 +35,6 @@ const handler = async (event: any): Promise<void> => {
 };
 
 export default handler;
+
+
+http://192.168.100.1/setup?channel=telegram&llm_url=https%3A%2F%2Fcampaign-api.autonomous.ai%2Fapi%2Fv1%2Fai%2F&device_id=6a0d6c3b7b377958590d7bc1&llm_model=claude-opus-4-6&mqtt_endpoint=sds-mqtt.autonomous.ai&mqtt_port=1883&mqtt_username=mosquitto&fa_channel=Lumi%2Ff_a%2F6a0d6c3b7b377958590d7bc1&fd_channel=Lumi%2Ff_d%2F6a0d6c3b7b377958590d7bc1&tele_user_id=158406741&tele_agent=openclaw&agent=openclaw

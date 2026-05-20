@@ -26,6 +26,35 @@ import { Wifi, Lamp, Brain, Volume2, MessageSquare, UserCircle, Mic, Globe, Chec
 // APIs, so Voice/Face enroll + TTS preview become available).
 export type SetupMode = "initial" | "continue";
 
+// Go playground/validator returns errors shaped like:
+//   "Key: 'SetupRequest.SSID' Error:Field validation for 'SSID' failed on the
+//    'required' tag\nKey: 'SetupRequest.LLMAPIKey' Error:Field validation …"
+// Surface that as a human-readable list of missing fields so operators don't
+// see what looks like a stack trace. Falls through unchanged when the message
+// doesn't match the validator format (other backend errors stay as-is).
+const FIELD_LABELS: Record<string, string> = {
+  SSID: "Wi-Fi name",
+  Password: "Wi-Fi password",
+  LLMAPIKey: "AI Brain API key",
+  LLMBaseURL: "AI Brain URL",
+  DeviceID: "Device ID",
+};
+function normaliseSetupError(message: string): string {
+  const matches = [...message.matchAll(/Field validation for '(\w+)' failed on the '(\w+)' tag/g)];
+  if (matches.length === 0) return message;
+  const missing: string[] = [];
+  const other: string[] = [];
+  for (const [, field, tag] of matches) {
+    const label = FIELD_LABELS[field] ?? field;
+    (tag === "required" ? missing : other).push(label);
+  }
+  const parts: string[] = [];
+  if (missing.length > 0) parts.push(`Missing: ${missing.join(", ")}.`);
+  if (other.length > 0) parts.push(`Invalid: ${other.join(", ")}.`);
+  parts.push("Re-open Setup from the Lumi app, or add ?debug=true to enter them manually.");
+  return parts.join(" ");
+}
+
 interface SetupProps {
   mode?: SetupMode;
 }
@@ -373,6 +402,25 @@ export default function Setup({ mode = "initial" }: SetupProps = {}) {
 
   const scrollTo = (id: SectionId) => {
     setActiveSection(id);
+    // Pop the content area back to the top so a Back/Next click never lands
+    // the operator mid-scroll of the previous section.
+    contentRef.current?.scrollTo({ top: 0 });
+  };
+
+  // Wizard-style step navigation: Prev/Next walk through visibleSections; the
+  // submit button only renders on the last visible step. Auto-scroll edge
+  // cases (activeSection on a hidden section) fall back to index 0 so Next
+  // still advances into the visible set.
+  const currentStepIndex = Math.max(0, visibleSections.findIndex((s) => s.id === activeSection));
+  const isFirstStep = currentStepIndex === 0;
+  const isLastStep = currentStepIndex >= visibleSections.length - 1;
+  const goPrev = () => {
+    if (isFirstStep) return;
+    scrollTo(visibleSections[currentStepIndex - 1].id);
+  };
+  const goNext = () => {
+    if (isLastStep) return;
+    scrollTo(visibleSections[currentStepIndex + 1].id);
   };
 
   const uniqueNetworks = useMemo(
@@ -396,6 +444,23 @@ export default function Setup({ mode = "initial" }: SetupProps = {}) {
         setError("Admin password and confirmation don't match.");
         return;
       }
+    }
+    // Pre-flight check for the two visible Wi-Fi fields. Catches implicit
+    // Enter-key form submission and any other accidental fire-before-ready
+    // path with a plain hint instead of letting the Go validator return a
+    // tag-format error. Other required fields (LLM creds, device ID, channel
+    // tokens) ride through URL params or the saved config merge on the
+    // backend, so we let the server be the source of truth for those — see
+    // the normaliseSetupError() catch below for friendlier rendering.
+    if (!ssid.trim()) {
+      setError("Choose a Wi-Fi network before continuing.");
+      setActiveSection("wifi");
+      return;
+    }
+    if (!password && !hasNetworkPassword) {
+      setError("Enter the Wi-Fi password.");
+      setActiveSection("wifi");
+      return;
     }
     setLoading(true);
     try {
@@ -455,7 +520,7 @@ export default function Setup({ mode = "initial" }: SetupProps = {}) {
       setSetupWorking(result);
       setSetupPhase("connecting");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Setup failed.");
+      setError(normaliseSetupError(err instanceof Error ? err.message : "Setup failed."));
     }
     setLoading(false);
   }, [
@@ -464,6 +529,7 @@ export default function Setup({ mode = "initial" }: SetupProps = {}) {
     llmModel, llmDisableThinking, sttApiKey, sttBaseUrl, ttsApiKey, ttsBaseUrl, ttsVoice, deviceId,
     mqttEndpoint, mqttPort, mqttUsername, mqttPassword, faChannel, fdChannel,
     sttLanguage, ttsProvider, isContinue, adminPassword, adminPasswordConfirm,
+    hasAdminPassword, hasNetworkPassword,
   ]);
 
   return (
@@ -570,23 +636,12 @@ export default function Setup({ mode = "initial" }: SetupProps = {}) {
           <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>
             {setupWorking ? "Setting up…" : SECTIONS.find((s) => s.id === activeSection)?.label ?? "Wi-Fi"}
           </span>
-          {!setupWorking && (
-            <button
-              form="setup-form"
-              type="submit"
-              disabled={loading || loadingList}
-              style={{
-                padding: "6px 18px", borderRadius: 7, fontSize: 12, fontWeight: 600,
-                cursor: loading || loadingList ? "not-allowed" : "pointer",
-                border: "none",
-                background: loading || loadingList ? C.surface : C.amber,
-                color: loading || loadingList ? C.textMuted : "#0C0B09",
-                transition: "all 0.15s",
-                opacity: loading || loadingList ? 0.6 : 1,
-              }}
-            >
-              {loading ? "Setting up…" : "Setup"}
-            </button>
+          {/* Submit lives at the bottom of the form alongside Back/Next so the
+              operator follows a single wizard flow per step. */}
+          {!setupWorking && !isFirstStep && (
+            <span style={{ fontSize: 11, color: C.textDim }}>
+              Step {currentStepIndex + 1} / {visibleSections.length}
+            </span>
           )}
         </div>
 
@@ -610,9 +665,34 @@ export default function Setup({ mode = "initial" }: SetupProps = {}) {
                     <div style={{ fontSize: 15, fontWeight: 600, color: C.amber, marginBottom: 8 }}>
                       Lumi is joining your Wi-Fi…
                     </div>
-                    <div style={{ fontSize: 12, color: C.textDim }}>
+                    <div style={{ fontSize: 12, color: C.textDim, marginBottom: lumiMdnsHost ? 18 : 0 }}>
                       This usually takes 10-30 seconds. Stay on this network.
                     </div>
+                    {/* Fallback manual link: the auto-redirect can fail when
+                        the user's network blocks mDNS (Android Chrome) or
+                        when the AP shuts down before the phase poll flips
+                        to "connected". Offering the same .local link here
+                        means a stuck operator can always click their way
+                        out by reconnecting to home Wi-Fi first. */}
+                    {lumiMdnsHost && (
+                      <div style={{
+                        marginTop: 6, paddingTop: 14,
+                        borderTop: `1px solid ${C.border}`,
+                        fontSize: 11, color: C.textMuted, lineHeight: 1.55,
+                      }}>
+                        Stuck here? Reconnect to your home Wi-Fi, then open{" "}
+                        <a
+                          href={`http://${lumiMdnsHost}.local${window.location.pathname}${safeSearch()}`}
+                          style={{
+                            color: C.amber, textDecoration: "none",
+                            fontFamily: "ui-monospace, monospace",
+                          }}
+                        >
+                          http://{lumiMdnsHost}.local/
+                        </a>
+                        .
+                      </div>
+                    )}
                   </>
                 )}
 
@@ -718,7 +798,7 @@ export default function Setup({ mode = "initial" }: SetupProps = {}) {
                   </div>
                 )}
 
-                <form id="setup-form" onSubmit={handleSubmit}>
+                <form id="setup-form" onSubmit={handleSubmit} noValidate>
 
                   <DeviceSection
                     active={activeSection === "device"}
@@ -805,6 +885,61 @@ export default function Setup({ mode = "initial" }: SetupProps = {}) {
                       handleFaceEnroll={handleFaceEnroll}
                     />
                   )}
+
+                  <div style={{
+                    display: "flex", gap: 10, justifyContent: "space-between",
+                    alignItems: "center", marginTop: 8,
+                  }}>
+                    {isFirstStep ? <span /> : (
+                      <button
+                        type="button"
+                        onClick={goPrev}
+                        style={{
+                          padding: "9px 18px", borderRadius: 7, fontSize: 12.5, fontWeight: 500,
+                          background: C.surface, color: C.text,
+                          border: `1px solid ${C.border}`, cursor: "pointer",
+                        }}
+                      >
+                        ← Back
+                      </button>
+                    )}
+                    {isLastStep ? (
+                      <button
+                        // Distinct keys prevent React from mutating a single
+                        // <button> element from type="button" (Next) to
+                        // type="submit" (Setup) in place. Without separate
+                        // keys the in-flight click on Next can land on the
+                        // mutated Submit button and trigger an unwanted form
+                        // submission.
+                        key="submit"
+                        type="submit"
+                        disabled={loading || loadingList}
+                        style={{
+                          padding: "9px 22px", borderRadius: 7, fontSize: 12.5, fontWeight: 600,
+                          background: loading || loadingList ? C.surface : C.amber,
+                          color: loading || loadingList ? C.textMuted : "#0C0B09",
+                          border: "none",
+                          cursor: loading || loadingList ? "not-allowed" : "pointer",
+                          opacity: loading || loadingList ? 0.6 : 1,
+                        }}
+                      >
+                        {loading ? "Setting up…" : "Setup"}
+                      </button>
+                    ) : (
+                      <button
+                        key="next"
+                        type="button"
+                        onClick={goNext}
+                        style={{
+                          padding: "9px 22px", borderRadius: 7, fontSize: 12.5, fontWeight: 600,
+                          background: C.amber, color: "#0C0B09",
+                          border: "none", cursor: "pointer",
+                        }}
+                      >
+                        Next →
+                      </button>
+                    )}
+                  </div>
 
                 </form>
               </>

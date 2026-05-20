@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { getDeviceConfig } from "@/lib/api";
+import { getDeviceConfig, getSetupStatus } from "@/lib/api";
 import type { ChannelType } from "@/types";
 import type { SetupUrlParams } from "./useSetupUrlParams";
 import type { SectionId, LlmLoadedState, ChannelLoadedState } from "./types";
@@ -130,6 +130,13 @@ export function useConfigPrefill(args: {
       // cookie. Safer than hiding the field on a real migration target.
       setHasAdminPassword(false);
       setHasNetworkPassword(false);
+      // Pull the hardware-derived MAC from the open setup-status endpoint
+      // so the canonical-URL upgrade (192.168.100.1 → lumi-xxxx.local) and
+      // the post-setup mDNS auto-redirect still work for fresh devices
+      // that can't read /api/device/config without an admin session.
+      getSetupStatus().then((s) => {
+        if (s.mac) setMac(s.mac);
+      }).catch(() => { /* status endpoint unreachable — manual flow still works via fallback link */ });
     });
     // Intentional empty deps — mount-only, like the original effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps

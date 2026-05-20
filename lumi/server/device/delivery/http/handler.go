@@ -115,10 +115,17 @@ func (h *DeviceHandler) GetConfig(c *gin.Context) {
 //	@Router			/device/setup/status [get]
 func (h *DeviceHandler) SetupStatus(c *gin.Context) {
 	phase, lanIP, errMsg := h.service.SetupStatus()
+	// `mac` (hardware-derived "Lumi-XXXX") is exposed here intentionally — the
+	// device already broadcasts `lumi-xxxx.local` via avahi-daemon on the LAN,
+	// so the suffix isn't sensitive. The web client uses it to auto-redirect
+	// 192.168.100.1 → lumi-xxxx.local even before the operator is authed,
+	// since /api/device/config requires admin auth and fresh devices have
+	// none.
 	c.JSON(http.StatusOK, serializers.ResponseSuccess(gin.H{
 		"phase":  phase,
 		"lan_ip": lanIP,
 		"error":  errMsg,
+		"mac":    device.GetDeviceMac(),
 	}))
 }
 

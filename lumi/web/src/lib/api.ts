@@ -176,6 +176,11 @@ export interface SetupStatus {
   phase: "idle" | "connecting" | "connected" | "failed";
   lan_ip: string;
   error: string;
+  // Hardware-derived "Lumi-XXXX". Used by the web client to compute the
+  // canonical mDNS hostname (`lumi-xxxx.local`) for the AP→STA auto-redirect.
+  // Exposed on this open endpoint because /api/device/config is admin-gated
+  // and fresh devices have no admin yet.
+  mac: string;
 }
 
 /** Polled by Setup.tsx during the AP→STA transition. Returns the device's
