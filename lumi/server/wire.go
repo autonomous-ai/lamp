@@ -8,6 +8,7 @@ import (
 	"go-lamp.autonomous.ai/internal/agent"
 	"go-lamp.autonomous.ai/internal/ambient"
 	"go-lamp.autonomous.ai/internal/beclient"
+	"go-lamp.autonomous.ai/internal/buddy"
 	"go-lamp.autonomous.ai/internal/device"
 	"go-lamp.autonomous.ai/internal/healthwatch"
 	"go-lamp.autonomous.ai/internal/monitor"
@@ -16,6 +17,7 @@ import (
 	"go-lamp.autonomous.ai/lib/devicebutton"
 	"go-lamp.autonomous.ai/lib/mqtt"
 	"go-lamp.autonomous.ai/server/config"
+	_buddyHttp "go-lamp.autonomous.ai/server/buddy/delivery/http"
 	_deviceGPIODeliver "go-lamp.autonomous.ai/server/device/delivery/gpio"
 	_deviceHttpDeliver "go-lamp.autonomous.ai/server/device/delivery/http"
 	_deviceMQTTDeliver "go-lamp.autonomous.ai/server/device/delivery/mqtt"
@@ -34,6 +36,8 @@ func InitializeServer() (*Server, error) {
 		agent.ProviderSet,
 		network.ProviderSet,
 		device.ProviderSet,
+		buddy.ProviderSet,
+		_buddyHttp.ProviderSet,
 		devicebutton.ProviderSet,
 		ambient.ProviderSet,
 		healthwatch.ProviderSet,
