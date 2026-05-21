@@ -13,6 +13,7 @@ from core.enums import (
     PoseEstimator2DEnum,
     SpeechEmotionRecognizerEnum,
 )
+from core.enums.object import ObjectDetectorEnum
 from core.enums.pose import ErgoAssessorEnum, PoseLifter3DEnum
 
 
@@ -83,6 +84,20 @@ class CryptoSetting(BaseModel):
     require_encryption: bool = False  # reject plain payloads if True
 
 
+class SingleObjectDetectorSetting(BaseModel):
+    enabled: bool = False
+    model_path: str | None = None
+    classes_path: str | None = None
+    threshold: float | None = None
+
+
+class ObjectDetectorSetting(BaseModel):
+    yolo_world: SingleObjectDetectorSetting = SingleObjectDetectorSetting()
+    yoloe: SingleObjectDetectorSetting = SingleObjectDetectorSetting()
+    owlv2: SingleObjectDetectorSetting = SingleObjectDetectorSetting()
+    grounding_dino: SingleObjectDetectorSetting = SingleObjectDetectorSetting()
+
+
 class LBSetting(BaseModel):
     backends: str = ""  # comma-separated backend URLs, e.g. "http://127.0.0.1:8888"
     host: str = "0.0.0.0"
@@ -117,6 +132,7 @@ class Settings(BaseSettings):
     emotion: EmotionSetting = EmotionSetting()
     pose: PoseSetting = PoseSetting()
     person_detector: PersonDetectorSetting = PersonDetectorSetting()
+    object_detector: ObjectDetectorSetting = ObjectDetectorSetting()
 
     crypto: CryptoSetting = CryptoSetting()
     lb: LBSetting = LBSetting()

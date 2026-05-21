@@ -1,3 +1,4 @@
+import asyncio
 """Tests for the action-analysis WebSocket endpoint."""
 
 import base64
@@ -35,13 +36,13 @@ def _make_frame_b64(width: int = 320, height: int = 240) -> str:
 def model():
     """Load the real X3DActionRecognizer once for the entire test session."""
     from core.enums import HumanActionRecognizerEnum
-    from core.perception.action.utils import create_recognizer
+    from core.perception.action.utils import ActionRecognizerFactory
 
-    recognizer = create_recognizer(
+    factory = ActionRecognizerFactory(
         model_name=HumanActionRecognizerEnum.X3D, model_path=X3D_MODEL_PATH
     )
-    model = ActionPerception(action_recognizer=recognizer)
-    model.start()
+    model = ActionPerception(action_recognizer_factory=factory)
+    asyncio.run(model.start())
     return model
 
 

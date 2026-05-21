@@ -1,3 +1,4 @@
+import asyncio
 """Tests for the action-analysis WebSocket endpoint using the local UniformerV2 model."""
 
 import base64
@@ -32,13 +33,13 @@ def _make_frame_b64(width: int = 320, height: int = 240) -> str:
 @pytest.fixture(scope="session")
 def model():
     from core.enums import HumanActionRecognizerEnum
-    from core.perception.action.utils import create_recognizer
+    from core.perception.action.utils import ActionRecognizerFactory
 
-    recognizer = create_recognizer(
+    factory = ActionRecognizerFactory(
         model_name=HumanActionRecognizerEnum.UNIFORMERV2, model_path=UNIFORMERV2_MODEL_PATH
     )
-    m = ActionPerception(action_recognizer=recognizer)
-    m.start()
+    m = ActionPerception(action_recognizer_factory=factory)
+    asyncio.run(m.start())
     return m
 
 

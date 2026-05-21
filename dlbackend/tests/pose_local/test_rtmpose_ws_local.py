@@ -1,3 +1,4 @@
+import asyncio
 """Tests for the pose-estimation WebSocket + HTTP endpoints using the local RTMPose model."""
 
 import base64
@@ -12,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from dlserver.utils.state import get_pose_model, set_pose_model
 from core.perception.pose.perception import PosePerception
-from core.perception.pose.utils import create_estimator_2d
+from core.perception.pose.utils import PoseEstimator2DFactory
 
 TEST_API_KEY = "test-secret-key"
 os.environ["DL_API_KEY"] = TEST_API_KEY
@@ -52,11 +53,11 @@ def model():
     """Load the real RTMPose model once for the entire test session."""
     from core.enums.pose import PoseEstimator2DEnum
 
-    estimator_2d = create_estimator_2d(
+    factory = PoseEstimator2DFactory(
         model_name=PoseEstimator2DEnum.RTMPOSE, model_path=RTMPOSE_MODEL_PATH
     )
-    pose_model = PosePerception(estimator_2d=estimator_2d)
-    pose_model.start()
+    pose_model = PosePerception(estimator_2d_factory=factory)
+    asyncio.run(pose_model.start())
     return pose_model
 
 

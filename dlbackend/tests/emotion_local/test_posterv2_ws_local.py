@@ -1,3 +1,4 @@
+import asyncio
 """Tests for the emotion-analysis WebSocket endpoint using the local POSTER V2 model."""
 
 import base64
@@ -13,8 +14,8 @@ from fastapi.testclient import TestClient
 from dlserver.utils.state import get_emotion_model, set_emotion_model
 from core.perception.emotion.constants import RESOURCES_DIR
 from core.perception.emotion.perception import EmotionPerception
-from core.perception.emotion.utils import create_emotion_recognizer
-from core.perception.face.predictors.yunet import YuNetFaceDetector
+from core.perception.emotion.utils import EmotionRecognizerFactory
+from core.perception.face.utils import FaceDetectorFactory
 
 POSTERV2_EMOTIONS: list[str] = (RESOURCES_DIR / "posterv2_classes.txt").read_text().strip().split("\n")
 
@@ -52,13 +53,14 @@ def _make_face_frame_b64(width: int = 320, height: int = 240) -> str:
 @pytest.fixture(scope="session")
 def model():
     from core.enums import EmotionRecognizerEnum
+    from core.enums.face import FaceDetectorEnum
 
-    emotion_recognizer = create_emotion_recognizer(
+    emotion_factory = EmotionRecognizerFactory(
         model_name=EmotionRecognizerEnum.POSTERV2, model_path=POSTERV2_MODEL_PATH
     )
-    face_detector = YuNetFaceDetector()
-    m = EmotionPerception(emotion_recognizer=emotion_recognizer, face_detector=face_detector)
-    m.start()
+    face_factory = FaceDetectorFactory(model_name=FaceDetectorEnum.YUNET)
+    m = EmotionPerception(emotion_recognizer_factory=emotion_factory, face_detector_factory=face_factory)
+    asyncio.run(m.start())
     return m
 
 

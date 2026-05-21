@@ -1,3 +1,4 @@
+import asyncio
 """Tests for the emotion-analysis WebSocket endpoint."""
 
 import base64
@@ -12,8 +13,8 @@ from fastapi.testclient import TestClient
 
 from core.perception.emotion.constants import RESOURCES_DIR
 from core.perception.emotion.perception import EmotionPerception
-from core.perception.emotion.utils import create_emotion_recognizer
-from core.perception.face.predictors.yunet import YuNetFaceDetector
+from core.perception.emotion.utils import EmotionRecognizerFactory
+from core.perception.face.utils import FaceDetectorFactory
 from dlserver.utils.state import get_emotion_model, set_emotion_model
 
 EMONET_EMOTIONS: list[str] = (
@@ -62,13 +63,14 @@ def _make_face_frame_b64(width: int = 320, height: int = 240) -> str:
 def model():
     """Load the real EmotionPerception once for the entire test session."""
     from core.enums import EmotionRecognizerEnum
+    from core.enums.face import FaceDetectorEnum
 
-    emotion_recognizer = create_emotion_recognizer(
+    emotion_factory = EmotionRecognizerFactory(
         model_name=EmotionRecognizerEnum.EMONET_8, model_path=EMONET_MODEL_PATH
     )
-    face_detector = YuNetFaceDetector()
-    m = EmotionPerception(emotion_recognizer=emotion_recognizer, face_detector=face_detector)
-    m.start()
+    face_factory = FaceDetectorFactory(model_name=FaceDetectorEnum.YUNET)
+    m = EmotionPerception(emotion_recognizer_factory=emotion_factory, face_detector_factory=face_factory)
+    asyncio.run(m.start())
     return m
 
 

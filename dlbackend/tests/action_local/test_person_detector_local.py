@@ -1,3 +1,4 @@
+import asyncio
 """Tests for action recognition with person detector enabled.
 
 Uses a small YOLO model (yolo11n.pt) for person detection and
@@ -18,6 +19,7 @@ from fastapi.testclient import TestClient
 from core.models.action import ActionPerceptionSessionConfig
 from core.perception.action import ActionPerception
 from core.perception.person.predictors import PersonDetector, YOLOPersonDetector
+from core.perception.person.utils import PersonDetectorFactory
 from dlserver.utils.state import set_action_model
 
 TEST_API_KEY = "test-secret-key"
@@ -64,35 +66,39 @@ def person_detector():
 
 
 @pytest.fixture(scope="session")
-def model_with_detector(person_detector):
+def model_with_detector():
     from core.enums import HumanActionRecognizerEnum
-    from core.perception.action.utils import create_recognizer
+    from core.enums.person import PersonDetectorEnum
+    from core.perception.action.utils import ActionRecognizerFactory
 
-    recognizer = create_recognizer(
+    action_factory = ActionRecognizerFactory(
         model_name=HumanActionRecognizerEnum.X3D, model_path=X3D_MODEL_PATH
     )
+    person_factory = PersonDetectorFactory(
+        model_name=PersonDetectorEnum.YOLO, model_path="yolo11n.pt"
+    )
     m = ActionPerception(
-        action_recognizer=recognizer,
-        person_detector=person_detector,
+        action_recognizer_factory=action_factory,
+        person_detector_factory=person_factory,
         default_config=ActionPerceptionSessionConfig(frame_interval=0),
     )
-    m.start()
+    asyncio.run(m.start())
     return m
 
 
 @pytest.fixture(scope="session")
 def model_without_detector():
     from core.enums import HumanActionRecognizerEnum
-    from core.perception.action.utils import create_recognizer
+    from core.perception.action.utils import ActionRecognizerFactory
 
-    recognizer = create_recognizer(
+    factory = ActionRecognizerFactory(
         model_name=HumanActionRecognizerEnum.X3D, model_path=X3D_MODEL_PATH
     )
     m = ActionPerception(
-        action_recognizer=recognizer,
+        action_recognizer_factory=factory,
         default_config=ActionPerceptionSessionConfig(frame_interval=0),
     )
-    m.start()
+    asyncio.run(m.start())
     return m
 
 
