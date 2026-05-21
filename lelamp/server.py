@@ -839,9 +839,9 @@ def health():
     """Check which hardware drivers are available."""
     return {
         "status": "ok",
-        "servo": state.animation_service is not None,
-        "led": state.rgb_service is not None,
-        "camera": state.camera_capture is not None,
+        "servo": state.animation_service is not None and state.animation_service.robot is not None and state.animation_service.robot.is_connected,
+        "led": state.rgb_service is not None and state.rgb_service._driver is not None,
+        "camera": state.camera_capture is not None and state.camera_capture.last_frame is not None,
         "audio": state.audio_output_device is not None or state.audio_input_device is not None,
         "sensing": state.sensing_service is not None,
         "voice": state.voice_service is not None and state.voice_service.available
