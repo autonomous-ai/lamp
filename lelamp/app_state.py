@@ -15,8 +15,8 @@ from typing import Optional
 from lelamp.presets import (
     EMO_IDLE,
     EMOTION_PRESETS,
-    FX_RAINBOW,
     FX_SPEAKING_WAVE,
+    FX_SPEAKING_WAVE_RAINBOW,
     LST_EFFECT,
     LST_OFF,
     LST_SCENE,
@@ -349,9 +349,9 @@ def _on_music_play_start():
     state = _user_led_state
     led_off = state is None or state.get("type") == LST_OFF
     if led_off:
-        effect = FX_RAINBOW
-        color = (0, 0, 0)  # ignored by rainbow
-        name = "led-music-rainbow"
+        effect = FX_SPEAKING_WAVE_RAINBOW
+        color = (0, 0, 0)  # ignored; each segment computes its own hue
+        name = "led-music-speaking_wave_rainbow"
     else:
         effect = FX_SPEAKING_WAVE
         color = _get_current_led_color()
