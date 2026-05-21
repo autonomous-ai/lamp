@@ -13,7 +13,6 @@ from core.enums import (
     PoseEstimator2DEnum,
     SpeechEmotionRecognizerEnum,
 )
-from core.enums.object import ObjectDetectorEnum
 from core.enums.pose import ErgoAssessorEnum, PoseLifter3DEnum
 
 

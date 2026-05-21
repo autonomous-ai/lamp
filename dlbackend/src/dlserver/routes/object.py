@@ -12,9 +12,9 @@ from pydantic import TypeAdapter, ValidationError
 
 from dlserver.models.object import (
     ObjectConfigRequest,
+    ObjectDetectionItemResponse,
     ObjectDetectRequest,
     ObjectDetectResponse,
-    ObjectDetectionItemResponse,
     ObjectFrameRequest,
     ObjectHeartBeatRequest,
     ObjectRequest,
@@ -130,9 +130,4 @@ async def object_detect_compat(detector_name: str, req: ObjectDetectRequest):
 async def list_object_models():
     """List all loaded object detectors."""
     models = get_object_models()
-    return {
-        "models": [
-            {"name": name, "ready": model.is_ready()}
-            for name, model in models.items()
-        ]
-    }
+    return {"models": [{"name": name, "ready": model.is_ready()} for name, model in models.items()]}
