@@ -47,6 +47,7 @@ import (
 	_healthHttpDeliver "go-lamp.autonomous.ai/server/health/delivery/http"
 	_networkHttpDeliver "go-lamp.autonomous.ai/server/network/delivery/http"
 	_agentHttpDeliver "go-lamp.autonomous.ai/server/agent/delivery/http"
+	_buddyHttpDeliver "go-lamp.autonomous.ai/server/buddy/delivery/http"
 	_sensingHttpDeliver "go-lamp.autonomous.ai/server/sensing/delivery/http"
 	"go-lamp.autonomous.ai/server/serializers"
 	"go-lamp.autonomous.ai/server/session"
@@ -65,6 +66,7 @@ type Server struct {
 	deviceGPIOHandler _deviceGPIODeliver.DeviceGPIOHandler
 	agentHandler   _agentHttpDeliver.AgentHandler
 	sensingHandler    _sensingHttpDeliver.SensingHandler
+	buddyHandler      _buddyHttpDeliver.BuddyHandler
 
 	agentGateway   domain.AgentGateway
 	networkService *network.Service
@@ -120,6 +122,7 @@ func ProvideServer(
 	dgph _deviceGPIODeliver.DeviceGPIOHandler,
 	agentH _agentHttpDeliver.AgentHandler,
 	sensingH _sensingHttpDeliver.SensingHandler,
+	buddyH _buddyHttpDeliver.BuddyHandler,
 	ds *device.Service,
 	agentGW domain.AgentGateway,
 	ns *network.Service,
@@ -138,6 +141,7 @@ func ProvideServer(
 		deviceGPIOHandler: dgph,
 		agentHandler:   agentH,
 		sensingHandler:    sensingH,
+		buddyHandler:      buddyH,
 		agentGateway:      agentGW,
 		networkService:    ns,
 		deviceService:     ds,
@@ -594,6 +598,19 @@ func (s *Server) Serve(closeFn func()) error {
 
 	monitor := api.Group("monitor")
 	monitor.POST("event", sameOriginOrLAN(), s.sensingHandler.PostMonitorEvent)
+
+	// Lumi Buddy (macOS companion app for remote computer use):
+	//   - /pair/start, /status, /command, DELETE admin-gated
+	//   - /pair/confirm anonymous (code-based)
+	//   - /ws bearer-token gated (validated in handler against buddies.json)
+	//   - /command localhost-only (OpenClaw skill is the caller)
+	buddy := api.Group("buddy")
+	buddy.POST("pair/start", adminAuthMiddleware(s.config), s.buddyHandler.PairStart)
+	buddy.POST("pair/confirm", s.buddyHandler.PairConfirm)
+	buddy.GET("status", adminAuthMiddleware(s.config), s.buddyHandler.Status)
+	buddy.DELETE("", adminAuthMiddleware(s.config), s.buddyHandler.Revoke)
+	buddy.GET("ws", s.buddyHandler.WS)
+	buddy.POST("command", localOnlyMiddleware(), s.buddyHandler.Command)
 
 	agent := api.Group("agent")
 	// Everything under /api/openclaw/ is admin-gated: status carries device
