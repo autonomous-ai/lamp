@@ -21,6 +21,7 @@ This repo is developed in both **Cursor** and **Claude Code**. The following rul
    | Sensing behavior, sound escalation, reactions | `docs/sensing-behavior.md` | `docs/vi/sensing-behavior_vi.md` |
    | Sensing threshold tuning (LeLamp config) | `docs/sensing-tuning.md` | `docs/vi/sensing-tuning_vi.md` (SER section) |
    | Speech emotion recognition (SER) | `docs/speech-emotion.md` | `docs/vi/speech-emotion_vi.md` |
+   | Voice brain (Gemini Live chit-chat / task router) | `docs/voice-brain.md` | `docs/vi/voice-brain_vi.md` |
    | Habit tracking, pattern building, habit-aware nudge phrasing | `docs/habit-tracking.md` | `docs/vi/habit-tracking_vi.md` |
    | Vision tracking, object follow, servo track | `docs/vision-tracking.md` | `docs/vi/vision-tracking_vi.md` |
    | Physical controls (GPIO button, TTP223 touchpad, gestures, pet response) | `docs/physical-controls.md` | `docs/vi/physical-controls_vi.md` |

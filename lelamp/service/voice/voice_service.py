@@ -263,6 +263,62 @@ class VoiceService:
         else:
             logger.info("Silero VAD disabled via LELAMP_SILERO_ENABLED=false")
 
+        # Optional brain mode — opt-in via LELAMP_BRAIN=gemini_live. When
+        # enabled, every mic frame goes straight to Gemini Live which owns
+        # VAD, turn detection, classification, and reply. The classic STT
+        # pipeline is bypassed entirely; we don't pretend to be an STT
+        # provider. Any init failure falls back to classic STT.
+        #
+        #   LELAMP_BRAIN_TTS = native (default) | fallback
+        #     native   → brain plays its own Gemini voice directly.
+        #     fallback → brain emits text via output_audio_transcription,
+        #                we hand it to TTSService so the user keeps the
+        #                same ElevenLabs/OpenAI voice as task replies.
+        self._brain = None            # GeminiLiveBrain instance, or None
+        self._brain_sink = None       # PCMAudioSink for native audio out
+        self._brain_tts_mode = "native"
+        brain_kind = os.environ.get("LELAMP_BRAIN", "classic").strip().lower()
+        if brain_kind == "gemini_live":
+            tts_mode = os.environ.get("LELAMP_BRAIN_TTS", "native").strip().lower()
+            if tts_mode not in ("native", "fallback"):
+                logger.warning("unknown LELAMP_BRAIN_TTS=%r — using 'native'", tts_mode)
+                tts_mode = "native"
+            try:
+                from lelamp.service.brain.audio_sink import PCMAudioSink
+                from lelamp.service.brain.gemini_live import GeminiLiveBrain
+
+                brain = GeminiLiveBrain(tts_output_mode=tts_mode)
+                if not brain.available:
+                    logger.warning(
+                        "LELAMP_BRAIN=gemini_live but brain unavailable — "
+                        "keeping classic STT %s", self._stt.name,
+                    )
+                else:
+                    sink = PCMAudioSink()
+                    if not sink.start():
+                        logger.warning(
+                            "brain sink failed to open — keeping classic STT %s",
+                            self._stt.name,
+                        )
+                    else:
+                        if tts_mode == "fallback" and self._tts is None:
+                            logger.warning(
+                                "LELAMP_BRAIN_TTS=fallback but no TTSService "
+                                "wired — replies will be lost. Forcing native.",
+                            )
+                            tts_mode = "native"
+                        self._brain = brain
+                        self._brain_sink = sink
+                        self._brain_tts_mode = tts_mode
+                        logger.info(
+                            "VoiceService brain mode active (gemini_live, tts=%s)",
+                            tts_mode,
+                        )
+            except Exception as e:
+                logger.warning("Brain init failed, keeping STT %s: %s", self._stt.name, e)
+        elif brain_kind != "classic":
+            logger.warning("Unknown LELAMP_BRAIN=%r — using classic STT", brain_kind)
+
     def set_music_service(self, music_service) -> None:
         self._music = music_service
 
@@ -305,6 +361,9 @@ class VoiceService:
         if self._thread:
             self._thread.join(timeout=5)
             self._thread = None
+        if self._brain_sink is not None:
+            self._brain_sink.stop()
+            self._brain_sink = None
         logger.info("VoiceService stopped")
 
     def _get_alsa_device_str(self) -> Optional[str]:
@@ -471,9 +530,23 @@ class VoiceService:
             logger.warning("Silero VAD inference error: %s", e)
             return True  # fail open — don't block speech
 
+    def _brain_is_speaking(self) -> bool:
+        """True while the Gemini Live brain is streaming chit-chat audio.
+        Used by the mic gate the same way _tts_is_speaking is — keeps the
+        mic from re-capturing the brain's own voice."""
+        return self._brain_sink is not None and self._brain_sink.speaking
+
     def _tts_is_speaking(self) -> bool:
-        """Check if TTS is currently using the audio device."""
-        return self._tts is not None and self._tts.speaking
+        """Check if any of our own voices is using the audio device.
+
+        Covers both the classic TTS and the brain audio sink — both need
+        the same mic gate to prevent echo loopback. Kept under the legacy
+        name so all six existing call sites still mean ``self should hush
+        the mic now``.
+        """
+        if self._tts is not None and self._tts.speaking:
+            return True
+        return self._brain_is_speaking()
 
     def _music_is_playing(self) -> bool:
         """Check if music is currently playing."""
@@ -728,8 +801,18 @@ class VoiceService:
             time.sleep(1.0)
 
     def _loop(self):
-        """Main loop: local VAD → STT on speech → disconnect on silence."""
+        """Main loop: local VAD → STT on speech → disconnect on silence.
+
+        When the brain is enabled (LELAMP_BRAIN=gemini_live) we fork to
+        a continuous loop instead — Gemini Live handles VAD server-side,
+        so we keep one session open and stream every mic frame regardless
+        of RMS / silence boundaries.
+        """
         time.sleep(0.5)  # Brief pause for audio subsystem to settle
+
+        if self._brain is not None:
+            self._continuous_brain_loop()
+            return
 
         # Use arecord only when explicitly configured via LELAMP_AUDIO_INPUT_ALSA.
         # Auto-detection is disabled because arecord uses exclusive ALSA access,
@@ -786,6 +869,222 @@ class VoiceService:
                 logger.warning("Voice loop error: %s", e)
                 if self._running:
                     time.sleep(3)
+
+    def _continuous_brain_loop(self):
+        """Brain-only loop — mic frames go straight to Gemini Live.
+
+        One BrainSession stays open and receives every mic frame as long
+        as the loop runs. Gemini Live owns VAD, turn detection,
+        classification, and reply generation. When the session ends
+        (delegate fires, Gemini disconnects, or the user calls stop) we
+        open a fresh one and continue.
+
+        Echo gate: while TTSService / brain sink / music is producing
+        audio we drain the mic but drop the frame (Layer 1). After the
+        speaker stops we keep dropping until the measured RMS falls
+        below ECHO_RMS_FLOOR (Layer 2) so room reverb doesn't loop back
+        into Gemini as a fake user turn.
+
+        Speaker recognition and SER are intentionally not run here —
+        they need per-utterance audio buffers that this loop doesn't
+        keep.
+        """
+        if self._alsa_device is not None:
+            device_rate = STT_RATE
+            logger.info("Brain loop: arecord backend (%s) at %dHz",
+                        self._alsa_device, device_rate)
+        else:
+            if self._device_rate is None:
+                self._device_rate = self._detect_device_rate()
+            device_rate = self._device_rate
+            logger.info("Brain loop: sounddevice backend (device=%s) at %dHz",
+                        self._input_device, device_rate)
+
+        frame_size = int(device_rate * FRAME_DURATION_MS / 1000)
+        self._device_rate = device_rate
+
+        try:
+            if self._alsa_device is not None:
+                mic_ctx = _ArecordStream(
+                    alsa_device=self._alsa_device, rate=device_rate,
+                    channels=CHANNELS, blocksize=frame_size, np=self._np,
+                )
+            else:
+                mic_ctx = self._sd.InputStream(
+                    samplerate=device_rate, channels=CHANNELS, dtype="int16",
+                    blocksize=frame_size, device=self._input_device,
+                )
+        except Exception as e:
+            logger.warning("Brain loop: could not open mic: %s", e)
+            return
+
+        # Rolling audio buffer + per-turn transcript chunks so each Flow
+        # Monitor event can be tagged with the identified speaker. Keep
+        # roughly the last 30 s of mic audio — long enough for the
+        # speaker recognizer to embed a stable voiceprint, short enough
+        # to fit comfortably in memory.
+        AUDIO_BUF_MAX = max(1, int(30_000 / FRAME_DURATION_MS))
+        audio_buf: deque = deque(maxlen=AUDIO_BUF_MAX)
+        user_text_chunks: list[str] = []   # Gemini's transcription of user mic
+        reply_chunks: list[str] = []       # Gemini's transcription of its own reply
+        last_speaker = ["unknown"]         # mutable cell so callbacks can update
+
+        def _post_monitor(event_type: str, summary: str) -> None:
+            """Best-effort POST to Lumi's monitor bus so the Flow Monitor
+            UI shows which branch the brain took. Never blocks the loop
+            on failure."""
+            try:
+                requests.post(
+                    "http://127.0.0.1:5000/api/monitor/event",
+                    json={"type": event_type, "summary": summary},
+                    timeout=0.3,
+                )
+            except Exception:
+                pass
+
+        def _identify_speaker() -> str:
+            """Run the existing SpeakerRecognizer on the rolling audio
+            buffer to tag who's speaking. Returns ``"unknown"`` on any
+            failure or when recognition is disabled — never raises."""
+            if self._speaker is None or not audio_buf:
+                return "unknown"
+            try:
+                _, name = self._identify_and_decorate("", list(audio_buf))
+                return name or "unknown"
+            except Exception as e:
+                logger.warning("Brain speaker ID failed: %s", e)
+                return "unknown"
+
+        def on_delegate(transcript: str) -> None:
+            transcript = transcript.strip()
+            if not transcript:
+                return
+            last_speaker[0] = _identify_speaker()
+            tag = last_speaker[0]
+            logger.info("brain.input  [%s] %r", tag, transcript)
+            logger.info("brain.delegate [%s] → Lumi", tag)
+            _post_monitor("brain_input", f"[{tag}] said: {transcript}")
+            _post_monitor("brain_delegate", f"[{tag}] → Lumi")
+            # Forward to OpenClaw with the speaker prefix it expects from
+            # the classic flow ("Speaker - <name>: <text>") so downstream
+            # logic that keys off the user label keeps working.
+            if tag and tag != "unknown":
+                outbound = f"Speaker - {tag.capitalize()}: {transcript}"
+            else:
+                outbound = transcript
+            self._send_to_lumi(outbound, event_type="voice")
+            audio_buf.clear()
+            user_text_chunks.clear()
+
+        def on_audio_chunk(pcm: bytes) -> None:
+            # Native mode only — fallback never emits audio chunks.
+            if self._brain_sink is not None:
+                self._brain_sink.push(pcm)
+
+        def on_text(text: str, is_final: bool) -> None:
+            if text:
+                reply_chunks.append(text)
+            if not is_final:
+                return
+            reply = "".join(reply_chunks).strip()
+            reply_chunks.clear()
+            if not reply:
+                return
+            last_speaker[0] = _identify_speaker()
+            tag = last_speaker[0]
+            user_text = "".join(user_text_chunks).strip()
+            user_text_chunks.clear()
+            if user_text:
+                logger.info("brain.input  [%s] %r", tag, user_text)
+                _post_monitor("brain_input", f"[{tag}] said: {user_text}")
+            logger.info("brain.chitchat [%s] %r", tag, reply)
+            _post_monitor("brain_chitchat", f"[{tag}] Lumi reply: {reply}")
+            if self._brain_tts_mode == "fallback" and self._tts is not None:
+                try:
+                    if hasattr(self._tts, "speak_queue"):
+                        self._tts.speak_queue(reply)
+                    else:
+                        self._tts.speak(reply)
+                except Exception as e:
+                    logger.warning("Brain fallback speak failed: %s", e)
+            audio_buf.clear()
+
+        def on_user_input(text: str, is_final: bool) -> None:
+            # Incremental transcription of the user's mic. Accumulate so
+            # on_delegate / on_text can include the user text in their
+            # monitor events. is_final fires at turn_complete; in the
+            # task path it might not arrive before session close, so the
+            # delegate handler also flushes from this buffer.
+            if text:
+                user_text_chunks.append(text)
+
+        def on_error(err: Exception) -> None:
+            logger.warning("Brain session error: %s", err)
+
+        with mic_ctx as mic:
+            while self._running:
+                session = self._brain.create_session()
+                if not session.start(
+                    on_delegate, on_audio_chunk,
+                    on_text=on_text, on_user_input=on_user_input,
+                    on_error=on_error,
+                ):
+                    logger.warning("Brain loop: session.start failed, retrying in 2s")
+                    time.sleep(2)
+                    continue
+
+                self._listening = True
+                logger.info("Brain loop: session open — streaming continuously")
+                # Reverb-decay gate state (mirrors classic _wait_for_tts):
+                # once speaker output stops, keep dropping mic frames
+                # until the measured RMS falls below ECHO_RMS_FLOOR.
+                reverb_until = 0.0  # epoch time we may resume sending; 0 = no gate
+                try:
+                    while self._running and not session.is_closed():
+                        # Always drain the mic — if we skipped read() while
+                        # gated, arecord would buffer our own reply tail
+                        # and we'd ship that to Gemini the moment the gate
+                        # opens, kicking off an echo loop.
+                        data, overflowed = mic.read(frame_size)
+                        if overflowed:
+                            continue
+
+                        # Layer 1 — speaker is actively producing audio.
+                        if self._tts_is_speaking() or self._music_is_playing():
+                            reverb_until = time.time() + ECHO_GATE_MAX_WAIT_S
+                            continue
+
+                        # Layer 2 — wait for reverb to decay.
+                        if reverb_until:
+                            now = time.time()
+                            if now >= reverb_until:
+                                logger.info("Brain loop: reverb gate timeout — resuming send")
+                                reverb_until = 0.0
+                            else:
+                                rms = self._rms(data)
+                                if rms < ECHO_RMS_FLOOR:
+                                    logger.info(
+                                        "Brain loop: reverb decayed (RMS=%.0f < %d) — resuming send",
+                                        rms, ECHO_RMS_FLOOR,
+                                    )
+                                    reverb_until = 0.0
+                                else:
+                                    continue
+
+                        try:
+                            resampled = self._resample_to_stt(data, device_rate)
+                            audio_buf.append(resampled)
+                            session.send_audio(resampled)
+                        except Exception as e:
+                            logger.warning("Brain send_audio failed: %s", e)
+                            break
+                finally:
+                    self._listening = False
+                    session.close()
+                    reply_chunks.clear()
+                    user_text_chunks.clear()
+                if self._running:
+                    time.sleep(0.1)  # tiny breather before reconnecting
 
     def _vad_loop(self, mic, frame_size: int, device_rate: int):
         """Monitor mic with local VAD, connect STT when speech detected.
