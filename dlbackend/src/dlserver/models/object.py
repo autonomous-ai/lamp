@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict, Discriminator, Tag
 from core.models.object import ObjectDetection
 from core.types import Omit, omit
 
-
 # --- WebSocket messages ---
 
 

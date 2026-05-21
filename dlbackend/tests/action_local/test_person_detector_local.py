@@ -26,7 +26,7 @@ TEST_API_KEY = "test-secret-key"
 os.environ["DL_API_KEY"] = TEST_API_KEY
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
-PERSON_DRINKING_IMG = FIXTURES_DIR / "person_drinking.jpg"
+PERSON_DRINKING_IMG = FIXTURES_DIR / "images" / "person_drinking.jpg"
 X3D_MODEL_PATH = Path.cwd() / "local" / "x3d_m_16x5x1_int8.onnx"
 
 pytestmark = pytest.mark.skipif(
