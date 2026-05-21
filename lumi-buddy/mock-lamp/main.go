@@ -21,6 +21,7 @@ func main() {
 	mux.HandleFunc("POST /api/buddy/pair/start", state.HandlePairStart)
 	mux.HandleFunc("POST /api/buddy/pair/confirm", state.HandlePairConfirm)
 	mux.HandleFunc("GET /api/buddy/ws", state.HandleWS)
+	mux.HandleFunc("POST /api/buddy/command", state.HandleCommand)
 
 	srv := &http.Server{
 		Addr:              listenAddr,

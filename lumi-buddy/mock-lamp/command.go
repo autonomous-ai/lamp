@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -65,6 +66,146 @@ func parseREPL(line string) (Command, bool) {
 			"title": fallback(rest, "Lumi"),
 			"body":  "Test from mock-lamp",
 		}), true
+
+	// --- Vision / mouse / clipboard / accessibility ---
+
+	case "screenshot":
+		// usage: screenshot [scale]   e.g. "screenshot 0.5"
+		params := map[string]any{}
+		if rest != "" {
+			if s, err := strconv.ParseFloat(rest, 64); err == nil {
+				params["scale"] = s
+			}
+		}
+		return newCommand("screenshot", params), true
+
+	case "click_at", "click":
+		// usage: click_at <x> <y> [button] [clicks]
+		toks := strings.Fields(rest)
+		if len(toks) < 2 {
+			return Command{}, false
+		}
+		x, errX := strconv.Atoi(toks[0])
+		y, errY := strconv.Atoi(toks[1])
+		if errX != nil || errY != nil {
+			return Command{}, false
+		}
+		params := map[string]any{"x": x, "y": y}
+		if len(toks) >= 3 {
+			params["button"] = toks[2]
+		}
+		if len(toks) >= 4 {
+			if c, err := strconv.Atoi(toks[3]); err == nil {
+				params["clicks"] = c
+			}
+		}
+		return newCommand("click_at", params), true
+
+	case "double_click":
+		toks := strings.Fields(rest)
+		if len(toks) < 2 {
+			return Command{}, false
+		}
+		x, errX := strconv.Atoi(toks[0])
+		y, errY := strconv.Atoi(toks[1])
+		if errX != nil || errY != nil {
+			return Command{}, false
+		}
+		return newCommand("click_at", map[string]any{"x": x, "y": y, "clicks": 2}), true
+
+	case "right_click":
+		toks := strings.Fields(rest)
+		if len(toks) < 2 {
+			return Command{}, false
+		}
+		x, errX := strconv.Atoi(toks[0])
+		y, errY := strconv.Atoi(toks[1])
+		if errX != nil || errY != nil {
+			return Command{}, false
+		}
+		return newCommand("click_at", map[string]any{"x": x, "y": y, "button": "right"}), true
+
+	case "scroll":
+		// usage: scroll <delta_y> [delta_x]    e.g. "scroll -300" (down 300px)
+		toks := strings.Fields(rest)
+		if len(toks) == 0 {
+			return Command{}, false
+		}
+		dy, err := strconv.Atoi(toks[0])
+		if err != nil {
+			return Command{}, false
+		}
+		params := map[string]any{"delta_y": dy}
+		if len(toks) >= 2 {
+			if dx, err := strconv.Atoi(toks[1]); err == nil {
+				params["delta_x"] = dx
+			}
+		}
+		return newCommand("scroll", params), true
+
+	case "mouse_move", "move":
+		// usage: mouse_move <x> <y> [smooth]
+		toks := strings.Fields(rest)
+		if len(toks) < 2 {
+			return Command{}, false
+		}
+		x, errX := strconv.Atoi(toks[0])
+		y, errY := strconv.Atoi(toks[1])
+		if errX != nil || errY != nil {
+			return Command{}, false
+		}
+		params := map[string]any{"x": x, "y": y}
+		if len(toks) >= 3 && (toks[2] == "smooth" || toks[2] == "true") {
+			params["smooth"] = true
+		}
+		return newCommand("mouse_move", params), true
+
+	case "drag":
+		// usage: drag <x1> <y1> <x2> <y2> [duration_ms]
+		toks := strings.Fields(rest)
+		if len(toks) < 4 {
+			return Command{}, false
+		}
+		x1, _ := strconv.Atoi(toks[0])
+		y1, _ := strconv.Atoi(toks[1])
+		x2, _ := strconv.Atoi(toks[2])
+		y2, _ := strconv.Atoi(toks[3])
+		params := map[string]any{
+			"from": map[string]any{"x": x1, "y": y1},
+			"to":   map[string]any{"x": x2, "y": y2},
+		}
+		if len(toks) >= 5 {
+			if d, err := strconv.Atoi(toks[4]); err == nil {
+				params["duration_ms"] = d
+			}
+		}
+		return newCommand("drag", params), true
+
+	case "read_clipboard", "paste_read":
+		return newCommand("read_clipboard", map[string]any{}), true
+
+	case "write_clipboard", "copy_write":
+		return newCommand("write_clipboard", map[string]any{"text": fallback(rest, "hello clipboard")}), true
+
+	case "click_button":
+		// usage: click_button <label> [app=X]
+		// e.g. "click_button Admit"  or  "click_button Submit app=Safari"
+		if rest == "" {
+			return Command{}, false
+		}
+		// Split off optional app=... at the end
+		var label, appName string
+		if idx := strings.Index(rest, " app="); idx >= 0 {
+			label = strings.TrimSpace(rest[:idx])
+			appName = strings.TrimSpace(rest[idx+5:])
+		} else {
+			label = rest
+		}
+		params := map[string]any{"label": label}
+		if appName != "" {
+			params["app"] = appName
+		}
+		return newCommand("click_button", params), true
 	}
 	return Command{}, false
 }
