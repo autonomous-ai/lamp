@@ -13,6 +13,14 @@ final class CommandDispatcher {
         register(KeyComboExecutor())
         register(NotificationExecutor())
         register(PingExecutor())
+        register(ScreenshotExecutor())
+        register(ClickAtExecutor())
+        register(ScrollExecutor())
+        register(MouseMoveExecutor())
+        register(DragExecutor())
+        register(ReadClipboardExecutor())
+        register(WriteClipboardExecutor())
+        register(ClickButtonExecutor())
     }
 
     private func register(_ executor: Executor) {

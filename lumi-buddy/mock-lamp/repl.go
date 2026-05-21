@@ -10,18 +10,40 @@ import (
 )
 
 const helpText = `
-mock-lamp REPL — type a command to send it to the paired buddy:
-  ping                       quickest sanity check (no permission needed)
-  notification <title>       e.g. notification meeting in 5    (needs noti permission)
-  open_url <url>             e.g. open_url https://news.ycombinator.com
-  open_app <name>            e.g. open_app Calculator          (or bundle id)
-  close_app <name>           e.g. close_app Calculator
-  type_text <text>           e.g. type_text hello world        (needs Accessibility)
-  key_combo <keys>           e.g. key_combo cmd space          (needs Accessibility)
-  code                       re-issue a new pairing code
-  status                     show pairing / connection state
-  help | ?                   this list
-  quit                       exit
+mock-lamp REPL — type a command to send it to the paired buddy.
+
+Intent-based (no vision needed):
+  ping                              sanity check
+  notification <title>              e.g. notification meeting in 5
+  open_url <url>                    e.g. open_url https://news.ycombinator.com
+  open_app <name>                   e.g. open_app Calculator
+  close_app <name>                  e.g. close_app Calculator
+  type_text <text>                  needs Accessibility
+  key_combo <keys>                  e.g. key_combo cmd space (Accessibility)
+
+Vision / click / mouse:
+  screenshot [scale]                e.g. "screenshot 0.5" — saves to ~/Library/Application Support/LumiBuddy/screenshots/latest.png
+  click_at <x> <y> [button] [n]     e.g. "click_at 540 320" or "click_at 540 320 right"
+  click <x> <y>                     alias for click_at left
+  double_click <x> <y>              two clicks at coord
+  right_click <x> <y>               right-click at coord
+  scroll <dy> [dx]                  e.g. "scroll -300" (down)
+  mouse_move <x> <y> [smooth]       e.g. "mouse_move 100 100 smooth"
+  drag <x1> <y1> <x2> <y2> [ms]     e.g. "drag 100 200 400 200 500"
+
+Clipboard:
+  read_clipboard                    returns current clipboard text
+  write_clipboard <text>            e.g. write_clipboard hello
+
+Accessibility (find element by label, click it — best for native apps):
+  click_button <label> [app=X]      e.g. click_button Submit
+                                    e.g. click_button Admit app="Google Chrome"
+
+Session:
+  code                              re-issue a new pairing code
+  status                            show pairing / connection state
+  help | ?                          this list
+  quit                              exit
 `
 
 func RunREPL(ctx context.Context, state *State) {
@@ -90,8 +112,27 @@ func printResponse(raw json.RawMessage) {
 	okVal, _ := pretty["ok"].(bool)
 	duration := pretty["duration_ms"]
 	if okVal {
-		fmt.Printf("  ✓ %v  (%vms)\n\n", pretty["result"], duration)
+		result := truncateLarge(pretty["result"])
+		fmt.Printf("  ✓ %v  (%vms)\n\n", result, duration)
 	} else {
 		fmt.Printf("  ✗ %v  (%vms)\n\n", pretty["error"], duration)
 	}
+}
+
+// truncateLarge prevents the REPL from dumping huge base64 strings (e.g. screenshot image_b64)
+// to the terminal. Keys with values >200 chars are shown as "<N chars>".
+func truncateLarge(v any) any {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return v
+	}
+	out := make(map[string]any, len(m))
+	for k, val := range m {
+		if s, ok := val.(string); ok && len(s) > 200 {
+			out[k] = fmt.Sprintf("<%d chars>", len(s))
+		} else {
+			out[k] = val
+		}
+	}
+	return out
 }
