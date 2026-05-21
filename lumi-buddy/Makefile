@@ -42,7 +42,7 @@ release: ## Build release binary at macos/.build/release/LumiBuddy
 check: ## Compile-only check (no link)
 	cd $(MACOS_DIR) && swift build --build-tests
 
-app: release ## Bundle into dist/LumiBuddy.app (unsigned)
+app: release ## Bundle into dist/LumiBuddy.app (ad-hoc signed with bundle ID)
 	@echo "==> Bundling $(APP_BUNDLE)"
 	@rm -rf "$(APP_BUNDLE)"
 	@mkdir -p "$(APP_BUNDLE)/Contents/MacOS"
@@ -50,6 +50,8 @@ app: release ## Bundle into dist/LumiBuddy.app (unsigned)
 	@cp "$(RELEASE_BIN)" "$(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)"
 	@cp "$(INFO_PLIST)" "$(APP_BUNDLE)/Contents/Info.plist"
 	@chmod +x "$(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)"
+	@codesign --force --sign - --identifier "$(BUNDLE_ID)" \
+		"$(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)" 2>&1 | sed 's/^/    /'
 	@echo "==> Done: $(APP_BUNDLE)"
 	@echo "    First launch: right-click → Open (Gatekeeper blocks unsigned apps)."
 

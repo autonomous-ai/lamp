@@ -73,6 +73,51 @@ func (s *State) HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// HandleCommand accepts a command over HTTP and forwards it to the connected buddy.
+// Mirrors what lumi production will expose at /api/buddy/command (with admin auth added).
+// Used by the mock REPL AND by external "brain" callers (curl, OpenClaw skill, etc.).
+func (s *State) HandleCommand(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID        string         `json:"id"`
+		Action    string         `json:"action"`
+		Params    map[string]any `json:"params"`
+		TimeoutMs int            `json:"timeout_ms"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json: " + err.Error()})
+		return
+	}
+	if strings.TrimSpace(req.Action) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing action"})
+		return
+	}
+	if req.Params == nil {
+		req.Params = map[string]any{}
+	}
+	cmd := newCommand(req.Action, req.Params)
+	if req.ID != "" {
+		cmd.ID = req.ID
+	}
+	if req.TimeoutMs > 0 {
+		cmd.TimeoutMs = req.TimeoutMs
+	}
+
+	timeout := 30 * time.Second
+	if req.TimeoutMs > 0 {
+		timeout = time.Duration(req.TimeoutMs)*time.Millisecond + 5*time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+
+	raw, err := s.Dispatch(ctx, cmd)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(raw)
+}
+
 // Dispatch sends a command to the buddy over the open WS and waits for the response with the
 // matching ID. Caller decides the overall timeout via ctx.
 func (s *State) Dispatch(ctx context.Context, cmd Command) (json.RawMessage, error) {

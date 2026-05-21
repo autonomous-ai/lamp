@@ -166,6 +166,25 @@ struct DragExecutor: Executor {
     }
 }
 
+struct CursorPosExecutor: Executor {
+    let action = "cursor_pos"
+
+    func execute(params: [String: Any]) async throws -> [String: Any] {
+        // NSEvent.mouseLocation: origin bottom-left of menu-bar screen, in POINTS.
+        // CGEvent coords: origin top-left, in POINTS. Same x, flipped y.
+        let pt = NSEvent.mouseLocation
+        let screenH = NSScreen.main?.frame.height ?? 0
+        let scale = NSScreen.main?.backingScaleFactor ?? 1.0
+        let cgY = screenH - pt.y
+        return [
+            "x": Int(pt.x.rounded()),
+            "y": Int(cgY.rounded()),
+            "screen_height": Int(screenH),
+            "backing_scale": Double(scale),
+        ]
+    }
+}
+
 // MARK: - helpers
 
 private func requireCGFloat(_ params: [String: Any], key: String) throws -> CGFloat {

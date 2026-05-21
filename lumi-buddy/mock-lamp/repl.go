@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const helpText = `
@@ -38,6 +40,12 @@ Clipboard:
 Accessibility (find element by label, click it — best for native apps):
   click_button <label> [app=X]      e.g. click_button Submit
                                     e.g. click_button Admit app="Google Chrome"
+
+Coord helpers (no need to eyeball pixel coords):
+  where                             one-shot — print current cursor (x,y)
+  pick [seconds]                    countdown N seconds then capture cursor pos
+  pick_click [seconds]              countdown then click at captured pos
+                                    (alias: click_here)
 
 Session:
   code                              re-issue a new pairing code
@@ -71,6 +79,19 @@ func RunREPL(ctx context.Context, state *State) {
 		case "status":
 			printStatus(state)
 			continue
+		case "where":
+			handleWhere(ctx, state)
+			continue
+		}
+		if strings.HasPrefix(line, "pick_click") || strings.HasPrefix(line, "click_here") {
+			rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(line, "click_here"), "pick_click"))
+			handlePick(ctx, state, rest, true)
+			continue
+		}
+		if strings.HasPrefix(line, "pick") {
+			rest := strings.TrimSpace(strings.TrimPrefix(line, "pick"))
+			handlePick(ctx, state, rest, false)
+			continue
 		}
 
 		cmd, ok := parseREPL(line)
@@ -85,6 +106,78 @@ func RunREPL(ctx context.Context, state *State) {
 		}
 		printResponse(resp)
 	}
+}
+
+func handleWhere(ctx context.Context, state *State) {
+	cmd := newCommand("cursor_pos", map[string]any{})
+	resp, err := state.Dispatch(ctx, cmd)
+	if err != nil {
+		fmt.Printf("  ✗ %v\n\n", err)
+		return
+	}
+	x, y, ok := extractXY(resp)
+	if !ok {
+		printResponse(resp)
+		return
+	}
+	fmt.Printf("  cursor at: (%d, %d)\n  → click_at %d %d\n\n", x, y, x, y)
+}
+
+func handlePick(ctx context.Context, state *State, rest string, alsoClick bool) {
+	seconds := 3
+	if rest != "" {
+		if n, err := strconv.Atoi(rest); err == nil && n > 0 && n <= 30 {
+			seconds = n
+		}
+	}
+	fmt.Printf("  Move cursor to target. Capturing in %ds...\n", seconds)
+	for i := seconds; i > 0; i-- {
+		fmt.Printf("  %d...\n", i)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
+	}
+
+	resp, err := state.Dispatch(ctx, newCommand("cursor_pos", map[string]any{}))
+	if err != nil {
+		fmt.Printf("  ✗ %v\n\n", err)
+		return
+	}
+	x, y, ok := extractXY(resp)
+	if !ok {
+		printResponse(resp)
+		return
+	}
+	fmt.Printf("  cursor at: (%d, %d)\n", x, y)
+
+	if !alsoClick {
+		fmt.Println()
+		return
+	}
+	clickResp, err := state.Dispatch(ctx, newCommand("click_at", map[string]any{
+		"x": x, "y": y,
+	}))
+	if err != nil {
+		fmt.Printf("  ✗ click: %v\n\n", err)
+		return
+	}
+	printResponse(clickResp)
+}
+
+func extractXY(raw json.RawMessage) (int, int, bool) {
+	var parsed struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			X int `json:"x"`
+			Y int `json:"y"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || !parsed.OK {
+		return 0, 0, false
+	}
+	return parsed.Result.X, parsed.Result.Y, true
 }
 
 func printStatus(state *State) {

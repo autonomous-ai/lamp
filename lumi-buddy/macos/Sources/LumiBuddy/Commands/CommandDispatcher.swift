@@ -21,6 +21,8 @@ final class CommandDispatcher {
         register(ReadClipboardExecutor())
         register(WriteClipboardExecutor())
         register(ClickButtonExecutor())
+        register(CursorPosExecutor())
+        register(ListDisplaysExecutor())
     }
 
     private func register(_ executor: Executor) {
