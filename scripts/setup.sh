@@ -721,6 +721,19 @@ server {
     proxy_send_timeout 86400s;
   }
 
+  # Lumi Buddy (macOS companion) persistent WebSocket. Same Upgrade + long-
+  # timeout requirements as /api/system/shell. Must come BEFORE the generic
+  # /api/ block so the exact match wins.
+  location = /api/buddy/ws {
+    proxy_pass http://backend;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host \$host;
+    proxy_read_timeout 86400s;
+    proxy_send_timeout 86400s;
+  }
+
   # Remote code execution endpoint — local callers only (OpenClaw agent on Pi).
   # Must come BEFORE the generic /api/ block so the exact match wins.
   location = /api/system/exec {
