@@ -135,18 +135,59 @@ final class MenuBarController: NSObject {
         pause.target = self
         menu.addItem(pause)
 
-        if let record = AppState.shared.lastCommand {
-            let symbol = record.ok ? "✓" : "✗"
-            let line = "Last command: \(record.action) \(symbol)"
-            let last = NSMenuItem(title: line, action: nil, keyEquivalent: "")
-            last.isEnabled = false
-            menu.addItem(last)
-        }
+        addActivitySubmenu()
 
         menu.addItem(.separator())
         let unpair = NSMenuItem(title: "Revoke pairing…", action: #selector(unpairAction), keyEquivalent: "")
         unpair.target = self
         menu.addItem(unpair)
+    }
+
+    private static let activityTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f
+    }()
+
+    private func addActivitySubmenu() {
+        let recent = AppState.shared.recentCommands
+        let title: String
+        if recent.isEmpty {
+            title = "Recent activity (none)"
+        } else if let last = recent.first {
+            let symbol = last.ok ? "✓" : "✗"
+            title = "Recent activity (\(recent.count)) · last: \(last.action) \(symbol)"
+        } else {
+            title = "Recent activity"
+        }
+
+        let parent = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        let sub = NSMenu()
+
+        if recent.isEmpty {
+            let empty = NSMenuItem(title: "No commands yet", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            sub.addItem(empty)
+        } else {
+            for record in recent {
+                let symbol = record.ok ? "✓" : "✗"
+                let time = Self.activityTimeFormatter.string(from: record.timestamp)
+                let item = NSMenuItem(title: "\(symbol)  \(time)  \(record.action)", action: nil, keyEquivalent: "")
+                item.isEnabled = false
+                if let err = record.error, !err.isEmpty {
+                    item.toolTip = err
+                }
+                sub.addItem(item)
+            }
+        }
+
+        sub.addItem(.separator())
+        let openLog = NSMenuItem(title: "Show audit log in Finder…", action: #selector(showAuditLog), keyEquivalent: "")
+        openLog.target = self
+        sub.addItem(openLog)
+
+        parent.submenu = sub
+        menu.addItem(parent)
     }
 
     // MARK: - actions
@@ -178,6 +219,16 @@ final class MenuBarController: NSObject {
 
     @objc private func aboutAction() {
         onAbout()
+    }
+
+    @objc private func showAuditLog() {
+        let url = AuditLog.fileURL
+        // Ensure the file exists before revealing it (the actor only creates it
+        // lazily on first write — until then Finder would just open the parent dir).
+        if !FileManager.default.fileExists(atPath: url.path) {
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
     @objc private func quitAction() {

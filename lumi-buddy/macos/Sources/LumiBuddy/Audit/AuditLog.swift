@@ -3,12 +3,18 @@ import Foundation
 actor AuditLog {
     private let url: URL
 
-    init() {
+    // fileURL is the canonical on-disk audit log location, exposed so the menu
+    // bar's "Show audit log…" item can open it without instantiating an actor.
+    static var fileURL: URL {
         let fm = FileManager.default
         let dir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             .appendingPathComponent("LumiBuddy", isDirectory: true)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        self.url = dir.appendingPathComponent("audit.log")
+        return dir.appendingPathComponent("audit.log")
+    }
+
+    init() {
+        self.url = Self.fileURL
     }
 
     func append(action: String, ok: Bool, error: String?) {

@@ -55,7 +55,7 @@ final class CommandDispatcher {
         guard let executor = executors[cmd.action] else {
             let resp = CommandResponse(id: cmd.id, ok: false, result: nil, error: "unknown action: \(cmd.action)", durationMs: 0)
             await auditLog.append(action: cmd.action, ok: false, error: resp.error)
-            await recordOnMain(id: cmd.id, action: cmd.action, ok: false)
+            await recordOnMain(id: cmd.id, action: cmd.action, ok: false, error: resp.error)
             return (try? resp.encode()) ?? Data()
         }
 
@@ -71,7 +71,7 @@ final class CommandDispatcher {
             let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             let resp = CommandResponse(id: cmd.id, ok: false, result: nil, error: msg, durationMs: duration)
             await auditLog.append(action: cmd.action, ok: false, error: msg)
-            await recordOnMain(id: cmd.id, action: cmd.action, ok: false)
+            await recordOnMain(id: cmd.id, action: cmd.action, ok: false, error: msg)
             return (try? resp.encode()) ?? Data()
         }
     }
@@ -98,7 +98,7 @@ final class CommandDispatcher {
     }
 
     @MainActor
-    private func recordOnMain(id: String, action: String, ok: Bool) {
-        AppState.shared.recordCommand(CommandRecord(id: id, action: action, ok: ok, timestamp: Date()))
+    private func recordOnMain(id: String, action: String, ok: Bool, error: String? = nil) {
+        AppState.shared.recordCommand(CommandRecord(id: id, action: action, ok: ok, error: error, timestamp: Date()))
     }
 }
