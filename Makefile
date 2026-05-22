@@ -90,7 +90,7 @@ buddy-build:
 # Upload (OTA to GCS) — unified format: make upload-<component>
 # ============================================================================
 
-.PHONY: upload-lumi upload-bootstrap upload-lelamp upload-claude-desktop-buddy upload-web upload-skills upload-hooks upload-setup upload-setup-ap upload-openclaw upload-all
+.PHONY: upload-lumi upload-bootstrap upload-lelamp upload-claude-desktop-buddy upload-lumi-buddy upload-web upload-skills upload-hooks upload-setup upload-setup-ap upload-openclaw upload-all
 
 upload-lumi:
 	bash scripts/upload-lumi.sh
@@ -103,6 +103,9 @@ upload-lelamp:
 
 upload-claude-desktop-buddy:
 	bash scripts/upload-claude-desktop-buddy.sh
+
+upload-lumi-buddy:
+	bash scripts/upload-lumi-buddy.sh
 
 upload-web:
 	bash scripts/upload-web.sh
