@@ -98,14 +98,23 @@ class Turn:
 
 @dataclass
 class BrainContext:
-    soul: str = ""
+    identity: str = ""               # full IDENTITY.md (given name, species, traits)
+    identity_name: str = ""          # just the parsed given name (Noah, etc.) for quick checks
+    soul: str = ""                   # full SOUL.md (persona narrative)
     recent_turns: List[Turn] = field(default_factory=list)
     workspace_dir: str = ""
 
     def to_system_prompt_block(self) -> str:
         """Render context as a single block suitable for prepending to the
-        brain's system instruction. Empty sections are skipped silently."""
+        brain's system instruction. Empty sections are skipped silently.
+
+        Order is intentional and reflects the review-notes recommendation:
+        identity FIRST so the model never invents a name; persona NEXT so
+        tone matches; recent turns LAST so they don't shadow the persona.
+        """
         parts: list[str] = []
+        if self.identity.strip():
+            parts.append("=== IDENTITY (IDENTITY.md) ===\n" + self.identity.strip())
         if self.soul.strip():
             parts.append("=== PERSONA (SOUL.md) ===\n" + self.soul.strip())
         if self.recent_turns:
@@ -115,6 +124,44 @@ class BrainContext:
             if convo:
                 parts.append("=== RECENT CONVERSATION ===\n" + convo)
         return "\n\n".join(parts)
+
+
+def _read_identity(workspace_dir: str) -> tuple[str, str]:
+    """Read IDENTITY.md from the workspace.
+
+    Returns ``(raw_text, parsed_name)``. ``raw_text`` is the full file
+    contents (used as the prompt block); ``parsed_name`` extracts the
+    ``**Name:**`` line the same way ``app_state._read_agent_name`` does
+    so the brain's prompt block exposes the canonical given name
+    (Noah, etc.) without each provider re-parsing.
+
+    Returns ``("", "")`` when the file is missing or unreadable —
+    callers should treat empty as "no identity injected".
+    """
+    path = Path(workspace_dir) / "IDENTITY.md"
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        logger.info("IDENTITY.md not found at %s — brain runs without given name", path)
+        return "", ""
+    except OSError as e:
+        logger.warning("Could not read IDENTITY.md at %s: %s", path, e)
+        return "", ""
+
+    name = ""
+    for line in raw.splitlines():
+        lower = line.lower()
+        idx = lower.find("**name:**")
+        if idx >= 0:
+            # Strip the marker + anything after em-dash / en-dash / hyphen
+            # so "**Name:** Noah — a curious lamp" yields "Noah".
+            tail = line[idx + len("**name:**"):].strip()
+            for sep in ("—", "–", "-"):
+                tail = tail.split(sep)[0].strip()
+            if tail:
+                name = tail
+                break
+    return raw, name
 
 
 def _read_soul(workspace_dir: str) -> str:
@@ -309,6 +356,7 @@ def load_context(
     session_key = session_key or os.environ.get("OPENCLAW_SESSION_KEY") or DEFAULT_SESSION_KEY
     lumi_base_url = lumi_base_url or os.environ.get("LUMI_BASE_URL") or DEFAULT_LUMI_BASE
 
+    identity, identity_name = _read_identity(workspace_dir)
     soul = _read_soul(workspace_dir)
 
     turns: List[Turn] = []
@@ -323,8 +371,15 @@ def load_context(
                 history_source = "lumi_recent"
 
     logger.info(
-        "Brain context loaded — soul=%d chars, turns=%d, history_source=%s, "
-        "session_key=%s, workspace=%s, agents=%s",
+        "Brain context loaded — identity=%r (%d chars), soul=%d chars, turns=%d, "
+        "history_source=%s, session_key=%s, workspace=%s, agents=%s",
+        identity_name or "(no IDENTITY.md)", len(identity),
         len(soul), len(turns), history_source, session_key, workspace_dir, agents_dir,
     )
-    return BrainContext(soul=soul, recent_turns=turns, workspace_dir=workspace_dir)
+    return BrainContext(
+        identity=identity,
+        identity_name=identity_name,
+        soul=soul,
+        recent_turns=turns,
+        workspace_dir=workspace_dir,
+    )
