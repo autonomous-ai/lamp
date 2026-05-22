@@ -93,16 +93,19 @@ struct ScreenshotExecutor: Executor {
             image = rawImage
         }
 
-        let pngData = NSMutableData()
-        guard let dest = CGImageDestinationCreateWithData(pngData, UTType.png.identifier as CFString, 1, nil) else {
-            throw ExecutorError.actionFailed("could not create PNG destination")
+        // JPEG q=0.8 gives ~5-10× smaller payload than PNG for typical desktop
+        // screenshots, with negligible perceptual loss for vision LLM input.
+        let jpegData = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(jpegData, UTType.jpeg.identifier as CFString, 1, nil) else {
+            throw ExecutorError.actionFailed("could not create JPEG destination")
         }
-        CGImageDestinationAddImage(dest, image, nil)
+        let jpegOptions: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: 0.8]
+        CGImageDestinationAddImage(dest, image, jpegOptions as CFDictionary)
         if !CGImageDestinationFinalize(dest) {
-            throw ExecutorError.actionFailed("could not encode PNG")
+            throw ExecutorError.actionFailed("could not encode JPEG")
         }
 
-        let saveURL = try saveDefaultPath(data: pngData as Data)
+        let saveURL = try saveDefaultPath(data: jpegData as Data)
 
         // Retina point↔pixel scale of the source display.
         let mode = CGDisplayCopyDisplayMode(displayID)
@@ -116,10 +119,11 @@ struct ScreenshotExecutor: Executor {
             "height": image.height,
             "display_id": Int(displayID),
             "display_scale": displayScale,
-            "bytes": pngData.length,
+            "bytes": jpegData.length,
+            "mime": "image/jpeg",
         ]
         if returnFormat == "base64" || returnFormat == "both" {
-            result["image_b64"] = (pngData as Data).base64EncodedString()
+            result["image_b64"] = (jpegData as Data).base64EncodedString()
         }
         return result
     }
@@ -130,7 +134,7 @@ struct ScreenshotExecutor: Executor {
             .appendingPathComponent("LumiBuddy", isDirectory: true)
             .appendingPathComponent("screenshots", isDirectory: true)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        let url = dir.appendingPathComponent("latest.png")
+        let url = dir.appendingPathComponent("latest.jpg")
         try data.write(to: url, options: .atomic)
         return url
     }

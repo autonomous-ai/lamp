@@ -72,7 +72,7 @@ For multi-display setups, call `list_displays` first and pick the display the us
 
 | Action | Returns / Effect | Key params |
 |---|---|---|
-| `screenshot` | `{path, width, height, display_id, display_scale, bytes, image_b64?}` | `display_id` (default main), `scale` (default 1.0 — shrink for token budget), `return_format` `"path"` / `"base64"` / `"both"` |
+| `screenshot` | `{path, width, height, display_id, display_scale, bytes, mime, image_b64?}` — JPEG q=0.8 to keep LLM vision token cost low | `display_id` (default main), `scale` (default 1.0 — shrink for token budget), `return_format` `"path"` / `"base64"` / `"both"` |
 | `list_displays` | `{displays:[{id,is_main,x,y,width,height,pixel_width,pixel_height,scale}], count}` | — |
 | `cursor_pos` | `{x, y, screen_height, backing_scale}` (CGEvent space) | — |
 | `click_at` | `{clicked, x, y, button, clicks}` | `x`, `y` (points), `button` `"left"`/`"right"`/`"middle"`, `clicks` |
@@ -124,9 +124,9 @@ curl -s -X POST http://127.0.0.1:5000/api/buddy/command \
   -d '{"action":"screenshot","params":{"scale":<cached_scale>,"return_format":"base64"},"timeout_ms":15000}'
 ```
 
-Why not `scale: 1.0`? On a 4K Retina display a full-res PNG is 4-6MB and ~5-8 million pixels — Claude undershoots clicks because the trained dim is much smaller, plus you burn tokens. `scale: 0.5` (the old default) was an approximation that works for 13" Retina but is too small on a 16" and too large on a non-Retina display. Anchor on the 1280px target instead.
+Why not `scale: 1.0`? On a 4K Retina display a full-res JPEG is still ~500KB-1MB and ~5-8 million pixels — Claude undershoots clicks because the trained dim is much smaller, plus you burn tokens. `scale: 0.5` (the old default) was an approximation that works for 13" Retina but is too small on a 16" and too large on a non-Retina display. Anchor on the 1280px target instead.
 
-The `image_b64` field is a plain base64-encoded PNG. Treat it as image input in your next reasoning step.
+The `image_b64` field is a base64-encoded JPEG (quality 0.8). Treat it as image input in your next reasoning step.
 
 ## Example flows
 
