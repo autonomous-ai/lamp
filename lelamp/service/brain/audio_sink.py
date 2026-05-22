@@ -1,8 +1,11 @@
 """
 PCM audio sink — plays raw int16 mono PCM out the default output device.
 
-Used by the brain to play the chit-chat reply audio that Gemini Live
-streams back when ``LELAMP_BRAIN_TTS=native``. Gemini emits 24 kHz;
+Used by the brain to play the chit-chat reply audio that the realtime
+provider (Gemini Live, OpenAI Realtime, …) streams back when
+``LELAMP_BRAIN_TTS=native``. Both currently shipped providers emit
+24 kHz PCM16 mono, so the sink defaults to that. Override via
+``DEFAULT_INPUT_RATE`` if a future provider streams a different rate;
 backends resample on the fly.
 
 Two backends, tried in order:
@@ -41,13 +44,13 @@ from typing import Optional
 
 logger = logging.getLogger("lelamp.brain.audio")
 
-DEFAULT_INPUT_RATE = 24000   # Gemini Live audio output rate (int16 LE mono)
+DEFAULT_INPUT_RATE = 24000   # Realtime providers stream 24 kHz int16 LE mono
 DEFAULT_CHANNELS = 1
 WRITER_TIMEOUT_S = 0.5       # max time the writer waits on the queue before checking _running
 
 # Echo gate window — how long after the last PCM chunk we still report
 # `speaking=True`. Must comfortably outlast the ALSA output buffer (often
-# 150-300 ms on the Pi) AND any inter-chunk gap from Gemini Live streaming,
+# 150-300 ms on the Pi) AND any inter-chunk gap from realtime streaming,
 # otherwise the mic catches our own reply tail and feeds it back to the
 # brain as a fake user turn. 2 s is conservative but cheap.
 SPEAKING_DECAY_S = float(os.environ.get("LELAMP_BRAIN_SINK_DECAY_S", "2.0"))

@@ -21,9 +21,31 @@ from typing import Callable, Optional
 
 from lelamp.service.brain.base import Brain, BrainSession
 from lelamp.service.brain.context_loader import BrainContext, load_context
+from lelamp.service.brain.prompts import (
+    DECISION_RULES,
+    DELEGATE_TOOL_DESCRIPTION,
+    DELEGATE_TOOL_NAME,
+    language_hint,
+)
 
 logger = logging.getLogger("lelamp.brain.gemini")
 
+# Gemini Live model selection.
+#
+# We keep ONE model regardless of `LELAMP_BRAIN_TTS` mode:
+#   - `gemini-3.1-flash-live-preview` (latest, AUDIO-only response modality)
+#
+# Why not auto-switch to a text-only "half-cascade" model in fallback?
+# It would skip audio synth cost but the only Developer API model that
+# accepts response_modalities=[TEXT] is `gemini-2.0-flash-live-001` —
+# an older generation with weaker decision quality. The newer 2.5 /
+# 3.1 Live models only exist in AUDIO shape on the Developer tier.
+# Net trade: keep newer model + pay audio synth cost in fallback (we
+# drop the chunks on receive). When 3.x ships a text-capable Live
+# model on Developer API, swap this default.
+#
+# `LELAMP_GEMINI_LIVE_MODEL` overrides if you want to A/B test
+# 2.0-flash-live-001 (or any other model id).
 DEFAULT_MODEL = os.environ.get(
     "LELAMP_GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview"
 )
@@ -73,63 +95,14 @@ def _resolve_language(language: Optional[str]) -> str:
 
 # How the chit-chat reply is rendered to the user:
 #   "native"   — Gemini Live streams 24 kHz PCM out, we play it directly.
-#   "fallback" — Gemini Live emits text, we hand it to the existing
+#   "fallback" — Gemini Live emits text only; we hand it to the existing
 #                TTSService so the user keeps the same ElevenLabs/OpenAI
 #                voice as task replies.
-DEFAULT_TTS_OUTPUT_MODE = os.environ.get("LELAMP_BRAIN_TTS", "native").strip().lower()
+# Default is "fallback" — companion deployments want one consistent
+# voice across chit-chat AND task replies; the alternative ("native")
+# changes voice per branch.
+DEFAULT_TTS_OUTPUT_MODE = os.environ.get("LELAMP_BRAIN_TTS", "fallback").strip().lower()
 VALID_TTS_OUTPUT_MODES = ("native", "fallback")
-
-DELEGATE_TOOL_NAME = "delegate_to_lumi"
-
-# The rules block always comes first; SOUL.md + recent turns are appended
-# by context_loader. Kept short — the model holds it for the whole session
-# and long prompts inflate first-token latency on Live.
-DECISION_RULES = """\
-You are Lumi — a smart, warm voice assistant living in a lamp.
-
-Your DEFAULT is to chat with the user in your own voice. Almost
-everything they say is chit-chat. Reply briefly (1–2 short sentences) in
-the user's language, in the character described below.
-
-ONLY call the `delegate_to_lumi(transcript=<verbatim>)` tool when the
-user CLEARLY asks for a concrete action that needs a skill — turning
-devices on/off, setting reminders, looking up real-time info (weather,
-prices, email, who's home), playing music, telling long stories.
-Examples that DO delegate:
-  "bật đèn ngủ", "tắt nhạc", "nhắc tôi 5 phút nữa", "giá BTC hôm nay",
-  "mở camera", "kể chuyện cười dài".
-
-Examples that DO NOT delegate (these are chit-chat — reply in voice):
-  greetings ("hello", "ê Lumi", "야"), short acknowledgements ("vâng",
-  "ok", "à"), questions about you ("tên là gì?", "bạn khỏe không?"),
-  reactions ("đẹp ha", "vui ghê"), comments overheard, single words,
-  garbled audio, and questions about our conversation itself
-  ("nãy giờ mình nói gì?" — answer from your own session memory).
-
-When unsure → CHIT-CHAT. Never speak AND call the tool in the same turn.
-
-Your spoken reply is plain prose only. Never include operator markup —
-no `[HW:/...]`, no `/emotion ...`, no `[emotion: ...]`, no JSON blobs.
-Voice-style markers like `[chuckle]`, `[laughs softly]`, `[sigh]` are
-fine.
-
-**IMPORTANT — about the SOUL block below.** The persona description
-below is shared with a bigger Lumi system that has many skills (music,
-sensing, posture, wellbeing, /emotion physical control, etc.). YOU are
-only the voice front-door of that system. So:
-  - Lumi can *do* all the things SOUL describes — you can mention them
-    conversationally ("I can play music for you", "I can dim the light").
-  - BUT you cannot trigger any of them yourself. To actually do them,
-    call `delegate_to_lumi(transcript=…)` — the bigger Lumi will run the
-    skill and reply on its own.
-  - Ignore any SOUL rule that asks you to emit `/emotion`, `/servo`,
-    `/led`, `[sensing:…]`, or any slash/bracket command. Those are
-    operator-side and forbidden in YOUR spoken reply.
-  - SOUL's mandatory `/emotion before you speak` does NOT apply to you —
-    you don't have direct hardware. Replace it with a voice-style marker
-    like `[chuckle]` instead.
-"""
-
 
 class GeminiLiveBrain(Brain):
     """Factory holding the shared client + system prompt for the session."""
@@ -145,18 +118,27 @@ class GeminiLiveBrain(Brain):
         tts_output_mode: str = DEFAULT_TTS_OUTPUT_MODE,
     ):
         self._api_key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        if tts_output_mode not in VALID_TTS_OUTPUT_MODES:
+            logger.warning("unknown tts_output_mode=%r — defaulting to 'fallback'", tts_output_mode)
+            tts_output_mode = "fallback"
+        self._tts_output_mode = tts_output_mode
         self._model = model
         self._voice = voice
         self._language = _resolve_language(language)
         self._decision_rules = decision_rules
         self._context = context  # if None, loaded lazily per session (always fresh)
-        if tts_output_mode not in VALID_TTS_OUTPUT_MODES:
-            logger.warning("unknown tts_output_mode=%r — defaulting to 'native'", tts_output_mode)
-            tts_output_mode = "native"
-        self._tts_output_mode = tts_output_mode
         self._client = None
         self._types = None
         self._import_error: Optional[Exception] = None
+
+        # Cross-session resumption handle. Gemini Live hard-caps each WS
+        # at ~10-15 min — the server emits a session_resumption_update
+        # event with a handle we can pass on the next connect to keep
+        # the in-server conversation memory + skip re-billing the full
+        # system_instruction + context. Updated by every running session
+        # whenever the SDK reports a new resumable handle.
+        self._resumption_handle: Optional[str] = None
+        self._resumption_lock = threading.Lock()
 
         if not self._api_key:
             logger.warning("GeminiLiveBrain: no API key (GEMINI_API_KEY) — brain disabled")
@@ -182,6 +164,14 @@ class GeminiLiveBrain(Brain):
     def available(self) -> bool:
         return self._client is not None and self._types is not None
 
+    def _get_handle(self) -> Optional[str]:
+        with self._resumption_lock:
+            return self._resumption_handle
+
+    def _set_handle(self, handle: Optional[str]) -> None:
+        with self._resumption_lock:
+            self._resumption_handle = handle
+
     def create_session(self) -> BrainSession:
         ctx = self._context or load_context()
         system_instruction = self._build_system_instruction(ctx)
@@ -193,13 +183,19 @@ class GeminiLiveBrain(Brain):
             language=self._language,
             system_instruction=system_instruction,
             tts_output_mode=self._tts_output_mode,
+            resumption_handle=self._get_handle(),
+            on_handle_update=self._set_handle,
         )
 
     def _build_system_instruction(self, ctx: BrainContext) -> str:
+        parts: list[str] = [self._decision_rules]
+        hint = language_hint(self._language)
+        if hint:
+            parts.append(hint)
         block = ctx.to_system_prompt_block()
         if block:
-            return f"{self._decision_rules}\n\n{block}"
-        return self._decision_rules
+            parts.append(block)
+        return "\n\n".join(parts)
 
 
 class GeminiLiveSession(BrainSession):
@@ -223,6 +219,8 @@ class GeminiLiveSession(BrainSession):
         language: str,
         system_instruction: str,
         tts_output_mode: str = "native",
+        resumption_handle: Optional[str] = None,
+        on_handle_update: Optional[Callable[[Optional[str]], None]] = None,
     ):
         self._client = client
         self._types = types
@@ -231,6 +229,8 @@ class GeminiLiveSession(BrainSession):
         self._language = language
         self._system_instruction = system_instruction
         self._tts_output_mode = tts_output_mode
+        self._resumption_handle = resumption_handle
+        self._on_handle_update = on_handle_update
 
         # State shared across threads — guarded by simple flags + Events.
         self._thread: Optional[threading.Thread] = None
@@ -239,6 +239,10 @@ class GeminiLiveSession(BrainSession):
         self._close_event: Optional[asyncio.Event] = None
         self._setup_done = threading.Event()
         self._closed = False
+        # Live SDK session handle. Populated in _run() once the WS is
+        # open; consumed by send_audio (via the audio queue) and by
+        # notify_activity_start/end (via call_soon_threadsafe).
+        self._session = None
 
         # Callbacks installed by start()
         self._on_delegate: Optional[Callable[[str], None]] = None
@@ -246,6 +250,7 @@ class GeminiLiveSession(BrainSession):
         self._on_text: Optional[Callable[[str, bool], None]] = None
         self._on_user_input: Optional[Callable[[str, bool], None]] = None
         self._on_error: Optional[Callable[[Exception], None]] = None
+        self._on_usage: Optional[Callable[[int, int, int], None]] = None
 
     def start(
         self,
@@ -254,12 +259,14 @@ class GeminiLiveSession(BrainSession):
         on_text: Optional[Callable[[str, bool], None]] = None,
         on_user_input: Optional[Callable[[str, bool], None]] = None,
         on_error: Optional[Callable[[Exception], None]] = None,
+        on_usage: Optional[Callable[[int, int, int], None]] = None,
     ) -> bool:
         self._on_delegate = on_delegate
         self._on_audio_chunk = on_audio_chunk
         self._on_text = on_text
         self._on_user_input = on_user_input
         self._on_error = on_error
+        self._on_usage = on_usage
 
         self._thread = threading.Thread(
             target=self._thread_main, daemon=True, name="brain-gemini-live"
@@ -308,6 +315,50 @@ class GeminiLiveSession(BrainSession):
     def is_closed(self) -> bool:
         return self._closed
 
+    def notify_activity_start(self) -> None:
+        self._dispatch_activity(start=True)
+
+    def notify_activity_end(self) -> None:
+        self._dispatch_activity(start=False)
+
+    def _dispatch_activity(self, start: bool) -> None:
+        if self._closed or self._loop is None:
+            return
+        try:
+            self._loop.call_soon_threadsafe(
+                lambda: asyncio.create_task(self._send_activity(start))
+            )
+        except RuntimeError:
+            # Loop already closed — silent drop.
+            pass
+
+    async def _send_activity(self, start: bool) -> None:
+        """Send Gemini Live's manual activity_start/activity_end events.
+        No-op when ``self._session`` is gone OR when the SDK doesn't
+        expose ActivityStart/ActivityEnd (older google-genai versions),
+        in which case the server is still on auto-VAD and our explicit
+        events were already silently ignored."""
+        session = self._session
+        if session is None:
+            return
+        types = self._types
+        try:
+            if start:
+                payload = types.ActivityStart()
+                await session.send_realtime_input(activity_start=payload)
+            else:
+                payload = types.ActivityEnd()
+                await session.send_realtime_input(activity_end=payload)
+        except AttributeError:
+            # Old SDK — types.ActivityStart / ActivityEnd missing.
+            # Server is on auto-VAD anyway; just don't bother.
+            return
+        except Exception as e:
+            # Don't escalate — session might be tearing down for an
+            # unrelated reason and we don't want activity ack failures
+            # to mask the real cause downstream.
+            logger.debug("activity %s event failed: %s", "start" if start else "end", e)
+
     # ----- thread / asyncio internals --------------------------------------
 
     def _thread_main(self) -> None:
@@ -334,6 +385,7 @@ class GeminiLiveSession(BrainSession):
             async with self._client.aio.live.connect(
                 model=self._model, config=config
             ) as session:
+                self._session = session  # exposed for notify_activity_*
                 self._setup_done.set()
                 logger.info("Gemini Live session open (model=%s)", self._model)
                 send_task = asyncio.create_task(self._send_loop(session), name="brain-send")
@@ -359,17 +411,14 @@ class GeminiLiveSession(BrainSession):
                         except Exception:
                             pass
         finally:
+            self._session = None
             logger.info("Gemini Live session closed")
 
     def _build_config(self):
         types = self._types
         function_decl = types.FunctionDeclaration(
             name=DELEGATE_TOOL_NAME,
-            description=(
-                "Delegate the user's request to the Lumi backend (OpenClaw). "
-                "Call this for any request that needs an action, tool, lookup, "
-                "schedule, or long-form answer. Do not speak when calling this."
-            ),
+            description=DELEGATE_TOOL_DESCRIPTION,
             parameters=types.Schema(
                 type=types.Type.OBJECT,
                 properties={
@@ -382,18 +431,12 @@ class GeminiLiveSession(BrainSession):
             ),
         )
 
-        # Gemini Live's `gemini-3.1-flash-live-preview` only supports AUDIO
-        # response modality — TEXT-only sessions get a 1011 "Internal
-        # error encountered" handshake failure. So we always request AUDIO;
-        # what differs by mode is what we do with the response:
-        #
-        #   native   → play PCM chunks via PCMAudioSink (speaker).
-        #   fallback → drop PCM chunks; speak the transcript through our
-        #              own TTSService (ElevenLabs) for a single voice.
-        #
-        # output_audio_transcription is enabled in BOTH modes so the Flow
-        # Monitor can show *what* Lumi just said even when audio plays
-        # natively. input_audio_transcription gives us the user's text.
+        # Single shape for both `LELAMP_BRAIN_TTS` modes: request AUDIO
+        # modality (the only one this model supports on Developer API),
+        # plus output_audio_transcription so we get text we can route
+        # to ElevenLabs in fallback mode. In native mode we play the
+        # PCM directly; in fallback we drop the audio chunks in
+        # _handle_server_content but still consume the transcription.
         speech_kwargs = dict(
             voice_config=types.VoiceConfig(
                 prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=self._voice),
@@ -412,9 +455,90 @@ class GeminiLiveSession(BrainSession):
             ),
             tools=[types.Tool(function_declarations=[function_decl])],
             speech_config=types.SpeechConfig(**speech_kwargs),
-            input_audio_transcription=types.AudioTranscriptionConfig(),
+            input_audio_transcription=self._build_input_transcription(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
+            **self._build_resumption_kwargs(),
+            **self._build_manual_activity_kwargs(),
         )
+
+    def _build_manual_activity_kwargs(self) -> dict:
+        """Disable Gemini's server-side VAD so we get to choose
+        start-of-turn / end-of-turn explicitly via send_realtime_input(
+        activity_start=...) / activity_end=...). This is the
+        officially supported "I have my own VAD on the client" mode —
+        cleaner than feeding silence padding to trick the server timer
+        when our ambient gate is dropping quiet frames.
+
+        Gracefully degrade to server-side auto-VAD if the SDK is too
+        old to expose RealtimeInputConfig / AutomaticActivityDetection
+        — the legacy auto path will still work, just with the
+        silence-trailing workaround in voice_service.
+        """
+        types = self._types
+        try:
+            return {
+                "realtime_input_config": types.RealtimeInputConfig(
+                    automatic_activity_detection=types.AutomaticActivityDetection(
+                        disabled=True,
+                    ),
+                ),
+            }
+        except (AttributeError, TypeError) as e:
+            logger.info(
+                "manual activity detection unsupported by this SDK (%s) — "
+                "falling back to server VAD", e,
+            )
+            return {}
+
+    def _build_resumption_kwargs(self) -> dict:
+        """Enable session resumption. Passing handle=None opts the
+        connection into the feature so the server starts emitting
+        ``session_resumption_update`` events; we capture those handles
+        and on the next connect (after the ~10-min GoAway) we hand the
+        most recent handle back so Gemini keeps the in-server
+        conversation memory instead of re-billing the full
+        system_instruction + history."""
+        types = self._types
+        try:
+            cfg = types.SessionResumptionConfig(handle=self._resumption_handle)
+            return {"session_resumption": cfg}
+        except (AttributeError, TypeError) as e:
+            # Older google-genai versions may not expose
+            # SessionResumptionConfig — degrade gracefully (we'll still
+            # auto-reconnect, just paying the full re-bill each cycle).
+            logger.info("session resumption unsupported by this SDK (%s)", e)
+            return {}
+
+    def _build_input_transcription(self):
+        """AudioTranscriptionConfig for incoming mic audio.
+
+        Note: ``language_codes=[...]`` is tempting (hard Whisper lock)
+        but is *Gemini Enterprise Agent Platform only* — passing it on
+        a Developer API key crashes the session with::
+
+            language_codes parameter is only supported in Gemini
+            Enterprise Agent Platform mode, not in Gemini Developer
+            API mode.
+
+        The SDK accepts the kwarg client-side, the server rejects it at
+        handshake. So we don't set it here — we lean on the
+        ``language_hint(...)`` paragraph already in system_instruction
+        plus ``speech_config.language_code`` (set in native mode only,
+        which biases output language). That's the strongest combo the
+        Developer tier allows."""
+        types = self._types
+        return types.AudioTranscriptionConfig()
+
+    @staticmethod
+    def _is_goaway_close(err: BaseException) -> bool:
+        """True when the SDK raised because the server sent a GoAway +
+        the WS was force-closed with 1008 ``policy violation``. That
+        path is *expected* every ~10-15 min (Gemini Live hard session
+        cap) — the outer loop reconnects with the latest resumption
+        handle, so we log it at INFO level instead of WARNING so the
+        journal isn't full of fake alarms."""
+        msg = str(err)
+        return "1008" in msg or "GoAway" in msg or "goaway" in msg.lower()
 
     async def _send_loop(self, session) -> None:
         types = self._types
@@ -429,6 +553,11 @@ class GeminiLiveSession(BrainSession):
                     audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000")
                 )
             except Exception as e:
+                if self._is_goaway_close(e):
+                    logger.info(
+                        "Gemini Live send: session expired (GoAway) — outer loop will reconnect"
+                    )
+                    return  # graceful: finish task without raising
                 logger.warning("Gemini Live send failed: %s", e)
                 raise
 
@@ -446,11 +575,58 @@ class GeminiLiveSession(BrainSession):
                     if getattr(response, "tool_call", None):
                         await self._handle_tool_call(session, response.tool_call)
                         continue
+                    # Update resumption handle FIRST so the latest valid
+                    # handle is captured even if the server kicks us
+                    # between this update and the next iteration.
+                    self._handle_resumption_update(response)
+                    self._handle_go_away(response)
                     self._handle_server_content(response)
                     self._log_usage(response)
             except Exception as e:
+                if self._is_goaway_close(e):
+                    logger.info(
+                        "Gemini Live recv: session expired (GoAway) — outer loop will reconnect"
+                    )
+                    return  # graceful: finish task without raising
                 logger.warning("Gemini Live recv failed: %s", e)
                 raise
+
+    def _handle_resumption_update(self, response) -> None:
+        """Capture the latest resumable handle Gemini gives us. The
+        server emits ``session_resumption_update`` periodically; only
+        handles where ``resumable=True`` should be persisted (others
+        are interim and would refuse on reconnect)."""
+        update = getattr(response, "session_resumption_update", None)
+        if update is None:
+            return
+        new_handle = getattr(update, "new_handle", None)
+        resumable = getattr(update, "resumable", False)
+        if resumable and new_handle and self._on_handle_update is not None:
+            try:
+                self._on_handle_update(new_handle)
+            except Exception as e:
+                logger.warning("on_handle_update callback raised: %s", e)
+
+    def _handle_go_away(self, response) -> None:
+        """Gemini Live sends ``go_away`` ~30 s before it force-closes the
+        WS with 1008. Log it once so the journal explains why the next
+        couple of seconds look quiet, then let the loop drain naturally
+        — the outer reconnect path takes over.
+
+        Some SDK versions surface go_away on `response.go_away`, others
+        nest it under server_content; we check both."""
+        for src in (response, getattr(response, "server_content", None)):
+            if src is None:
+                continue
+            go_away = getattr(src, "go_away", None)
+            if go_away is None:
+                continue
+            time_left = getattr(go_away, "time_left", None)
+            logger.info(
+                "Gemini Live: server GoAway received (time_left=%s) — will reconnect soon",
+                time_left,
+            )
+            return
             # receive() ended naturally → next turn awaits.
 
     def _log_usage(self, response) -> None:
@@ -474,6 +650,11 @@ class GeminiLiveSession(BrainSession):
             prompt, resp, total,
             self._tokens_total, self._tokens_prompt, self._tokens_response,
         )
+        if self._on_usage is not None:
+            try:
+                self._on_usage(prompt, resp, total)
+            except Exception as e:
+                logger.warning("on_usage callback raised: %s", e)
 
     async def _handle_tool_call(self, session, tool_call) -> None:
         """Fire on_delegate, then ACK the tool call so Gemini doesn't
@@ -512,12 +693,11 @@ class GeminiLiveSession(BrainSession):
         if content is None:
             return
 
-        native = self._tts_output_mode == "native"
-
-        # Audio chunks → speaker, but only in native mode. In fallback we
-        # drop them on purpose; the transcription gives us the same words
-        # and the caller speaks them via ElevenLabs for one consistent voice.
-        if native:
+        # Audio chunks → speaker, but only in native mode. In fallback
+        # we drop them on purpose; the transcription below gives us the
+        # same words and the caller speaks them via ElevenLabs for one
+        # consistent voice across chit-chat and task replies.
+        if self._tts_output_mode == "native":
             turn = getattr(content, "model_turn", None)
             if turn is not None:
                 for part in turn.parts or []:
@@ -529,8 +709,9 @@ class GeminiLiveSession(BrainSession):
                             except Exception as e:
                                 logger.warning("on_audio_chunk callback raised: %s", e)
 
-        # Brain-reply transcription — what Gemini just said. Used to log
-        # the reply (both modes) and to TTS via ElevenLabs (fallback).
+        # Brain-reply transcription — what Gemini just said. Used by
+        # Flow Monitor logging in native mode and by TTSService route
+        # in fallback mode.
         out_tr = getattr(content, "output_transcription", None)
         if out_tr is not None:
             text = getattr(out_tr, "text", None) or ""

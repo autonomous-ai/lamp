@@ -35,6 +35,7 @@ dependencies = [
     "insightface>=0.7.3",
     "cryptography>=44.0.0",
     "google-genai>=0.7.0",
+    "openai[realtime]>=1.40.0",
 ]
 
 [build-system]

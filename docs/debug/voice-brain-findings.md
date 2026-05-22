@@ -6,6 +6,9 @@ Living notes, not formal docs — the canonical reference is
 
 ## Brain vs Classic STT — at a glance
 
+(Provider columns assume `gemini`; OpenAI Realtime trade-offs are
+similar — added in §10 below.)
+
 | Aspect | Classic STT → OpenClaw | Brain (fallback ElevenLabs) | Brain (native Aoede) |
 | --- | --- | --- | --- |
 | Chit-chat latency | slow (full pipeline) | faster | fastest |
@@ -111,6 +114,86 @@ Gray (boss-mandated): brain feature must keep changes inside
 `lelamp/service/brain/`. `lelamp/service/voice/voice_service.py` is the
 only `voice/` file modified — the previously added
 `TTSService.write_int16_pcm` was reverted.
+
+### 10. Pluggable provider refactor (2026-05-22)
+
+Brain was originally hard-coded to Gemini Live in `voice_service.py`.
+Refactored so the env var (renamed from `LELAMP_BRAIN` →
+`LELAMP_BRAIN_PROVIDER`) selects a provider via
+`brain.factory.make_brain`. Single source of truth for which providers
+exist is the `_PROVIDERS` dict in `factory.py`. Retiring a provider
+after benchmark = delete the module file + delete the row, nothing
+else changes.
+
+Shared between providers (`prompts.py`): `DECISION_RULES`,
+`DELEGATE_TOOL_NAME`, `DELEGATE_TOOL_DESCRIPTION`. Sharing the prompt
+is intentional — the only thing that should vary across providers is
+the wire protocol, so chit-chat-vs-task quality is comparable A/B.
+
+Provider keys use the vendor convention (LiteLLM / LangChain /
+OpenRouter): `gemini` and `openai` (not `gemini_live` / `gpt_realtime`).
+Module filenames keep the product name so reading the code still tells
+you which API is wrapped.
+
+OpenAI Realtime added in the same pass. Wire shape mirrors Gemini
+session closely; differences worth knowing:
+
+- **Audio rate** — OpenAI expects 24 kHz input PCM16, lelamp captures
+  16 kHz, so `openai_realtime.py` resamples each chunk with
+  `scipy.signal.resample_poly(up=3, down=2)`. scipy was already in
+  `pyproject.toml`. Gemini accepts 16 kHz natively so no resampling
+  there.
+- **Session persistence** — the OpenAI Realtime WS yields events for
+  the whole session via a single `async for event in conn:` loop;
+  no per-turn iterator wrap-around like Gemini (`session.receive()`
+  was per-turn). The `while not self._closed` shim Gemini needs is
+  unnecessary for OpenAI.
+- **Tool-call ack** — OpenAI surfaces
+  `response.function_call_arguments.done` with `call_id` + JSON
+  arguments, but the function `name` comes from a separate
+  `response.output_item.added` event earlier in the turn. The session
+  tracks `call_id → name` itself. ACK with
+  `conversation.item.create(type="function_call_output", …)` — same
+  goal as Gemini's `send_tool_response`.
+- **Server VAD** — both providers offer server VAD; the OpenAI session
+  config tunes `turn_detection.silence_duration_ms=500`,
+  `prefix_padding_ms=300` to match Gemini's default behaviour roughly.
+
+Not yet measured: latency / token cost differences between providers.
+That's the point of the refactor — A/B it on `lumi-9314` next.
+
+### 11. OpenAI Realtime: GA endpoint + payload reshape (2026-05-22 smoke)
+
+First Mac smoke test against the live OpenAI Realtime API surfaced two
+real gotchas, both fixed in the same pass:
+
+1. **`client.beta.realtime.connect` is dead.** Handshake fails with
+   `4000 invalid_request_error.beta_api_shape_disabled`. The GA endpoint
+   is `client.realtime.connect(model=...)` (no `.beta`). Once Realtime
+   went GA OpenAI stopped honouring the beta surface even for old
+   `gpt-4o-realtime-preview` model ids — the SDK keeps both
+   `client.beta.realtime` and `client.realtime` attributes for source
+   compatibility, but only `.realtime` actually works against current
+   servers.
+2. **`session.update` payload reshape.** GA nests audio settings under
+   `audio.input` / `audio.output` (each with its own
+   `format: {type:"audio/pcm", rate:24000}`); `modalities` was renamed
+   to `output_modalities`; the discriminator `type: "realtime"` is
+   required; voice moves into `audio.output.voice`. Event names also
+   shifted: `response.audio.delta` → `response.output_audio.delta`,
+   `response.audio_transcript.*` → `response.output_audio_transcript.*`,
+   `response.text.*` → `response.output_text.*`. All other event names
+   (tool calls, transcription, output items) are unchanged.
+
+Third gotcha that didn't trigger a server error but blew up the SDK
+client-side: `pip install openai` is **not enough** — the bare wheel
+has no realtime websocket transport. You get
+`"You need to install openai[realtime] to use this method"` at first
+connect. Pin `openai[realtime]>=1.40.0` in `pyproject.toml`.
+
+Smoke run also reported the test account is out of quota
+(`"You exceeded your current quota"`) — that's billing, not code; the
+session opened and the error path correctly routed through `on_error`.
 
 ## Outstanding follow-ups
 

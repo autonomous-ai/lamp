@@ -33,6 +33,7 @@ class BrainSession(ABC):
         on_text: Optional[Callable[[str, bool], None]] = None,
         on_user_input: Optional[Callable[[str, bool], None]] = None,
         on_error: Optional[Callable[[Exception], None]] = None,
+        on_usage: Optional[Callable[[int, int, int], None]] = None,
     ) -> bool:
         """Open the upstream connection and start streaming.
 
@@ -53,6 +54,12 @@ class BrainSession(ABC):
                             and run per-turn speaker recognition.
             on_error:       Optional. Called once when the session encounters
                             a fatal error.
+            on_usage:       Optional. Called with (prompt_tokens,
+                            response_tokens, total_tokens) per turn when
+                            the provider surfaces usage metadata. Used by
+                            BrainBenchmark to track cost; pure additive,
+                            providers that don't report usage simply never
+                            invoke this.
 
         Returns:
             True if the session started, False otherwise.
@@ -63,6 +70,22 @@ class BrainSession(ABC):
         """Push a chunk of mic audio (PCM int16 LE 16 kHz mono) to the brain.
         Safe to call from the audio thread; implementations marshal across
         threads if their upstream client requires it."""
+
+    def notify_activity_start(self) -> None:
+        """Hint to the provider that the user just started speaking.
+
+        Providers that support *manual activity detection* (Gemini Live
+        with ``automatic_activity_detection.disabled=True``) need an
+        explicit start signal — they don't run server VAD in that mode.
+        Providers with their own server VAD (OpenAI Realtime) can no-op
+        this (default) and let the audio stream drive turn detection.
+        Safe to call multiple times — implementations should de-dup."""
+
+    def notify_activity_end(self) -> None:
+        """Hint to the provider that the user just stopped speaking.
+
+        Symmetric to :meth:`notify_activity_start`. Default no-op so
+        providers without manual mode aren't forced to implement it."""
 
     @abstractmethod
     def close(self) -> None:
