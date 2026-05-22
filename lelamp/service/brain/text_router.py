@@ -32,7 +32,15 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-from lelamp.service.brain.context_loader import load_context
+from lelamp.service.brain.context_loader import (
+    DEFAULT_AGENTS_SUBDIR,
+    DEFAULT_HISTORY_LIMIT,
+    DEFAULT_SESSION_KEY,
+    DEFAULT_WORKSPACE,
+    DEFAULT_WORKSPACE_SUBDIR,
+    _read_openclaw_history,
+    load_context,
+)
 from lelamp.service.brain.prompts import (
     DECISION_RULES,
     DELEGATE_TOOL_DESCRIPTION,
@@ -107,6 +115,23 @@ class TextBrain:
                 "TextBrain: unknown provider %r (supported: %s) — brain disabled",
                 provider, self.SUPPORTED_PROVIDERS,
             )
+
+        # Static system prompt cached at startup. Recent conversation
+        # turns are fetched per-call (still cheap — one JSONL read) and
+        # passed as chat history so the static prefix stays byte-stable
+        # across turns. That stable prefix lets OpenAI / Gemini's prompt
+        # cache kick in: after the first call, the IDENTITY / USER /
+        # MEMORY / KNOWLEDGE / SOUL blocks bill at ~50 % of normal input
+        # token rate. Changes to those files require a service restart
+        # to take effect — fine for the kind of files involved.
+        if self.available:
+            self._cached_static_system = self._build_static_system_instruction()
+            logger.info(
+                "TextBrain[%s] static prompt cached (%d chars) — recent turns fetched per call",
+                self._provider, len(self._cached_static_system),
+            )
+        else:
+            self._cached_static_system = ""
 
     # --- per-provider init ---------------------------------------------------
 
@@ -190,24 +215,49 @@ class TextBrain:
 
     # --- prompt assembly -----------------------------------------------------
 
-    def _build_system_instruction(self) -> str:
-        """Same prompt as the audio brain — DECISION_RULES + language
-        hint + SOUL + recent history. Sharing this between providers
-        keeps decision quality comparable."""
+    def _build_static_system_instruction(self) -> str:
+        """Cache-friendly system instruction: DECISION_RULES + language
+        hint + IDENTITY + USER + MEMORY + KNOWLEDGE + SOUL. Recent
+        conversation turns are NOT included here — they're appended as
+        chat history per-call so the cached prefix stays byte-stable."""
         parts = [DECISION_RULES]
         hint = language_hint(self._language)
         if hint:
             parts.append(hint)
         try:
-            ctx = load_context()
+            ctx = load_context(include_history=False)
         except Exception as e:
-            logger.debug("context_loader failed in text brain: %s", e)
+            logger.debug("context_loader (static) failed in text brain: %s", e)
             ctx = None
         if ctx is not None:
             block = ctx.to_system_prompt_block()
             if block:
                 parts.append(block)
         return "\n\n".join(parts)
+
+    def _load_recent_turns(self):
+        """Per-call fetch of just the recent OpenClaw conversation
+        turns. Skips load_context (which re-reads IDENTITY / USER /
+        MEMORY / KNOWLEDGE / SOUL) and goes straight to the JSONL —
+        the static blocks were cached at startup, no point re-reading.
+        Returns ``[]`` on any failure."""
+        try:
+            workspace_root = os.environ.get("OPENCLAW_WORKSPACE")
+            if workspace_root:
+                workspace_root = workspace_root.rstrip("/")
+                if workspace_root.endswith("/" + DEFAULT_WORKSPACE_SUBDIR):
+                    workspace_root = workspace_root[: -len("/" + DEFAULT_WORKSPACE_SUBDIR)]
+            else:
+                workspace_root = DEFAULT_WORKSPACE
+            agents_dir = os.environ.get(
+                "OPENCLAW_AGENTS_DIR",
+                f"{workspace_root}/{DEFAULT_AGENTS_SUBDIR}",
+            )
+            session_key = os.environ.get("OPENCLAW_SESSION_KEY") or DEFAULT_SESSION_KEY
+            return _read_openclaw_history(agents_dir, session_key, DEFAULT_HISTORY_LIMIT)
+        except Exception as e:
+            logger.debug("recent_turns fetch failed: %s", e)
+            return []
 
     # --- gemini path ---------------------------------------------------------
 
@@ -232,7 +282,7 @@ class TextBrain:
                 ),
             ])
             config = types.GenerateContentConfig(
-                system_instruction=self._build_system_instruction(),
+                system_instruction=self._cached_static_system,
                 tools=[tool],
                 # Force tool-or-text: model picks one of the two paths,
                 # never both. AUTO is the SDK default — making it
@@ -241,9 +291,23 @@ class TextBrain:
                     function_calling_config=types.FunctionCallingConfig(mode="AUTO"),
                 ),
             )
+            # Build chat-history-shaped contents so the static system
+            # instruction stays byte-stable (cache-friendly). Gemini
+            # roles are "user" / "model".
+            contents = []
+            for turn in self._load_recent_turns():
+                if not (turn.text or "").strip():
+                    continue
+                role = "user" if turn.role == "user" else "model"
+                contents.append(types.Content(
+                    role=role, parts=[types.Part(text=turn.text)],
+                ))
+            contents.append(types.Content(
+                role="user", parts=[types.Part(text=text)],
+            ))
             response = self._client.models.generate_content(
                 model=self._model,
-                contents=[text],
+                contents=contents,
                 config=config,
             )
             latency = time.time() - t0
@@ -312,10 +376,19 @@ class TextBrain:
                     },
                 },
             }
+            # Build message list with the static system at index 0 +
+            # recent conversation as user/assistant alternation. The
+            # system message is byte-stable across turns so OpenAI's
+            # prompt cache (auto for prefixes ≥1024 tokens) kicks in.
             messages = [
-                {"role": "system", "content": self._build_system_instruction()},
-                {"role": "user", "content": text},
+                {"role": "system", "content": self._cached_static_system},
             ]
+            for turn in self._load_recent_turns():
+                if not (turn.text or "").strip():
+                    continue
+                role = "user" if turn.role == "user" else "assistant"
+                messages.append({"role": role, "content": turn.text})
+            messages.append({"role": "user", "content": text})
             response = self._client.chat.completions.create(
                 model=self._model,
                 messages=messages,

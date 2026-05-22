@@ -100,6 +100,9 @@ class Turn:
 class BrainContext:
     identity: str = ""               # full IDENTITY.md (given name, species, traits)
     identity_name: str = ""          # just the parsed given name (Noah, etc.) for quick checks
+    user_profile: str = ""           # full USER.md (owner — name, preferences, timezone, …)
+    memory: str = ""                 # curated long-term memory — workspace/memory/*.md (newest tail) or MEMORY.md
+    knowledge: str = ""              # KNOWLEDGE.md — mistakes the agent learned to not repeat
     soul: str = ""                   # full SOUL.md (persona narrative)
     recent_turns: List[Turn] = field(default_factory=list)
     workspace_dir: str = ""
@@ -108,13 +111,31 @@ class BrainContext:
         """Render context as a single block suitable for prepending to the
         brain's system instruction. Empty sections are skipped silently.
 
-        Order is intentional and reflects the review-notes recommendation:
-        identity FIRST so the model never invents a name; persona NEXT so
-        tone matches; recent turns LAST so they don't shadow the persona.
+        Order reflects the review-notes recommendation:
+          1. IDENTITY  — who *I* am (given name first so model never invents).
+          2. OWNER     — who the *user* is (USER.md).
+          3. MEMORY    — long-term curated facts.
+          4. KNOWLEDGE — mistakes / corrections the agent has learned.
+          5. PERSONA   — narrative tone (SOUL.md).
+          6. RECENT    — recent conversation turns (last so they don't
+                          shadow persona / identity).
         """
         parts: list[str] = []
         if self.identity.strip():
             parts.append("=== IDENTITY (IDENTITY.md) ===\n" + self.identity.strip())
+        if self.user_profile.strip():
+            parts.append(
+                "=== OWNER / USER PROFILE (USER.md) ===\n" + self.user_profile.strip()
+            )
+        if self.memory.strip():
+            parts.append(
+                "=== LONG-TERM MEMORY ===\n" + self.memory.strip()
+            )
+        if self.knowledge.strip():
+            parts.append(
+                "=== KNOWLEDGE (KNOWLEDGE.md — mistakes to avoid) ===\n"
+                + self.knowledge.strip()
+            )
         if self.soul.strip():
             parts.append("=== PERSONA (SOUL.md) ===\n" + self.soul.strip())
         if self.recent_turns:
@@ -173,6 +194,117 @@ def _read_soul(workspace_dir: str) -> str:
         return ""
     except OSError as e:
         logger.warning("Could not read SOUL.md at %s: %s", path, e)
+        return ""
+
+
+# Per-block size cap so a curated MEMORY.md that grows over time
+# doesn't quietly balloon the brain prompt to 50K tokens. Drops the
+# OLDEST half if exceeded — assumes append-style writes where the tail
+# is the freshest (most relevant) information. Tune via env if the
+# behaviour ever surprises.
+_USER_MD_MAX_CHARS = int(os.environ.get("LELAMP_BRAIN_USER_MD_MAX", "3000"))
+_MEMORY_MD_MAX_CHARS = int(os.environ.get("LELAMP_BRAIN_MEMORY_MD_MAX", "5000"))
+_KNOWLEDGE_MD_MAX_CHARS = int(os.environ.get("LELAMP_BRAIN_KNOWLEDGE_MD_MAX", "2000"))
+# When memory lives as workspace/memory/*.md timestamped files (the
+# OpenClaw default), how many of the newest files to concatenate. 3 is
+# typically enough to cover the latest day's snapshots without bloating
+# the prompt.
+_MEMORY_FILES_KEEP = int(os.environ.get("LELAMP_BRAIN_MEMORY_FILES_KEEP", "3"))
+
+
+def _read_capped(path: Path, max_chars: int) -> str:
+    """Read a markdown context file, return its (possibly tail-trimmed)
+    contents. Files past the cap keep their tail (newest entries) so the
+    truncation doesn't drop recent updates."""
+    text = path.read_text(encoding="utf-8")
+    if len(text) <= max_chars:
+        return text
+    # Keep the tail — the assumption is curated context files grow by
+    # appending new facts at the bottom.
+    return "... (older entries truncated) ...\n" + text[-max_chars:]
+
+
+def _read_user(workspace_dir: str) -> str:
+    """Read USER.md from the workspace. Returns "" when the file is
+    missing — the brain just runs without owner context. We keep the
+    file even when its template fields are unfilled (Name / Pronouns /
+    Timezone all `_`) so the model sees the *shape* of the missing
+    profile and can ask the user to introduce themselves, instead of
+    inventing details from session history."""
+    path = Path(workspace_dir) / "USER.md"
+    try:
+        return _read_capped(path, _USER_MD_MAX_CHARS)
+    except FileNotFoundError:
+        logger.info("USER.md not found at %s — brain runs without owner context", path)
+        return ""
+    except OSError as e:
+        logger.warning("Could not read USER.md at %s: %s", path, e)
+        return ""
+
+
+def _read_memory(workspace_dir: str) -> str:
+    """Read curated long-term memory from the workspace.
+
+    Two layouts are supported, in priority order:
+
+      1. ``workspace/memory/*.md`` — the OpenClaw default. Each file is
+         a memory snapshot timestamped in its name (e.g.
+         ``2026-05-21-0929.md``). We concatenate the last few files
+         (newest tail = chronologically latest = freshest memory) and
+         tail-trim the whole thing to ``_MEMORY_MD_MAX_CHARS``.
+      2. ``workspace/MEMORY.md`` — a single curated file if the deploy
+         maintains memory that way. Tail-trimmed.
+
+    Missing both → return ``""`` (brain runs without long-term memory).
+    """
+    memory_dir = Path(workspace_dir) / "memory"
+    if memory_dir.is_dir():
+        files = sorted(memory_dir.glob("*.md"))
+        if files:
+            recent = files[-_MEMORY_FILES_KEEP:]
+            chunks: list[str] = []
+            for f in recent:
+                try:
+                    chunks.append(f"--- {f.name} ---\n" + f.read_text(encoding="utf-8"))
+                except OSError as e:
+                    logger.warning("Could not read memory file %s: %s", f, e)
+            combined = "\n\n".join(chunks)
+            if len(combined) > _MEMORY_MD_MAX_CHARS:
+                combined = "... (older entries truncated) ...\n" + combined[-_MEMORY_MD_MAX_CHARS:]
+            return combined
+
+    # Fallback: single MEMORY.md
+    path = Path(workspace_dir) / "MEMORY.md"
+    try:
+        return _read_capped(path, _MEMORY_MD_MAX_CHARS)
+    except FileNotFoundError:
+        logger.info(
+            "no memory/ dir and no MEMORY.md at %s — brain runs without long-term memory",
+            workspace_dir,
+        )
+        return ""
+    except OSError as e:
+        logger.warning("Could not read MEMORY.md at %s: %s", path, e)
+        return ""
+
+
+def _read_knowledge(workspace_dir: str) -> str:
+    """Read KNOWLEDGE.md from the workspace — the OpenClaw "mistakes to
+    not repeat" log. Typically very short (the default template is just
+    a comment line). When the workspace agent has populated it with
+    real lessons-learned, this gives the brain a chance to avoid the
+    same misstep when answering chit-chat."""
+    path = Path(workspace_dir) / "KNOWLEDGE.md"
+    try:
+        text = path.read_text(encoding="utf-8")
+        if len(text) > _KNOWLEDGE_MD_MAX_CHARS:
+            text = "... (older entries truncated) ...\n" + text[-_KNOWLEDGE_MD_MAX_CHARS:]
+        return text
+    except FileNotFoundError:
+        logger.info("KNOWLEDGE.md not found at %s — brain runs without it", path)
+        return ""
+    except OSError as e:
+        logger.warning("Could not read KNOWLEDGE.md at %s: %s", path, e)
         return ""
 
 
@@ -357,6 +489,8 @@ def load_context(
     lumi_base_url = lumi_base_url or os.environ.get("LUMI_BASE_URL") or DEFAULT_LUMI_BASE
 
     identity, identity_name = _read_identity(workspace_dir)
+    user_profile = _read_user(workspace_dir)
+    memory = _read_memory(workspace_dir)
     soul = _read_soul(workspace_dir)
 
     turns: List[Turn] = []
@@ -371,14 +505,17 @@ def load_context(
                 history_source = "lumi_recent"
 
     logger.info(
-        "Brain context loaded — identity=%r (%d chars), soul=%d chars, turns=%d, "
-        "history_source=%s, session_key=%s, workspace=%s, agents=%s",
+        "Brain context loaded — identity=%r (%d) user=%d memory=%d soul=%d turns=%d "
+        "history_source=%s session_key=%s",
         identity_name or "(no IDENTITY.md)", len(identity),
-        len(soul), len(turns), history_source, session_key, workspace_dir, agents_dir,
+        len(user_profile), len(memory), len(soul), len(turns),
+        history_source, session_key,
     )
     return BrainContext(
         identity=identity,
         identity_name=identity_name,
+        user_profile=user_profile,
+        memory=memory,
         soul=soul,
         recent_turns=turns,
         workspace_dir=workspace_dir,
