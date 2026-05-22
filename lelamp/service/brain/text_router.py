@@ -30,6 +30,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 from lelamp.service.brain.context_loader import (
@@ -105,6 +106,34 @@ class TextBrain:
         # provider-specific
         self._model: str = ""
         self._types = None
+        # In-process session memory — chit-chat turns the brain handled
+        # directly never reach OpenClaw, so without this they vanish
+        # between turns and the brain forgets its own conversation.
+        # Stores ``[{"role": "user"|"assistant", "text": "...",
+        # "ts": float}, ...]`` in chronological order, capped at
+        # SESSION_HISTORY_MAX turns (each turn = 2 entries).
+        #
+        # Also persisted to a JSONL file so a service restart no longer
+        # wipes the chit-chat memory — we reload the last N entries on
+        # init. Disable persistence by setting
+        # LELAMP_BRAIN_SESSION_LOG=/dev/null (or unsetting the path
+        # and pointing it at a non-writable location — both gracefully
+        # degrade to in-memory only).
+        #
+        # Note for a future pass — "Option B" from the design discussion:
+        # POST every chit-chat back to OpenClaw via /api/sensing/event
+        # with a `brain_chitchat` type so OpenClaw's own JSONL is the
+        # single source of truth. Trade-off: cross-process visibility
+        # for the cost of teaching OpenClaw the new event type and
+        # making sure we don't loop our own output back in as a new
+        # user turn. Defer until cross-process memory becomes a real
+        # requirement.
+        self._session_history: list[dict] = []
+        self._session_history_max = int(
+            os.environ.get("LELAMP_BRAIN_SESSION_HISTORY_MAX", "10")
+        ) * 2
+        self._session_log_path: Optional[Path] = self._init_session_log()
+        self._load_session_log()
 
         if self._provider == "gemini":
             self._init_gemini()
@@ -194,7 +223,14 @@ class TextBrain:
     def decide(self, text: str, speaker: str = "unknown") -> TextBrainDecision:
         """Send ``text`` to the brain and return a Decision. Never
         raises — always returns a TextBrainDecision (delegate-on-error
-        is the safe default)."""
+        is the safe default).
+
+        Side effect: on a chit-chat decision the (user, reply) pair is
+        appended to the in-process session history so the next call sees
+        continuity. Delegate decisions are NOT recorded here — the
+        forwarded transcript hits OpenClaw which logs it to the agent
+        JSONL, and the next call will read it from there.
+        """
         text = (text or "").strip()
         if not text:
             return TextBrainDecision(
@@ -205,13 +241,179 @@ class TextBrain:
                 decision="delegate", transcript=text, error="brain not available",
             )
         if self._provider == "gemini":
-            return self._decide_gemini(text, speaker)
-        if self._provider == "openai":
-            return self._decide_openai(text, speaker)
-        return TextBrainDecision(
-            decision="delegate", transcript=text,
-            error=f"unknown provider {self._provider}",
+            decision = self._decide_gemini(text, speaker)
+        elif self._provider == "openai":
+            decision = self._decide_openai(text, speaker)
+        else:
+            return TextBrainDecision(
+                decision="delegate", transcript=text,
+                error=f"unknown provider {self._provider}",
+            )
+        if decision.decision == "chitchat" and decision.reply:
+            self._append_session_turn("user", text)
+            self._append_session_turn("assistant", decision.reply)
+            logger.info(
+                "TextBrain[%s] session_history size=%d (cap=%d)",
+                self._provider, len(self._session_history), self._session_history_max,
+            )
+        return decision
+
+    def _append_session_turn(self, role: str, text: str) -> None:
+        """Push a turn onto the in-process session log + trim to cap.
+        Stamps each entry with ``time.time()`` so the per-call merge
+        with OpenClaw history can sort everything chronologically.
+        Also appends to the JSONL log on disk (best-effort) so a
+        service restart can reload the recent session."""
+        text = (text or "").strip()
+        if not text:
+            return
+        entry = {"role": role, "text": text, "ts": time.time()}
+        self._session_history.append(entry)
+        # Cap at SESSION_HISTORY_MAX entries — drops oldest pair first.
+        if len(self._session_history) > self._session_history_max:
+            self._session_history = self._session_history[-self._session_history_max:]
+        self._write_session_log(entry)
+
+    def _init_session_log(self) -> Optional[Path]:
+        """Resolve the JSONL persistence path + make sure the parent
+        dir exists. Returns ``None`` (disabled persistence) on any
+        failure — brain still works, just loses memory on restart."""
+        raw = os.environ.get(
+            "LELAMP_BRAIN_SESSION_LOG", "/root/local/brain/session.jsonl"
+        ).strip()
+        if not raw or raw in ("/dev/null", "off", "none"):
+            logger.info("TextBrain[%s] session log persistence disabled", self._provider)
+            return None
+        path = Path(raw)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.warning(
+                "TextBrain[%s] session log parent dir %s unavailable: %s — "
+                "running in-memory only", self._provider, path.parent, e,
+            )
+            return None
+        logger.info(
+            "TextBrain[%s] session log persistence enabled at %s",
+            self._provider, path,
         )
+        return path
+
+    def _load_session_log(self) -> None:
+        """Replay the JSONL tail into ``self._session_history`` so a
+        restart picks up where the previous process left off.
+
+        Reads ONLY the last ``session_history_max`` lines (the tail
+        TextBrain.decide will actually use) — no point loading megabytes
+        of old session log on init."""
+        if self._session_log_path is None or not self._session_log_path.exists():
+            return
+        try:
+            with open(self._session_log_path, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+        except OSError as e:
+            logger.warning(
+                "TextBrain[%s] could not read session log %s: %s",
+                self._provider, self._session_log_path, e,
+            )
+            return
+        tail = lines[-self._session_history_max:]
+        loaded = 0
+        for line in tail:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            role = obj.get("role")
+            text = (obj.get("text") or "").strip()
+            ts = float(obj.get("ts") or 0.0)
+            if role not in ("user", "assistant") or not text:
+                continue
+            self._session_history.append({"role": role, "text": text, "ts": ts})
+            loaded += 1
+        if loaded:
+            logger.info(
+                "TextBrain[%s] session log restored %d entries from %s",
+                self._provider, loaded, self._session_log_path,
+            )
+
+    def _write_session_log(self, entry: dict) -> None:
+        """Append one entry as a JSONL line. Silent on failure — disk
+        I/O errors shouldn't break the brain decision path."""
+        if self._session_log_path is None:
+            return
+        try:
+            with open(self._session_log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError as e:
+            logger.debug(
+                "TextBrain[%s] session log write failed: %s",
+                self._provider, e,
+            )
+
+    @staticmethod
+    def _to_epoch(value) -> float:
+        """Best-effort coerce a timestamp field (Unix epoch sec/ms or
+        ISO8601 string) to seconds-since-epoch. Returns 0.0 when the
+        value is missing or unparseable — those entries land at the
+        head of the merged list, which mimics "no timing info known"."""
+        if value is None or value == "":
+            return 0.0
+        if isinstance(value, (int, float)):
+            v = float(value)
+            return v / 1000.0 if v > 1e11 else v  # heuristic: > 10^11 = ms
+        s = str(value).strip()
+        if not s:
+            return 0.0
+        try:
+            from datetime import datetime
+            return datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            pass
+        try:
+            v = float(s)
+            return v / 1000.0 if v > 1e11 else v
+        except (ValueError, TypeError):
+            return 0.0
+
+    def _merge_history(self) -> list[dict]:
+        """Return a single chronologically-sorted list of turns, merging
+        recent OpenClaw conversation (delegate flow) with the in-process
+        session_history (chit-chat the brain handled itself).
+
+        Each entry is ``{"role": "user"|"assistant", "text": str,
+        "ts": float}``. Capped at ``2 * _session_history_max`` total
+        entries (newest tail) so a long OpenClaw log doesn't blow up
+        the prompt.
+        """
+        merged: list[dict] = []
+        for turn in self._load_recent_turns():
+            text = (turn.text or "").strip()
+            if not text:
+                continue
+            merged.append({
+                "role": "user" if turn.role == "user" else "assistant",
+                "text": text,
+                "ts": self._to_epoch(turn.time),
+            })
+        for entry in self._session_history:
+            text = (entry.get("text") or "").strip()
+            if not text:
+                continue
+            merged.append({
+                "role": entry["role"],
+                "text": text,
+                "ts": float(entry.get("ts", 0.0)),
+            })
+        merged.sort(key=lambda e: e["ts"])
+        # Cap newest tail so total context stays bounded.
+        cap = self._session_history_max * 2
+        if len(merged) > cap:
+            merged = merged[-cap:]
+        return merged
 
     # --- prompt assembly -----------------------------------------------------
 
@@ -293,14 +495,15 @@ class TextBrain:
             )
             # Build chat-history-shaped contents so the static system
             # instruction stays byte-stable (cache-friendly). Gemini
-            # roles are "user" / "model".
+            # roles are "user" / "model". History is the timestamp-
+            # merged interleave of OpenClaw turns (delegate flow) +
+            # in-process session turns (chit-chat the brain handled
+            # itself) — see _merge_history.
             contents = []
-            for turn in self._load_recent_turns():
-                if not (turn.text or "").strip():
-                    continue
-                role = "user" if turn.role == "user" else "model"
+            for entry in self._merge_history():
+                role = "user" if entry["role"] == "user" else "model"
                 contents.append(types.Content(
-                    role=role, parts=[types.Part(text=turn.text)],
+                    role=role, parts=[types.Part(text=entry["text"])],
                 ))
             contents.append(types.Content(
                 role="user", parts=[types.Part(text=text)],
@@ -377,17 +580,18 @@ class TextBrain:
                 },
             }
             # Build message list with the static system at index 0 +
-            # recent conversation as user/assistant alternation. The
-            # system message is byte-stable across turns so OpenAI's
-            # prompt cache (auto for prefixes ≥1024 tokens) kicks in.
+            # the timestamp-merged conversation history (OpenClaw +
+            # in-process brain session, interleaved chronologically) +
+            # current user. The system message is byte-stable so
+            # OpenAI's prompt cache (auto for prefixes ≥1024 tokens)
+            # kicks in.
             messages = [
                 {"role": "system", "content": self._cached_static_system},
             ]
-            for turn in self._load_recent_turns():
-                if not (turn.text or "").strip():
-                    continue
-                role = "user" if turn.role == "user" else "assistant"
-                messages.append({"role": role, "content": turn.text})
+            for entry in self._merge_history():
+                messages.append({
+                    "role": entry["role"], "content": entry["text"],
+                })
             messages.append({"role": "user", "content": text})
             response = self._client.chat.completions.create(
                 model=self._model,
