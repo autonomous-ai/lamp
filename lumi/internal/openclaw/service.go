@@ -23,7 +23,6 @@ const (
 	defaultGatewayBind  = "loopback"
 	defaultGatewayPort  = 18789
 	openclawRuntimeUser = "root"
-	defaultModelKey     = "claude-haiku-4-5"
 )
 
 // Compile-time check: *Service implements domain.AgentGateway.
