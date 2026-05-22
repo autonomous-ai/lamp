@@ -62,28 +62,14 @@ WEBRTCVAD_FRAME_MS = int(os.environ.get("LELAMP_WEBRTCVAD_FRAME_MS", "30"))
 ECHO_RMS_FLOOR = int(os.environ.get("LELAMP_ECHO_RMS_FLOOR", "200"))
 ECHO_GATE_MAX_WAIT_S = float(os.environ.get("LELAMP_ECHO_GATE_MAX_WAIT_S", "1.5"))
 
-# Brain-mode-only ambient gate. The realtime brain has no client-side
-# VAD on its own — when manual activity detection is on (Gemini Live
-# with automatic_activity_detection.disabled=True) we are the VAD.
-# This RMS floor distinguishes "someone close + actually addressing
-# Lumi" from "distant TV / passers-by", so we only open a turn when
-# the user is talking *to* the lamp.
-#
-# Tuning notes: a user speaking ~30 cm from the mic produces RMS in
-# the 1000-3000 range; ambient room noise + distant TV usually sits
-# 100-300. 400 is a safe default. Set to 0 to disable the gate.
-BRAIN_AMBIENT_RMS_MIN = int(os.environ.get("LELAMP_BRAIN_AMBIENT_RMS_MIN", "400"))
+# Brain-mode client-side VAD was removed — the provider's own server
+# VAD (Gemini Live, OpenAI Realtime) decides turn boundaries from the
+# audio stream. The TTS echo gate (Layer 1) + reverb decay (Layer 2)
+# remain to keep our own playback out of the mic.
+# LELAMP_BRAIN_AMBIENT_RMS_MIN / LELAMP_BRAIN_END_OF_SPEECH_S /
+# LELAMP_BRAIN_POST_TTS_SUPPRESS_S are no longer read; they may be
+# safely removed from .env.
 
-# How long we wait for another loud frame before declaring the turn
-# over and sending the provider an activity_end. Bumping this up
-# allows longer thought-pauses inside a single utterance at the cost
-# of slower end-of-turn detection.
-BRAIN_END_OF_SPEECH_S = float(
-    os.environ.get(
-        "LELAMP_BRAIN_END_OF_SPEECH_S",
-        os.environ.get("LELAMP_BRAIN_TURN_TAIL_S", "1.0"),  # legacy alias
-    )
-)
 ECHO_GATE_WINDOW_S = float(os.environ.get("LELAMP_ECHO_GATE_WINDOW_S", "0.05"))
 ECHO_SIMILARITY_THRESHOLD = float(os.environ.get("LELAMP_ECHO_SIMILARITY_THRESHOLD", "0.55"))
 ECHO_RELEVANCE_WINDOW_S = float(os.environ.get("LELAMP_ECHO_RELEVANCE_WINDOW_S", "15.0"))
@@ -303,66 +289,30 @@ class VoiceService:
         #     fallback → brain emits text via input_audio_transcription,
         #                we hand it to TTSService so the user keeps the
         #                same ElevenLabs/OpenAI voice as task replies.
-        self._brain = None            # Brain instance (provider-agnostic), or None
-        self._brain_sink = None       # PCMAudioSink for native audio out
+        # Half-cascade text brain. Activated via LELAMP_BRAIN_PROVIDER
+        # (gemini | openai | none). When active, the classic STT
+        # pipeline still does the audio→text work — only the routing
+        # decision after STT goes through the brain. See
+        # lelamp/service/brain/text_router.py for the design rationale.
+        #
+        # Kept the legacy audio-realtime brain attributes (_brain,
+        # _brain_sink, _brain_tts_mode) at None so any code still
+        # checking them treats brain as "off". The audio realtime path
+        # is unwired but the modules stay on disk for rollback.
+        self._brain = None
+        self._brain_sink = None
         self._brain_tts_mode = "native"
-        provider_env = os.environ.get("LELAMP_BRAIN_PROVIDER", "")
+        self._text_brain = None
         try:
-            from lelamp.service.brain import (
-                available_providers,
-                is_disabled,
-                make_brain,
-                normalize,
-            )
-            from lelamp.service.brain.audio_sink import PCMAudioSink
+            from lelamp.service.brain.text_router import build_text_brain_from_env
+            self._text_brain = build_text_brain_from_env()
+            if self._text_brain is not None:
+                logger.info(
+                    "VoiceService brain mode active (text router — provider=%s, model=%s)",
+                    self._text_brain.provider, self._text_brain.model,
+                )
         except Exception as e:
-            logger.warning("brain package import failed: %s — using classic STT", e)
-            is_disabled = lambda _: True  # noqa: E731 — neutralize the branch below
-            make_brain = lambda *_a, **_k: None  # noqa: E731
-            available_providers = lambda: []  # noqa: E731
-            normalize = lambda v: (v or "").strip().lower()  # noqa: E731
-
-        if not is_disabled(provider_env):
-            tts_mode = os.environ.get("LELAMP_BRAIN_TTS", "native").strip().lower()
-            if tts_mode not in ("native", "fallback"):
-                logger.warning("unknown LELAMP_BRAIN_TTS=%r — using 'native'", tts_mode)
-                tts_mode = "native"
-            try:
-                brain = make_brain(provider_env, tts_output_mode=tts_mode)
-                if brain is None:
-                    logger.warning(
-                        "LELAMP_BRAIN_PROVIDER=%r unknown — accepted: %s. "
-                        "Using classic STT %s.",
-                        provider_env, available_providers(), self._stt.name,
-                    )
-                elif not brain.available:
-                    logger.warning(
-                        "brain provider %r not ready — using classic STT %s",
-                        normalize(provider_env), self._stt.name,
-                    )
-                else:
-                    sink = PCMAudioSink()
-                    if not sink.start():
-                        logger.warning(
-                            "brain sink failed to open — using classic STT %s",
-                            self._stt.name,
-                        )
-                    else:
-                        if tts_mode == "fallback" and self._tts is None:
-                            logger.warning(
-                                "LELAMP_BRAIN_TTS=fallback but no TTSService "
-                                "wired — replies will be lost. Forcing native.",
-                            )
-                            tts_mode = "native"
-                        self._brain = brain
-                        self._brain_sink = sink
-                        self._brain_tts_mode = tts_mode
-                        logger.info(
-                            "VoiceService brain mode active (provider=%s, tts=%s)",
-                            normalize(provider_env), tts_mode,
-                        )
-            except Exception as e:
-                logger.warning("Brain init failed, keeping STT %s: %s", self._stt.name, e)
+            logger.warning("Text brain init failed, keeping classic STT path: %s", e)
 
     def set_music_service(self, music_service) -> None:
         self._music = music_service
@@ -974,6 +924,14 @@ class VoiceService:
         user_text_chunks: list[str] = []   # brain's transcription of user mic
         reply_chunks: list[str] = []       # brain's transcription of its own reply
         last_speaker = ["unknown"]         # mutable cell so callbacks can update
+        # Set when we send activity_end (turn closed, Gemini owns it now),
+        # cleared when the reply lands (on_text final / on_delegate / on_error).
+        # While True, mic loop drops loud frames so the user can't open a
+        # second turn while Lumi is still thinking — otherwise replies
+        # arrive in parallel and TTSService ends up speaking multiple
+        # answers in a row. List-as-cell for cross-thread mutability.
+        reply_pending = [False]
+        reply_pending_since = [0.0]  # epoch — used by the safety timeout
 
         # Per-turn benchmark. Auto-discovers provider from the brain
         # class name (GeminiLiveBrain → "gemini", OpenAIRealtimeBrain →
@@ -1040,6 +998,7 @@ class VoiceService:
             if bench is not None:
                 bench.end_turn("delegate")
                 bench.start_turn()
+            reply_pending[0] = False   # delegate done, user can speak again
             audio_buf.clear()
             user_text_chunks.clear()
 
@@ -1063,6 +1022,7 @@ class VoiceService:
                 if bench is not None:
                     bench.end_turn("empty")
                     bench.start_turn()
+                reply_pending[0] = False
                 return
             last_speaker[0] = _identify_speaker()
             tag = last_speaker[0]
@@ -1088,6 +1048,7 @@ class VoiceService:
             if bench is not None:
                 bench.end_turn("chitchat")
                 bench.start_turn()
+            reply_pending[0] = False   # reply received, user can speak again
             audio_buf.clear()
 
         def on_user_input(text: str, is_final: bool) -> None:
@@ -1105,6 +1066,7 @@ class VoiceService:
             logger.warning("Brain session error: %s", err)
             if bench is not None:
                 bench.end_turn("error", error=str(err))
+            reply_pending[0] = False   # safety: don't deadlock the mic if a reply errored
 
         def on_usage(prompt: int, response: int, total: int) -> None:
             if bench is not None:
@@ -1130,14 +1092,14 @@ class VoiceService:
                 # once speaker output stops, keep dropping mic frames
                 # until the measured RMS falls below ECHO_RMS_FLOOR.
                 reverb_until = 0.0  # epoch time we may resume sending; 0 = no gate
-                # Manual-VAD state machine for the brain. The provider
-                # gets explicit activity_start / activity_end events at
-                # turn boundaries; audio frames between them belong to
-                # one user utterance. Outside a turn (idle), quiet
-                # frames are dropped so distant TV / passers-by don't
-                # burn tokens.
-                in_speech = False        # True while inside an open turn
-                last_loud_t = 0.0        # epoch of most recent loud frame
+                tts_gate_on = False      # True while Layer 1 is muting frames
+                tts_gate_start_t = 0.0   # epoch when current TTS gate engaged
+                tts_gate_dropped = 0     # frames dropped during this engage
+                # Layer 3 client VAD was removed — we now trust the
+                # provider's own server-side VAD to decide turn
+                # boundaries. Layer 1 (TTS gate) + Layer 2 (reverb
+                # decay) still run to keep our own playback out of the
+                # mic; everything else passes through unchanged.
                 try:
                     while self._running and not session.is_closed():
                         # Always drain the mic — if we skipped read() while
@@ -1149,9 +1111,36 @@ class VoiceService:
                             continue
 
                         # Layer 1 — speaker is actively producing audio.
-                        if self._tts_is_speaking() or self._music_is_playing():
-                            reverb_until = time.time() + ECHO_GATE_MAX_WAIT_S
+                        tts_now = self._tts_is_speaking()
+                        music_now = self._music_is_playing()
+                        if tts_now or music_now:
+                            now_t = time.time()
+                            if not tts_gate_on:
+                                # Edge: gate just engaged. Log clearly
+                                # so the start can be matched against
+                                # TTSService's own "speaking LED start"
+                                # log — if these don't align (±100 ms)
+                                # the brain mute is mis-firing.
+                                logger.info(
+                                    "Brain loop: TTS gate ENGAGE (tts=%s music=%s) — mic frames suppressed",
+                                    tts_now, music_now,
+                                )
+                                tts_gate_on = True
+                                tts_gate_start_t = now_t
+                                tts_gate_dropped = 0
+                            tts_gate_dropped += 1
+                            reverb_until = now_t + ECHO_GATE_MAX_WAIT_S
                             continue
+                        if tts_gate_on:
+                            # Edge: gate just released. Compare this
+                            # timestamp against "TTS speaking LED end"
+                            # — they should fire within ~50 ms.
+                            held = time.time() - tts_gate_start_t
+                            logger.info(
+                                "Brain loop: TTS gate RELEASE — dropped %d frames over %.2fs; reverb gate now armed",
+                                tts_gate_dropped, held,
+                            )
+                            tts_gate_on = False
 
                         # Layer 2 — wait for reverb to decay.
                         if reverb_until:
@@ -1170,32 +1159,10 @@ class VoiceService:
                                 else:
                                     continue
 
-                        # Layer 3 — manual VAD state machine. We tell
-                        # the provider explicitly when a turn starts
-                        # and ends (activity_start / activity_end);
-                        # frames between those markers belong to one
-                        # utterance. Outside a turn quiet frames are
-                        # dropped — distant TV / passers-by never
-                        # reach the provider.
-                        rms_now = self._rms(data) if BRAIN_AMBIENT_RMS_MIN > 0 else 32768
-                        now_t = time.time()
-                        loud = rms_now >= BRAIN_AMBIENT_RMS_MIN
-                        if loud:
-                            last_loud_t = now_t
-                            if not in_speech:
-                                session.notify_activity_start()
-                                in_speech = True
-                        elif in_speech and (now_t - last_loud_t) >= BRAIN_END_OF_SPEECH_S:
-                            session.notify_activity_end()
-                            in_speech = False
-                        if not in_speech:
-                            # Either truly idle, or just closed the turn
-                            # on this frame — keep the speaker-ID buffer
-                            # populated for the next turn but don't ship
-                            # audio to the provider.
-                            audio_buf.append(data)
-                            continue
-
+                        # No client-side VAD — every frame past the TTS
+                        # echo gate goes straight to the provider, which
+                        # decides turn boundaries on its own server-side
+                        # VAD.
                         try:
                             resampled = self._resample_to_stt(data, device_rate)
                             audio_buf.append(resampled)
@@ -1494,17 +1461,63 @@ class VoiceService:
                 buf_frames, buf_bytes, buf_duration, combined or "(empty)",
             )
                       
-            # Prepare message and user for speaker recognition and SER. 
+            # Prepare message and user for speaker recognition and SER.
             from lelamp.service.voice.speech_emotion.constants import UNKNOWN_USER_LABEL
             final_text, event_type = self._resolve_wake_word_split(combined)
             user = UNKNOWN_USER_LABEL
-            
+
             # 1. Speaker recognize and decorate the final text to send to Lumi.
             if combined:
                 final_msg, se_user = self._identify_and_decorate(final_text, audio_buffer)
                 user = se_user if se_user else UNKNOWN_USER_LABEL
                 logger.info("Final message → Lumi (%s): %r", event_type, final_msg)
-                self._send_to_lumi(final_msg, event_type=event_type)
+
+                # Half-cascade brain — when active, the model decides
+                # chit-chat vs delegate from `final_text` (the STT
+                # transcript without speaker prefix). Only consult on
+                # the plain "voice" event type — wake-word events have
+                # their own routing.
+                routed_to_brain = False
+                if (
+                    self._text_brain is not None
+                    and self._text_brain.available
+                    and event_type == "voice"
+                    and final_text.strip()
+                ):
+                    logger.info(
+                        "brain.input  [%s] %r", user, final_text,
+                    )
+                    decision = self._text_brain.decide(final_text, speaker=user)
+                    logger.info(
+                        "brain.decide [%s] decision=%s latency=%.2fs tokens=%d (prompt=%d response=%d)",
+                        user, decision.decision, decision.latency_s,
+                        decision.total_tokens, decision.prompt_tokens, decision.response_tokens,
+                    )
+                    if decision.decision == "chitchat" and decision.reply:
+                        logger.info("brain.chitchat [%s] %r", user, decision.reply)
+                        if self._tts is not None:
+                            try:
+                                if hasattr(self._tts, "speak_queue"):
+                                    self._tts.speak_queue(decision.reply)
+                                else:
+                                    self._tts.speak(decision.reply)
+                            except Exception as e:
+                                logger.warning("brain chitchat speak failed: %s", e)
+                        routed_to_brain = True
+                    elif decision.decision == "delegate":
+                        logger.info("brain.delegate [%s] → Lumi", user)
+                        # Fall through to _send_to_lumi below.
+                    else:
+                        # decision == "error" — log and let it fall
+                        # through to Lumi (safe default; never silently
+                        # drop user input).
+                        logger.warning(
+                            "brain.error [%s] %s — falling through to Lumi",
+                            user, decision.error or "(no detail)",
+                        )
+
+                if not routed_to_brain:
+                    self._send_to_lumi(final_msg, event_type=event_type)
 
             # 2. Submit SER — uses the UNTRIMMED snapshot so laughter / sighs
             self._submit_speech_emotion_from_session(ser_audio_buffer, user=user)

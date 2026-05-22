@@ -57,6 +57,23 @@ DEFAULT_VOICE = os.environ.get("LELAMP_OPENAI_REALTIME_VOICE", "alloy")
 # Optional explicit override — if blank, fall back to lumi config's
 # stt_language (same source classic STT + Gemini brain use).
 DEFAULT_LANGUAGE = os.environ.get("LELAMP_OPENAI_REALTIME_LANGUAGE", "")
+# ASR model for the Realtime input transcription. `whisper-1` is the
+# legacy default and hallucinates language-common phrases on silence
+# / low-information audio (Vietnamese: "Hẹn gặp lại các bạn trong
+# những video tiếp theo", English: "Thanks for watching", etc.).
+# `gpt-4o-mini-transcribe` is the newer ASR — same multilingual
+# coverage but trained on cleaner data + less prone to those YouTube
+# outro hallucinations. `gpt-4o-transcribe` is the bigger sibling
+# (slightly better quality, ~2x cost).
+# Default = whisper-1 (proven, but hallucinates outro phrases on silence).
+# Set LELAMP_OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe (or
+# gpt-4o-transcribe) once verified working on your account — those
+# newer ASR models hallucinate less but are gated behind feature flags
+# on some OpenAI tiers and the Realtime API silently disables
+# transcription if it doesn't accept the model name.
+DEFAULT_TRANSCRIBE_MODEL = os.environ.get(
+    "LELAMP_OPENAI_TRANSCRIBE_MODEL", "whisper-1"
+)
 
 # Output rendering — same env var as Gemini, same semantics:
 #   "native"   — play OpenAI's PCM audio out the speaker directly.
@@ -134,6 +151,7 @@ class OpenAIRealtimeBrain(Brain):
             client=self._client,
             model=self._model,
             voice=self._voice,
+            language=self._language,
             system_instruction=system_instruction,
             tts_output_mode=self._tts_output_mode,
         )
@@ -168,10 +186,12 @@ class OpenAIRealtimeSession(BrainSession):
         voice: str,
         system_instruction: str,
         tts_output_mode: str = "native",
+        language: str = "",
     ):
         self._client = client
         self._model = model
         self._voice = voice
+        self._language = language
         self._system_instruction = system_instruction
         self._tts_output_mode = tts_output_mode
 
@@ -295,7 +315,23 @@ class OpenAIRealtimeSession(BrainSession):
             # The beta endpoint started rejecting handshakes with
             # 4000 `beta_api_shape_disabled` once GA shipped.
             async with self._client.realtime.connect(model=self._model) as conn:
-                await conn.session.update(session=self._build_session_config())
+                config = self._build_session_config()
+                # Log the wire payload at a friendly level so we can
+                # verify: which transcribe model the server actually
+                # uses, language lock, voice, tool wiring. If the user
+                # sees a turn fire with no brain.input downstream, this
+                # is the first place to look — a silent server reject
+                # of `transcription.model` shows up as the next
+                # `session.updated` not containing it.
+                logger.info(
+                    "OpenAI Realtime session.update sent — model=%s voice=%s lang=%s tts=%s "
+                    "transcription=%s tool_choice=%s",
+                    self._model, self._voice, self._language or "auto",
+                    self._tts_output_mode,
+                    config.get("audio", {}).get("input", {}).get("transcription"),
+                    config.get("tool_choice"),
+                )
+                await conn.session.update(session=config)
                 self._setup_done.set()
                 logger.info("OpenAI Realtime session open (model=%s)", self._model)
 
@@ -324,6 +360,18 @@ class OpenAIRealtimeSession(BrainSession):
         finally:
             logger.info("OpenAI Realtime session closed")
 
+    def _build_transcription_kwargs(self) -> dict[str, Any]:
+        """Build the audio.input.transcription payload. Forces the ASR
+        to the configured ISO-639-1 language when one is set; otherwise
+        auto-detect. Model name comes from
+        ``LELAMP_OPENAI_TRANSCRIBE_MODEL`` (default
+        ``gpt-4o-mini-transcribe``) — see DEFAULT_TRANSCRIBE_MODEL for
+        why we avoid ``whisper-1``."""
+        kwargs: dict[str, Any] = {"model": DEFAULT_TRANSCRIBE_MODEL}
+        if self._language and self._language.lower() not in ("auto", ""):
+            kwargs["language"] = self._language.split("-")[0].lower()
+        return kwargs
+
     def _build_session_config(self) -> dict[str, Any]:
         """Build the session.update payload for the GA Realtime API.
 
@@ -345,11 +393,15 @@ class OpenAIRealtimeSession(BrainSession):
             "audio": {
                 "input": {
                     "format": {"type": "audio/pcm", "rate": INPUT_RATE_HZ},
-                    # whisper-1 is multilingual and the Realtime API's
-                    # default — leaving language unset lets it auto-detect,
-                    # which is the right call for households that switch
-                    # languages mid-chat.
-                    "transcription": {"model": "whisper-1"},
+                    # Whisper transcription. Setting `language` forces
+                    # ASR to interpret input as that ISO-639-1 tongue —
+                    # unlike Gemini Developer API's `language_codes`
+                    # (which is Enterprise-only), Whisper accepts this
+                    # on every tier. Strip the region tag because
+                    # Whisper expects short codes (vi, not vi-VN). If
+                    # `self._language` is empty/`auto`, fall back to
+                    # auto-detect so multilingual households still work.
+                    "transcription": self._build_transcription_kwargs(),
                     # server_vad lets OpenAI decide when a turn ends. The
                     # alternative (`turn_detection: None`) puts that on
                     # the client via input_audio_buffer.commit — we don't
@@ -454,7 +506,22 @@ class OpenAIRealtimeSession(BrainSession):
     # if/elif tree.
 
     async def _on_session_event(self, conn, event) -> None:
-        logger.debug("openai realtime session event: %s", event.type)
+        # Promote to INFO + dump what the server echoed back. If a
+        # transcription model name was silently rejected, the server's
+        # session.updated will *not* include `transcription.model` in
+        # the audio.input block — a 1-line diff vs what we sent.
+        sess = getattr(event, "session", None)
+        audio = getattr(sess, "audio", None) if sess is not None else None
+        ai_input = getattr(audio, "input", None) if audio is not None else None
+        echoed_transcription = getattr(ai_input, "transcription", None)
+        echoed_voice = (
+            getattr(getattr(audio, "output", None), "voice", None)
+            if audio is not None else None
+        )
+        logger.info(
+            "OpenAI Realtime %s — server echo: voice=%s transcription=%s",
+            event.type, echoed_voice, echoed_transcription,
+        )
 
     async def _on_response_audio_delta(self, conn, event) -> None:
         if self._tts_output_mode != "native":
@@ -564,6 +631,19 @@ class OpenAIRealtimeSession(BrainSession):
                 logger.warning("conversation.item.create (tool output) failed: %s", e)
 
     async def _on_response_done(self, conn, event) -> None:
+        # Emit a turn marker even when no user transcription / no reply
+        # text shows up downstream (often when Whisper finds the audio
+        # too short or empty — turn quietly closes without firing
+        # brain.input). Lets the operator see that the turn DID
+        # complete on the server side; if there's no brain.input
+        # afterwards, the issue is transcription-side, not session-side.
+        response = getattr(event, "response", None)
+        status = getattr(response, "status", "?") if response is not None else "?"
+        output_items = getattr(response, "output", None) or []
+        logger.info(
+            "OpenAI Realtime response.done — status=%s output_items=%d",
+            status, len(output_items),
+        )
         self._log_usage(event)
 
     async def _on_error_event(self, conn, event) -> None:

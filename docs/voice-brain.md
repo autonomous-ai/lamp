@@ -4,8 +4,8 @@ Optional routing layer placed **in front of** the existing STT → OpenClaw
 pipeline. Replaces the always-go-through-OpenClaw flow with:
 
 ```
-mic ─► VAD ─► <provider> ─┬─► tool_call delegate_to_lumi ─► OpenClaw (classic flow)
-                           └─► native audio out ──────────► speaker (chit-chat)
+mic ─► TTS echo gate ─► <provider> (server VAD) ─┬─► tool_call delegate_to_lumi ─► OpenClaw (classic flow)
+                                                  └─► native audio out ──────────► speaker (chit-chat)
 ```
 
 **Why:** OpenClaw pays a token + latency cost on every utterance, even for
@@ -84,10 +84,17 @@ export LUMI_BASE_URL=http://127.0.0.1:5000             # fallback history source
 ```
 
 When the brain is enabled, **the classic STT pipeline is bypassed
-entirely**. Every mic frame goes straight to the provider, which owns
-VAD, turn detection, classification, and reply. No fallback to
-per-utterance STT sessions — that path was tried and dropped because
-the silence-timeout kept cutting realtime replies off mid-stream.
+entirely**. Every mic frame is forwarded to the provider, which runs
+its own server-side VAD to decide turn boundaries — we don't run a
+client-side VAD on top. The only client-side gating that remains is
+the TTS echo gate (drops frames while Lumi's own playback is active)
+and the reverb-decay gate (waits for RMS to drop below
+`ECHO_RMS_FLOOR` after playback stops), so the brain doesn't hear
+itself.
+
+No fallback to per-utterance STT sessions — that path was tried and
+dropped because the silence-timeout kept cutting realtime replies
+off mid-stream.
 
 Speaker recognition, SER, and wake-word filtering are **not run** in
 brain mode (they need per-session audio buffers that this loop doesn't

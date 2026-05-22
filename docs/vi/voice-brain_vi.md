@@ -4,7 +4,7 @@ Lớp định tuyến tuỳ chọn đặt **trước** pipeline STT → OpenClaw
 Thay vì mọi câu nói đều đẩy qua OpenClaw, brain mới chia làm 2 nhánh:
 
 ```
-mic ─► VAD ─► <provider> ─┬─► tool_call delegate_to_lumi ─► OpenClaw (flow cũ)
+mic ─► TTS echo gate ─► <provider> (server VAD) ─┬─► tool_call delegate_to_lumi ─► OpenClaw (flow cũ)
                            └─► audio out trực tiếp ───────► loa (chit-chat)
 ```
 
@@ -83,11 +83,16 @@ export OPENCLAW_SESSION_KEY=agent:main:main
 export LUMI_BASE_URL=http://127.0.0.1:5000
 ```
 
-Khi bật brain, **pipeline STT cổ điển bị bypass hoàn toàn**. Mọi frame
-mic đi thẳng sang provider; provider lo VAD, turn detection, phân
-loại, sinh câu trả lời. Không còn nhánh "STT-shaped fallback
-per-utterance" — đã thử nhưng silence-timeout của VoiceService cứ cắt
-giọng giữa chừng.
+Khi bật brain, **pipeline STT cổ điển bị bypass hoàn toàn**. Mọi
+frame mic được đẩy thẳng sang provider, provider tự chạy server VAD
+để quyết turn boundary — client KHÔNG còn lớp VAD nào nữa. Phần
+gating duy nhất còn lại ở client là TTS echo gate (drop frame khi
+chính Lumi đang phát) và reverb-decay gate (đợi RMS xuống dưới
+`ECHO_RMS_FLOOR` sau khi loa tắt), để brain không tự nghe chính
+nó.
+
+Không còn nhánh "STT-shaped fallback per-utterance" — đã thử nhưng
+silence-timeout của VoiceService cứ cắt giọng giữa chừng.
 
 Speaker recognition, SER, wake-word filter **không chạy** trong brain
 mode (cần buffer audio per-session mà loop này không giữ). Cần lại

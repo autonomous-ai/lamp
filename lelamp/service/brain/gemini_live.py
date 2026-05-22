@@ -462,33 +462,31 @@ class GeminiLiveSession(BrainSession):
         )
 
     def _build_manual_activity_kwargs(self) -> dict:
-        """Disable Gemini's server-side VAD so we get to choose
-        start-of-turn / end-of-turn explicitly via send_realtime_input(
-        activity_start=...) / activity_end=...). This is the
-        officially supported "I have my own VAD on the client" mode —
-        cleaner than feeding silence padding to trick the server timer
-        when our ambient gate is dropping quiet frames.
-
-        Gracefully degrade to server-side auto-VAD if the SDK is too
-        old to expose RealtimeInputConfig / AutomaticActivityDetection
-        — the legacy auto path will still work, just with the
-        silence-trailing workaround in voice_service.
+        """Server VAD path — let Gemini decide turn boundaries from the
+        audio stream. We used to set automatic_activity_detection.disabled
+        =True and drive start/end manually from the client, but the TTS
+        echo gate in voice_service handles self-feedback on its own, so
+        the manual signalling layer was redundant. Kept as a no-op
+        return so the call site doesn't need to change if we ever flip
+        back; the original code is preserved in git history.
         """
-        types = self._types
-        try:
-            return {
-                "realtime_input_config": types.RealtimeInputConfig(
-                    automatic_activity_detection=types.AutomaticActivityDetection(
-                        disabled=True,
-                    ),
-                ),
-            }
-        except (AttributeError, TypeError) as e:
-            logger.info(
-                "manual activity detection unsupported by this SDK (%s) — "
-                "falling back to server VAD", e,
-            )
-            return {}
+        return {}
+        # --- legacy manual-VAD path (kept commented for reference) ---
+        # types = self._types
+        # try:
+        #     return {
+        #         "realtime_input_config": types.RealtimeInputConfig(
+        #             automatic_activity_detection=types.AutomaticActivityDetection(
+        #                 disabled=True,
+        #             ),
+        #         ),
+        #     }
+        # except (AttributeError, TypeError) as e:
+        #     logger.info(
+        #         "manual activity detection unsupported by this SDK (%s) — "
+        #         "falling back to server VAD", e,
+        #     )
+        #     return {}
 
     def _build_resumption_kwargs(self) -> dict:
         """Enable session resumption. Passing handle=None opts the
