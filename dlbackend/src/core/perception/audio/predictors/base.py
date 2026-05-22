@@ -103,11 +103,12 @@ class AudioEmbedder(PredictorBase[Audio, RawAudioEmbedding]):
         opts.frame_opts.samp_freq = float(self._sample_rate)
         opts.frame_opts.frame_length_ms = 25.0
         opts.frame_opts.frame_shift_ms = 10.0
+        opts.frame_opts.dither = 0.0
         opts.frame_opts.window_type = "hamming"
         opts.mel_opts.num_bins = self._num_mel_bins
 
         fbank = knf.OnlineFbank(opts)
-        fbank.accept_waveform(float(self._sample_rate), audio.waveform.tolist())
+        fbank.accept_waveform(self._sample_rate, audio.waveform)
         fbank.input_finished()
 
         num_frames = fbank.num_frames_ready
