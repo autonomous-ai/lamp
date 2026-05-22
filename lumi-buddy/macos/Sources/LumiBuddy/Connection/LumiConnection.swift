@@ -73,6 +73,11 @@ final class LumiConnection {
         config.httpShouldUsePipelining = false
         config.urlCache = nil
         config.httpCookieStorage = nil
+        // Bypass system proxy. The lamp is on the local LAN; system-wide
+        // proxies (corporate VPN, antivirus web filter, PAC file) can intercept
+        // the WS upgrade and replay garbled HTTP, producing "RSV1 set, bad
+        // opcode 7, bad MASK" on the server.
+        config.connectionProxyDictionary = [:]
         let session = URLSession(configuration: config)
         self.session = session
 

@@ -16,6 +16,11 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
 	CheckOrigin:     func(r *http.Request) bool { return true },
+	// Negotiate permessage-deflate when the client asks for it. macOS Ventura's
+	// URLSessionWebSocketTask requests this extension and on some builds will
+	// keep treating frames as compressed even if the server ignores the request
+	// — agreeing here keeps both sides in sync.
+	EnableCompression: true,
 }
 
 // WS upgrades to WebSocket after validating the Bearer token against the
