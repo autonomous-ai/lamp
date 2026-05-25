@@ -61,7 +61,7 @@ func (s *Service) SetupAgent(data domain.SetupRequest) error {
 	llmBaseURL := data.LLMBaseURL
 	llmModel := data.LLMModel
 	if llmModel == "" {
-		llmModel = defaultModelKey
+		llmModel = s.config.LLMModel
 	}
 	channel := data.EffectiveChannel()
 
