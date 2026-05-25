@@ -72,10 +72,18 @@ type Config struct {
 	TTSVoice        string `json:"tts_voice" yaml:"ttsVoice"`
 	TTSInstructions string `json:"tts_instructions" yaml:"ttsInstructions"`
 
-	// AgentRuntime selects which agentic backend to use: "openclaw" (default), "picoclaw", "claudecode", etc.
+	// AgentRuntime selects which agentic backend to use: "openclaw" (default), "hermes", "picoclaw", "claudecode", etc.
 	AgentRuntime string `json:"agent_runtime" yaml:"agentRuntime"`
 
 	OpenclawConfigDir string `json:"openclaw_config_dir" yaml:"openclawConfigDir"`
+
+	// Hermes backend (used when AgentRuntime == "hermes"). Hermes runs as a local
+	// HTTP+SSE API server (OpenAI Responses API style) on the Pi; Lumi acts as a
+	// per-request client. See hermes.md for the full design.
+	HermesBaseURL      string `json:"hermes_base_url,omitempty" yaml:"hermesBaseURL"`
+	HermesAPIKey       string `json:"hermes_api_key,omitempty" yaml:"hermesAPIKey"`
+	HermesConversation string `json:"hermes_conversation,omitempty" yaml:"hermesConversation"`
+	HermesModel        string `json:"hermes_model,omitempty" yaml:"hermesModel"`
 
 	NetworkSSID     string `json:"network_ssid" yaml:"networkSSID" validate:"required"`
 	NetworkPassword string `json:"network_password" yaml:"networkPassword" validate:"required"`
@@ -343,6 +351,32 @@ func (c *Config) GuardModeEnabled() bool {
 
 func (c *Config) GetNotifyChannel() chan bool {
 	return c.notify
+}
+
+// GetHermesBaseURL returns the configured Hermes endpoint, defaulting to the
+// canonical local socket.
+func (c *Config) GetHermesBaseURL() string {
+	if c.HermesBaseURL != "" {
+		return c.HermesBaseURL
+	}
+	return "http://127.0.0.1:8642"
+}
+
+// GetHermesConversation returns the named conversation Lumi posts every turn
+// into, defaulting to "lumi-main".
+func (c *Config) GetHermesConversation() string {
+	if c.HermesConversation != "" {
+		return c.HermesConversation
+	}
+	return "lumi-main"
+}
+
+// GetHermesModel returns the Hermes model name (advertised by /v1/models).
+func (c *Config) GetHermesModel() string {
+	if c.HermesModel != "" {
+		return c.HermesModel
+	}
+	return "hermes-agent"
 }
 
 func ProvideMQTTConfig(c *Config) mqtt.Config {
