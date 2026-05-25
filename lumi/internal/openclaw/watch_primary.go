@@ -17,28 +17,36 @@ const primarySyncDebounce = 300 * time.Millisecond
 const lumiWriteFlagWindow = 3 * time.Second
 const primaryWatchRetryInterval = 5 * time.Second
 
-// touchLumiWriteFlag creates or updates the flag file that signals the next
-// openclaw.json write was initiated by Lumi. Call this BEFORE writing
-// openclaw.json so the primary-model watcher can distinguish Lumi writes
-// from external (dashboard / CLI) writes and avoid a sync loop.
-func touchLumiWriteFlag(configDir string) {
+// setLumiWriteFlag writes expectedPrimary (e.g. "autonomous/claude-opus-4-6")
+// into the flag file. The watcher reads this value back and only treats a write
+// as Lumi-initiated when the file's primary matches the flag content exactly —
+// preventing the race where an external write arrives within the 3 s mtime
+// window but carries a different primary value.
+//
+// Call this BEFORE writing openclaw.json so the watcher sees the flag on fire.
+func setLumiWriteFlag(configDir, expectedPrimary string) {
 	flagPath := filepath.Join(configDir, lumiWriteFlagName)
-	f, err := os.Create(flagPath)
-	if err != nil {
-		slog.Warn("[primarysync] touch flag failed", "path", flagPath, "err", err)
-		return
+	if err := os.WriteFile(flagPath, []byte(expectedPrimary), 0600); err != nil {
+		slog.Warn("[primarysync] write flag failed", "path", flagPath, "err", err)
 	}
-	_ = f.Close()
 }
 
-// isRecentLumiWrite returns true when the flag file exists and its mtime is
-// within lumiWriteFlagWindow. Used by the watcher to skip writes made by Lumi.
-func isRecentLumiWrite(configDir string) bool {
-	info, err := os.Stat(filepath.Join(configDir, lumiWriteFlagName))
+// isLumiWrite returns true when the flag file exists, its mtime is within
+// lumiWriteFlagWindow, AND its content matches actualPrimary. Content matching
+// is the key guard: if an external write changes the primary to a different
+// value within the 3 s window, the mismatch correctly identifies it as
+// external even though the flag is still recent.
+func isLumiWrite(configDir, actualPrimary string) bool {
+	flagPath := filepath.Join(configDir, lumiWriteFlagName)
+	info, err := os.Stat(flagPath)
+	if err != nil || time.Since(info.ModTime()) >= lumiWriteFlagWindow {
+		return false
+	}
+	content, err := os.ReadFile(flagPath)
 	if err != nil {
 		return false
 	}
-	return time.Since(info.ModTime()) < lumiWriteFlagWindow
+	return strings.TrimSpace(string(content)) == actualPrimary
 }
 
 // clearLumiWriteFlag removes the flag file after consuming it.
@@ -47,10 +55,11 @@ func clearLumiWriteFlag(configDir string) {
 }
 
 // StartPrimaryModelWatch watches the openclaw config directory for changes to
-// openclaw.json. When a change originates externally (no Lumi write flag), it
-// reads agents.defaults.model.primary and syncs it back to config.LLMModel
-// — but only when the provider is "autonomous". Non-autonomous providers are
-// silently ignored (they have their own credentials and are out of Lumi scope).
+// openclaw.json. When a change originates externally (flag absent or content
+// mismatch), it reads agents.defaults.model.primary and syncs it back to
+// config.LLMModel — but only when the provider is "autonomous". Non-autonomous
+// providers are logged at WARN level and skipped (Lumi does not manage their
+// credentials).
 //
 // Uses directory-level watching instead of file-level because atomicWriteFile
 // (and OpenClaw itself) writes via a tmp+rename sequence: fsnotify loses the
@@ -124,19 +133,17 @@ func (s *Service) StartPrimaryModelWatch(ctx context.Context) {
 }
 
 // syncPrimaryFromFile is the debounced handler that fires after openclaw.json
-// changes. It skips Lumi-initiated writes (flag file present) and syncs the
-// new autonomous primary model back into config.LLMModel.
+// changes. It reads the new primary, skips Lumi-initiated writes (flag content
+// matches), and syncs autonomous-provider changes back into config.LLMModel.
 func (s *Service) syncPrimaryFromFile() {
+	// Serialize concurrent invocations (debounce timer fires in its own
+	// goroutine and may overlap with UpdatePrimaryModel or other config paths).
+	s.primarySyncMu.Lock()
+	defer s.primarySyncMu.Unlock()
+
 	configDir := s.config.OpenclawConfigDir
-
-	// Lumi-initiated write — not an external change, skip to avoid a loop.
-	if isRecentLumiWrite(configDir) {
-		clearLumiWriteFlag(configDir)
-		slog.Debug("[primarysync] skipping Lumi-initiated write")
-		return
-	}
-
 	configPath := filepath.Join(configDir, "openclaw.json")
+
 	raw, err := os.ReadFile(configPath)
 	if err != nil {
 		slog.Warn("[primarysync] read openclaw.json failed", "err", err)
@@ -153,17 +160,27 @@ func (s *Service) syncPrimaryFromFile() {
 		return
 	}
 
+	// Check both recency AND content: flag must carry the same primary value
+	// Lumi just wrote. If an external write arrives within the 3 s window with
+	// a different primary, the content mismatch correctly flags it as external.
+	if isLumiWrite(configDir, primary) {
+		clearLumiWriteFlag(configDir)
+		slog.Debug("[primarysync] skipping Lumi-initiated write", "primary", primary)
+		return
+	}
+
 	provider, modelKey, ok := splitProviderModel(primary)
 	if !ok || provider != customProviderName {
 		// External change switched to a non-autonomous provider.
-		// Lumi does not manage credentials for other providers — skip.
-		slog.Info("[primarysync] external primary uses non-autonomous provider, ignoring",
-			"primary", primary)
+		// Lumi does not manage credentials for other providers — log state
+		// drift at WARN so operators are aware and skip silently.
+		slog.Warn("[primarysync] external primary switched to non-autonomous provider, Lumi config NOT updated (state drift)",
+			"primary", primary, "lumi_model", s.config.LLMModel)
 		return
 	}
 
 	if s.config.LLMModel == modelKey {
-		return // already in sync, nothing to do
+		return // already in sync
 	}
 
 	slog.Info("[primarysync] external model change detected, syncing to Lumi config",

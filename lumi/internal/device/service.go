@@ -501,13 +501,18 @@ func (s *Service) UpdateConfig(data domain.UpdateConfigRequest) error {
 			}
 		}()
 	}
-	// Sync new primary model into openclaw.json (Lumi → OpenClaw direction).
-	if modelChanged && s.agentGateway != nil {
+	// Sync primary model into openclaw.json (Lumi → OpenClaw direction).
+	// When thinking also changed, RefreshModelsConfig handles primary update +
+	// reasoning patch in a single write + restart — skip UpdatePrimaryModel to
+	// avoid a redundant gateway restart.
+	if modelChanged && !thinkingChanged && s.agentGateway != nil {
 		if err := s.agentGateway.UpdatePrimaryModel(s.config.LLMModel); err != nil {
 			slog.Warn("update openclaw primary model failed", "component", "device", "error", err)
 		}
 	}
 	if thinkingChanged && s.agentGateway != nil {
+		// RefreshModelsConfig also syncs agents.defaults.model.primary from
+		// s.config.LLMModel, so one restart covers both model and thinking changes.
 		if err := s.agentGateway.RefreshModelsConfig(); err != nil {
 			slog.Error("refresh models config failed", "component", "device", "error", err)
 		}

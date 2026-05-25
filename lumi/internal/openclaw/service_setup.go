@@ -297,9 +297,9 @@ func (s *Service) SetupAgent(data domain.SetupRequest) error {
 	if err := os.MkdirAll(s.config.OpenclawConfigDir, 0755); err != nil {
 		return fmt.Errorf("create openclaw config dir: %w", err)
 	}
-	// Touch write flag before the file write so the primary-model watcher
-	// knows this is a Lumi-initiated change and does not sync it back.
-	touchLumiWriteFlag(s.config.OpenclawConfigDir)
+	// Write the expected primary into the flag so the watcher can match by
+	// content (not just mtime) and correctly identify this as a Lumi write.
+	setLumiWriteFlag(s.config.OpenclawConfigDir, customProviderName+"/"+defaultModel.Key)
 	if err := os.WriteFile(configPath, written, 0600); err != nil {
 		return fmt.Errorf("write openclaw config: %w", err)
 	}
@@ -443,7 +443,11 @@ func (s *Service) AddChannel(ctx context.Context, data domain.AddChannelRequest)
 	if err != nil {
 		return fmt.Errorf("marshal openclaw config: %w", err)
 	}
-	touchLumiWriteFlag(s.config.OpenclawConfigDir)
+	// AddChannel does not change the primary model; write the existing primary
+	// into the flag so the watcher recognises this as a Lumi-initiated write.
+	if existingPrimary := extractPrimaryModel(configData); existingPrimary != "" {
+		setLumiWriteFlag(s.config.OpenclawConfigDir, existingPrimary)
+	}
 	if err := os.WriteFile(configPath, written, 0600); err != nil {
 		return fmt.Errorf("write openclaw config: %w", err)
 	}
@@ -523,15 +527,28 @@ func (s *Service) RefreshModelsConfig() error {
 		}
 	}
 
+	// Also sync primary model in case LLMModel changed alongside the thinking
+	// setting. This avoids a second gateway restart from UpdatePrimaryModel
+	// when both fields change in a single UpdateConfig call.
+	newPrimary := customProviderName + "/" + s.config.LLMModel
+	agents := ensureMap(configData, "agents")
+	defaults := ensureMap(agents, "defaults")
+	modelMap := ensureMap(defaults, "model")
+	modelMap["primary"] = newPrimary
+	defaults["model"] = modelMap
+	agents["defaults"] = defaults
+	configData["agents"] = agents
+
 	written, err := json.MarshalIndent(configData, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal openclaw config: %w", err)
 	}
-	touchLumiWriteFlag(s.config.OpenclawConfigDir)
+	// Write the new primary into the flag so the watcher skips this write.
+	setLumiWriteFlag(s.config.OpenclawConfigDir, newPrimary)
 	if err := os.WriteFile(configPath, written, 0600); err != nil {
 		return fmt.Errorf("write openclaw config: %w", err)
 	}
-	slog.Info("refreshed models config in openclaw.json", "component", "openclaw", "disableThinking", disableThinking)
+	slog.Info("refreshed models config in openclaw.json", "component", "openclaw", "disableThinking", disableThinking, "primary", newPrimary)
 
 	if err := restartOpenclawGateway(); err != nil {
 		return err

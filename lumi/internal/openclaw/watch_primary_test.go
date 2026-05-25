@@ -66,40 +66,49 @@ func TestExtractPrimaryModel_Missing(t *testing.T) {
 
 // ---- flag file helpers ----
 
-func TestLumiWriteFlag(t *testing.T) {
+// TestLumiWriteFlag_ContentMatch: flag must match the primary written
+func TestLumiWriteFlag_ContentMatch(t *testing.T) {
 	dir := t.TempDir()
 
-	// Flag should not exist yet.
-	if isRecentLumiWrite(dir) {
-		t.Fatal("expected no flag before touch")
+	// No flag yet → not a Lumi write.
+	if isLumiWrite(dir, "autonomous/claude-opus-4-6") {
+		t.Fatal("expected no match before setLumiWriteFlag")
 	}
 
-	// After touch, it should be detected as a recent write.
-	touchLumiWriteFlag(dir)
-	if !isRecentLumiWrite(dir) {
-		t.Fatal("expected flag to be detected after touch")
+	// Write flag with opus.
+	setLumiWriteFlag(dir, "autonomous/claude-opus-4-6")
+
+	// Same primary → Lumi write.
+	if !isLumiWrite(dir, "autonomous/claude-opus-4-6") {
+		t.Fatal("expected match after setLumiWriteFlag with same primary")
 	}
 
-	// After clear, it should be gone.
+	// Different primary within 3 s window → NOT a Lumi write (external race).
+	if isLumiWrite(dir, "autonomous/claude-haiku-4-5") {
+		t.Fatal("expected mismatch: flag carries opus but file now has haiku")
+	}
+
+	// After clear, gone.
 	clearLumiWriteFlag(dir)
-	if isRecentLumiWrite(dir) {
-		t.Fatal("expected no flag after clear")
+	if isLumiWrite(dir, "autonomous/claude-opus-4-6") {
+		t.Fatal("expected no match after clearLumiWriteFlag")
 	}
 }
 
+// TestLumiWriteFlag_Expired: expired flag is never a match regardless of content.
 func TestLumiWriteFlag_Expired(t *testing.T) {
 	dir := t.TempDir()
 	flagPath := filepath.Join(dir, lumiWriteFlagName)
 
-	touchLumiWriteFlag(dir)
+	setLumiWriteFlag(dir, "autonomous/claude-opus-4-6")
 
-	// Back-date the mtime by more than the window.
+	// Back-date mtime beyond the window.
 	past := time.Now().Add(-(lumiWriteFlagWindow + time.Second))
 	if err := os.Chtimes(flagPath, past, past); err != nil {
 		t.Fatalf("chtimes: %v", err)
 	}
 
-	if isRecentLumiWrite(dir) {
+	if isLumiWrite(dir, "autonomous/claude-opus-4-6") {
 		t.Fatal("expected flag to be expired after back-dating mtime")
 	}
 }

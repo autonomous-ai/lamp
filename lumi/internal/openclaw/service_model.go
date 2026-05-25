@@ -10,17 +10,18 @@ import (
 
 // UpdatePrimaryModel patches agents.defaults.model.primary in openclaw.json
 // to "autonomous/{modelKey}" and restarts the gateway so the change takes
-// effect immediately. It touches the write flag before the file write so the
-// primary-model watcher recognises this as a Lumi-initiated write and does not
-// sync it back (which would be a no-op loop anyway, but the flag eliminates
-// the redundant read + Save round-trip).
+// effect immediately. Writes the expected primary into the write flag before
+// the file write so the primary-model watcher recognises this as a
+// Lumi-initiated write and does not sync it back.
 //
-// No-op when modelKey is empty or when openclaw.json does not yet exist
-// (device not set up).
+// No-op when modelKey is empty or when openclaw.json does not yet exist.
 func (s *Service) UpdatePrimaryModel(modelKey string) error {
 	if modelKey == "" {
 		return nil
 	}
+
+	s.primarySyncMu.Lock()
+	defer s.primarySyncMu.Unlock()
 
 	configPath := filepath.Join(s.config.OpenclawConfigDir, "openclaw.json")
 	raw, err := os.ReadFile(configPath)
@@ -55,8 +56,9 @@ func (s *Service) UpdatePrimaryModel(modelKey string) error {
 		return fmt.Errorf("marshal openclaw config: %w", err)
 	}
 
-	// Touch flag BEFORE the write so the watcher skips this change.
-	touchLumiWriteFlag(s.config.OpenclawConfigDir)
+	// Write the expected primary into the flag BEFORE the file write so the
+	// watcher can match content (not just mtime) to identify this as Lumi's.
+	setLumiWriteFlag(s.config.OpenclawConfigDir, newPrimary)
 
 	if err := atomicWriteFile(configPath, written, 0600); err != nil {
 		return fmt.Errorf("write openclaw config: %w", err)
