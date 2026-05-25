@@ -105,6 +105,7 @@ class BrainContext:
     brain_memory: str = ""           # brain-curated per-day diary entries — brain workspace/MEMORY.md
     knowledge: str = ""              # KNOWLEDGE.md — mistakes the agent learned to not repeat
     soul: str = ""                   # full SOUL.md (persona narrative)
+    skills_catalog: str = ""         # `name: description` lines pulled from workspace/skills/*/SKILL.md (OpenClaw's authoritative skill list — used as the brain's delegate trigger)
     recent_turns: List[Turn] = field(default_factory=list)
     workspace_dir: str = ""
 
@@ -151,6 +152,17 @@ class BrainContext:
             parts.append(
                 "=== KNOWLEDGE (KNOWLEDGE.md — mistakes to avoid) ===\n"
                 + self.knowledge.strip()
+            )
+        if self.skills_catalog.strip():
+            # OpenClaw's skill catalog — list of `name: description` lines.
+            # This is the authoritative source for "what Lumi can do that
+            # the brain can't simulate" — the DECISION_RULES leans on this
+            # block as the delegate trigger, so when OpenClaw adds a new
+            # skill the brain picks it up on next restart with zero prompt
+            # changes.
+            parts.append(
+                "=== OPENCLAW SKILLS (delegate when the user wants any of these) ===\n"
+                + self.skills_catalog.strip()
             )
         if self.soul.strip():
             parts.append("=== PERSONA (SOUL.md) ===\n" + self.soul.strip())
@@ -211,6 +223,94 @@ def _read_soul(workspace_dir: str) -> str:
     except OSError as e:
         logger.warning("Could not read SOUL.md at %s: %s", path, e)
         return ""
+
+
+# Maximum description chars retained per skill — keeps the catalog block
+# bounded even if a skill author writes a thesis in its frontmatter.
+# Skills with longer descriptions are truncated with an ellipsis; the
+# brain only needs enough to know whether to delegate, not the full
+# workflow (that's OpenClaw's job).
+_SKILL_DESC_MAX_CHARS = int(os.environ.get("LELAMP_BRAIN_SKILL_DESC_MAX", "400"))
+
+
+def _parse_skill_frontmatter(text: str) -> tuple[str, str]:
+    """Extract ``(name, description)`` from a SKILL.md's YAML
+    frontmatter. Returns ``("", "")`` when the file has no frontmatter
+    or the fields are missing. We parse manually instead of pulling in
+    PyYAML — the frontmatter shape is fixed (two flat string fields),
+    not worth a dependency."""
+    if not text.startswith("---"):
+        return "", ""
+    end = text.find("\n---", 3)
+    if end < 0:
+        return "", ""
+    fm = text[3:end].strip()
+    name = ""
+    description = ""
+    current: Optional[str] = None  # which field we're currently appending to
+    buffer: list[str] = []
+    for line in fm.splitlines():
+        # New key starts when the line begins with `<key>:` at column 0.
+        stripped_left = line.lstrip()
+        is_indented = stripped_left != line
+        head = line.split(":", 1)
+        if not is_indented and len(head) == 2 and head[0].strip() in ("name", "description"):
+            # Flush any pending field, then start the new one.
+            if current == "name":
+                name = " ".join(buffer).strip()
+            elif current == "description":
+                description = " ".join(buffer).strip()
+            current = head[0].strip()
+            buffer = [head[1].strip()]
+        elif current and is_indented:
+            # Continuation line for a folded multi-line value.
+            buffer.append(stripped_left)
+    if current == "name":
+        name = " ".join(buffer).strip()
+    elif current == "description":
+        description = " ".join(buffer).strip()
+    return name, description
+
+
+def _read_skills_catalog(workspace_dir: str) -> str:
+    """Scan ``<workspace>/skills/*/SKILL.md`` and return a newline-
+    separated catalog of ``- name: description`` lines for injection
+    into the brain's static system prompt.
+
+    The catalog is the authoritative "what OpenClaw can do that the
+    brain can't simulate" list. When OpenClaw adds a new skill, the
+    brain picks it up on the next process restart with zero prompt
+    changes. Skills without parseable frontmatter are skipped silently.
+
+    Returns ``""`` when the skills dir is missing or empty — brain
+    falls back to the static DECISION_RULES bucket list in that case.
+    """
+    skills_dir = Path(workspace_dir) / "skills"
+    if not skills_dir.is_dir():
+        logger.info("skills dir not found at %s — brain runs without skill catalog", skills_dir)
+        return ""
+    entries: list[str] = []
+    for skill_md in sorted(skills_dir.glob("*/SKILL.md")):
+        try:
+            text = skill_md.read_text(encoding="utf-8")
+        except OSError as e:
+            logger.warning("Could not read %s: %s", skill_md, e)
+            continue
+        name, description = _parse_skill_frontmatter(text)
+        if not name:
+            # Fall back to the parent folder name when frontmatter is
+            # absent — better than dropping the skill silently.
+            name = skill_md.parent.name
+        if not description:
+            continue
+        if len(description) > _SKILL_DESC_MAX_CHARS:
+            description = description[: _SKILL_DESC_MAX_CHARS - 1].rstrip() + "…"
+        entries.append(f"- {name}: {description}")
+    if not entries:
+        logger.info("no skill entries found under %s", skills_dir)
+        return ""
+    logger.info("skills catalog loaded from %s (%d skills)", skills_dir, len(entries))
+    return "\n".join(entries)
 
 
 # Per-block size cap so a curated MEMORY.md that grows over time
@@ -508,6 +608,7 @@ def load_context(
     user_profile = _read_user(workspace_dir)
     memory = _read_memory(workspace_dir)
     soul = _read_soul(workspace_dir)
+    skills_catalog = _read_skills_catalog(workspace_dir)
 
     turns: List[Turn] = []
     history_source = "none"
@@ -521,10 +622,12 @@ def load_context(
                 history_source = "lumi_recent"
 
     logger.info(
-        "Brain context loaded — identity=%r (%d) user=%d memory=%d soul=%d turns=%d "
+        "Brain context loaded — identity=%r (%d) user=%d memory=%d soul=%d skills=%d turns=%d "
         "history_source=%s session_key=%s",
         identity_name or "(no IDENTITY.md)", len(identity),
-        len(user_profile), len(memory), len(soul), len(turns),
+        len(user_profile), len(memory), len(soul),
+        skills_catalog.count("\n") + 1 if skills_catalog else 0,
+        len(turns),
         history_source, session_key,
     )
     return BrainContext(
@@ -533,6 +636,7 @@ def load_context(
         user_profile=user_profile,
         memory=memory,
         soul=soul,
+        skills_catalog=skills_catalog,
         recent_turns=turns,
         workspace_dir=workspace_dir,
     )
