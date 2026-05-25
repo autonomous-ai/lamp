@@ -90,6 +90,12 @@ class TestBasicResponse:
         assert isinstance(data["label"], str)
         assert isinstance(data["confidence"], float)
 
+    def test_scores_sum_to_one(self):
+        resp = _post_recognize(_wav_to_b64(HAPPY_WAV), return_scores=True)
+        data = resp.json()
+        total = sum(data["scores"].values())
+        assert abs(total - 1.0) < 1e-4
+
     def test_return_scores_true(self):
         resp = _post_recognize(_wav_to_b64(HAPPY_WAV), return_scores=True)
         data = resp.json()
@@ -101,6 +107,12 @@ class TestBasicResponse:
         resp = _post_recognize(_wav_to_b64(HAPPY_WAV), return_scores=False)
         data = resp.json()
         assert data.get("scores") is None
+
+    def test_scores_sorted_by_confidence(self):
+        resp = _post_recognize(_wav_to_b64(HAPPY_WAV), return_scores=True)
+        data = resp.json()
+        values = list(data["scores"].values())
+        assert values == sorted(values, reverse=True)
 
 
 class TestEmotionDetection:
@@ -115,6 +127,12 @@ class TestEmotionDetection:
         data = resp.json()
         assert data["label"] == "sad"
         assert data["confidence"] > 0.5
+
+    def test_batch_both_detected(self):
+        happy_resp = _post_recognize(_wav_to_b64(HAPPY_WAV))
+        sad_resp = _post_recognize(_wav_to_b64(SAD_WAV))
+        assert happy_resp.json()["label"] == "happy"
+        assert sad_resp.json()["label"] == "sad"
 
 
 class TestLabelsEndpoint:

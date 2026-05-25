@@ -7,14 +7,14 @@ import numpy as np
 import pytest
 import soundfile as sf
 
+from core.enums import SpeechEmotionRecognizerEnum
 from core.models.audio_emotion import AudioEmotionDetection, AudioEmotionPerceptionSessionConfig
 from core.models.media import Audio
 from core.perception.audio_emotion.perception import AudioEmotionPerception
 from core.perception.audio_emotion.predictors.emotion2vec import Emotion2VecPlusLargeRecognizer
 from core.perception.audio_emotion.utils import AudioEmotionRecognizerFactory
-from core.enums import SpeechEmotionRecognizerEnum
 
-MODEL_PATH = Path.cwd() / "local" / "emotion2vec_plus_large.onnx"
+MODEL_PATH = Path.cwd() / "local" / "emotion2vec.onnx"
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "audio"
 
 pytestmark = pytest.mark.skipif(
@@ -42,7 +42,7 @@ def recognizer():
 @pytest.fixture(scope="module")
 def perception():
     factory = AudioEmotionRecognizerFactory(
-        model_name=SpeechEmotionRecognizerEnum.EMOTION2VEC_PLUS_LARGE,
+        model_name=SpeechEmotionRecognizerEnum.EMOTION2VEC,
         model_path=MODEL_PATH,
     )
     p = AudioEmotionPerception(audio_emotion_recognizer_factory=factory)
@@ -82,12 +82,14 @@ class TestRecognizerPrediction:
         probs = results[0].expression_probs
         top_idx = int(np.argmax(probs))
         assert recognizer.class_names[top_idx] == "happy"
+        assert float(probs[top_idx]) > 0.5
 
     def test_sad_detected(self, recognizer, sad_audio):
         results = recognizer.predict([sad_audio])
         probs = results[0].expression_probs
         top_idx = int(np.argmax(probs))
         assert recognizer.class_names[top_idx] == "sad"
+        assert float(probs[top_idx]) > 0.5
 
 
 class TestPerceptionPrediction:
@@ -101,13 +103,26 @@ class TestPerceptionPrediction:
         confidences = [e.confidence for e in detection.emotions]
         assert confidences == sorted(confidences, reverse=True)
 
+    def test_scores_sum_to_one(self, perception, happy_audio):
+        detection = asyncio.run(perception.predict_audio(happy_audio))
+        total = sum(e.confidence for e in detection.emotions)
+        assert abs(total - 1.0) < 1e-4
+
     def test_predict_audio_happy(self, perception, happy_audio):
         detection = asyncio.run(perception.predict_audio(happy_audio))
         assert detection.emotions[0].emotion == "happy"
+        assert detection.emotions[0].confidence > 0.5
 
     def test_predict_audio_sad(self, perception, sad_audio):
         detection = asyncio.run(perception.predict_audio(sad_audio))
         assert detection.emotions[0].emotion == "sad"
+        assert detection.emotions[0].confidence > 0.5
+
+    def test_batch_both_detected(self, perception, happy_audio, sad_audio):
+        happy_det = asyncio.run(perception.predict_audio(happy_audio))
+        sad_det = asyncio.run(perception.predict_audio(sad_audio))
+        assert happy_det.emotions[0].emotion == "happy"
+        assert sad_det.emotions[0].emotion == "sad"
 
 
 class TestSession:
@@ -145,7 +160,7 @@ class TestRejection:
 
     def test_perception_predict_before_start_raises(self, happy_audio):
         factory = AudioEmotionRecognizerFactory(
-            model_name=SpeechEmotionRecognizerEnum.EMOTION2VEC_PLUS_LARGE,
+            model_name=SpeechEmotionRecognizerEnum.EMOTION2VEC,
             model_path=MODEL_PATH,
         )
         p = AudioEmotionPerception(audio_emotion_recognizer_factory=factory)

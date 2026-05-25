@@ -27,7 +27,7 @@ def create_audio_emotion_recognizer(
     model_path: Path | None = None,
 ) -> AudioEmotionRecognizer:
     """Create the audio emotion recognizer for the given model type."""
-    if model_name == SpeechEmotionRecognizerEnum.EMOTION2VEC_PLUS_LARGE:
+    if model_name == SpeechEmotionRecognizerEnum.EMOTION2VEC:
         from core.perception.audio_emotion.predictors.emotion2vec import Emotion2VecPlusLargeRecognizer
 
         return Emotion2VecPlusLargeRecognizer(model_path=model_path)

@@ -45,7 +45,7 @@ class AudioEmotionRecognizer(PredictorBase[Audio, RawAudioEmotionDetection]):
         enable_rms_normalize=False,
     )
     DEFAULT_INPUT_NAME: str = "input"
-    DEFAULT_OUTPUT_NAME: str = "scores"
+    DEFAULT_OUTPUT_NAME: str = "logits"
 
     def __init__(
         self,

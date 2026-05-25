@@ -61,7 +61,7 @@ class PoseSetting(BaseModel):
 
 class SERSetting(BaseModel):
     enabled: bool = True
-    model: SpeechEmotionRecognizerEnum = SpeechEmotionRecognizerEnum.EMOTION2VEC_PLUS_LARGE
+    model: SpeechEmotionRecognizerEnum = SpeechEmotionRecognizerEnum.EMOTION2VEC
     ckpt_path: str | None = None
     labels_path: str | None = None
 
