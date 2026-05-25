@@ -506,34 +506,32 @@ class VoiceService:
         """Spawn a daemon thread that waits for the queued chit-chat
         reply to finish playing through TTS, then emits one
         ``brain.chitchat.e2e`` log line with the full STT-final →
-        speech-end latency broken down into decide vs TTS portions.
+        speech-end wall-clock.
 
-        Approach: poll ``tts.speaking`` (cheap — bool flag). Wait up
-        to 5s for playback to start (it queues behind whatever else
-        TTS was doing) and up to 60s for it to finish (long replies on
-        slow synth). Both caps are generous safety nets; in normal
-        chit-chat the reply is 1-3 short sentences ≈ 2-6s of speech.
-        """
+        Approach: poll ``tts.speaking`` (cheap bool flag). 60s safety
+        cap covers long replies on slow synth. We *don't* try to break
+        the latency into ttfa vs synth vs playback — the ``speaking``
+        flag flips to True the moment ``speak_queue`` accepts (not
+        when the first audio frame leaves the speaker), so any "first
+        audio out" timing measured from this flag is wrong by the
+        ElevenLabs synth TTFB. One honest end-to-end number beats two
+        misleading sub-numbers."""
         if self._tts is None:
             return
 
         def _run():
             poll = 0.05
-            start_deadline = time.time() + 5.0
-            # 1) Wait until playback actually engages (or timeout).
-            while time.time() < start_deadline and not self._tts.speaking:
-                time.sleep(poll)
-            t_play_start = time.time()
             end_deadline = time.time() + 60.0
+            # Wait until the queued playback finishes. Skip the
+            # "start" wait — `tts.last_spoken_time` is authoritative
+            # for end-of-playback regardless of when it began.
             while time.time() < end_deadline and self._tts.speaking:
                 time.sleep(poll)
             t_play_end = self._tts.last_spoken_time or time.time()
             total = t_play_end - t_voice_final
-            tts_span = t_play_end - t_play_start
             logger.info(
-                "brain.chitchat.e2e [%s] total=%.2fs (decide=%.2fs tts=%.2fs) reply=%r",
-                user, total, decision.latency_s, tts_span,
-                decision.reply[:80],
+                "brain.chitchat.e2e [%s] total=%.2fs (decide=%.2fs) reply=%r",
+                user, total, decision.latency_s, decision.reply[:80],
             )
 
         threading.Thread(
