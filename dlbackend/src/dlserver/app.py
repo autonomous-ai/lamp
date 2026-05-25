@@ -87,7 +87,7 @@ async def lifespan(app: FastAPI):
             logger.warning("Failed to load action model: %s", e)
 
     # -- Emotion model --
-    if settings.emotion.enabled:
+    if settings.fer.enabled:
         logger.info("Loading emotion model...")
         try:
             emotion_model = build_emotion_perception()

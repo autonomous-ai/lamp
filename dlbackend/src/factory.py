@@ -84,11 +84,11 @@ def build_action_perception() -> ActionPerception:
 def build_emotion_perception() -> EmotionPerception:
     """Create EmotionPerception with factories from settings."""
     emotion_ckpt: Path | None = (
-        Path(settings.emotion.ckpt_path) if settings.emotion.ckpt_path else None
+        Path(settings.fer.ckpt_path) if settings.fer.ckpt_path else None
     )
 
     emotion_factory = EmotionRecognizerFactory(
-        model_name=settings.emotion.model,
+        model_name=settings.fer.model,
         model_path=emotion_ckpt,
     )
 
@@ -96,12 +96,12 @@ def build_emotion_perception() -> EmotionPerception:
 
     default_config: EmotionPerceptionSessionConfig | None = None
     if (
-        settings.emotion.confidence_threshold is not None
-        or settings.emotion.frame_interval is not None
+        settings.fer.confidence_threshold is not None
+        or settings.fer.frame_interval is not None
     ):
         default_config = EmotionPerceptionSessionConfig(
-            confidence_threshold=settings.emotion.confidence_threshold or 0.5,
-            frame_interval=settings.emotion.frame_interval or 1.0,
+            confidence_threshold=settings.fer.confidence_threshold or 0.5,
+            frame_interval=settings.fer.frame_interval or 1.0,
         )
 
     return EmotionPerception(
@@ -230,11 +230,11 @@ def build_audio_embedder() -> AudioEmbedder:
 def build_audio_emotion_perception() -> AudioEmotionPerception:
     """Create AudioEmotionPerception from settings."""
     ckpt_path: Path | None = (
-        Path(settings.ser_recognition_ckpt_path) if settings.ser_recognition_ckpt_path else None
+        Path(settings.ser.ckpt_path) if settings.ser.ckpt_path else None
     )
 
     factory = AudioEmotionRecognizerFactory(
-        model_name=settings.ser_recognition_model,
+        model_name=settings.ser.model,
         model_path=ckpt_path,
     )
 
