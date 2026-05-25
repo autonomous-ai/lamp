@@ -371,9 +371,11 @@ func (s *Service) UpdateConfig(data domain.UpdateConfigRequest) error {
 	if data.LLMBaseURL != "" {
 		s.config.LLMBaseURL = data.LLMBaseURL
 	}
+	prevModel := s.config.LLMModel
 	if data.LLMModel != "" {
 		s.config.LLMModel = data.LLMModel
 	}
+	modelChanged := data.LLMModel != "" && data.LLMModel != prevModel
 	thinkingChanged := data.LLMDisableThinking != nil
 	if thinkingChanged {
 		s.config.LLMDisableThinking = data.LLMDisableThinking
@@ -498,6 +500,12 @@ func (s *Service) UpdateConfig(data domain.UpdateConfigRequest) error {
 				slog.Error("WiFi reconnect failed", "component", "device", "error", err)
 			}
 		}()
+	}
+	// Sync new primary model into openclaw.json (Lumi → OpenClaw direction).
+	if modelChanged && s.agentGateway != nil {
+		if err := s.agentGateway.UpdatePrimaryModel(s.config.LLMModel); err != nil {
+			slog.Warn("update openclaw primary model failed", "component", "device", "error", err)
+		}
 	}
 	if thinkingChanged && s.agentGateway != nil {
 		if err := s.agentGateway.RefreshModelsConfig(); err != nil {

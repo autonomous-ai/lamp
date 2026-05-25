@@ -297,6 +297,9 @@ func (s *Service) SetupAgent(data domain.SetupRequest) error {
 	if err := os.MkdirAll(s.config.OpenclawConfigDir, 0755); err != nil {
 		return fmt.Errorf("create openclaw config dir: %w", err)
 	}
+	// Touch write flag before the file write so the primary-model watcher
+	// knows this is a Lumi-initiated change and does not sync it back.
+	touchLumiWriteFlag(s.config.OpenclawConfigDir)
 	if err := os.WriteFile(configPath, written, 0600); err != nil {
 		return fmt.Errorf("write openclaw config: %w", err)
 	}
@@ -440,6 +443,7 @@ func (s *Service) AddChannel(ctx context.Context, data domain.AddChannelRequest)
 	if err != nil {
 		return fmt.Errorf("marshal openclaw config: %w", err)
 	}
+	touchLumiWriteFlag(s.config.OpenclawConfigDir)
 	if err := os.WriteFile(configPath, written, 0600); err != nil {
 		return fmt.Errorf("write openclaw config: %w", err)
 	}
@@ -523,6 +527,7 @@ func (s *Service) RefreshModelsConfig() error {
 	if err != nil {
 		return fmt.Errorf("marshal openclaw config: %w", err)
 	}
+	touchLumiWriteFlag(s.config.OpenclawConfigDir)
 	if err := os.WriteFile(configPath, written, 0600); err != nil {
 		return fmt.Errorf("write openclaw config: %w", err)
 	}

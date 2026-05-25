@@ -178,6 +178,8 @@ func applyModelsToConfig(configPath string, configData map[string]any, autonomou
 	if err != nil {
 		return false, fmt.Errorf("marshal openclaw config: %w", err)
 	}
+	// Touch the write flag so the primary-model watcher skips this Lumi-initiated write.
+	touchLumiWriteFlag(filepath.Dir(configPath))
 	if err := atomicWriteFile(configPath, written, 0600); err != nil {
 		return false, fmt.Errorf("write openclaw config: %w", err)
 	}
