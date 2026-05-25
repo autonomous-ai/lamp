@@ -1,35 +1,26 @@
 """
-Brain — voice-in gateway that decides between chit-chat (reply directly)
-and task (delegate to OpenClaw via the existing /api/sensing/event flow).
+Brain — half-cascade text router placed between the classic STT pipeline
+and OpenClaw. STT produces a final transcript; the brain decides whether
+to reply directly (chit-chat) or forward to OpenClaw (delegate) via a
+single chat-completion HTTP call.
 
 See docs/voice-brain.md for the architecture.
-
-Provider selection is data-driven via :mod:`lelamp.service.brain.factory`
-— VoiceService reads ``LELAMP_BRAIN_PROVIDER`` and calls ``make_brain``.
-No provider implementation (Gemini, OpenAI, …) is imported here so the
-package stays cheap to import and machines without one of the vendor
-SDKs still boot — the missing one only fails when explicitly selected.
 """
 
-from lelamp.service.brain.audio_sink import PCMAudioSink
-from lelamp.service.brain.base import Brain, BrainSession
 from lelamp.service.brain.context_loader import BrainContext, Turn, load_context
-from lelamp.service.brain.factory import (
-    available_providers,
+from lelamp.service.brain.text_router import (
+    TextBrain,
+    TextBrainDecision,
+    build_text_brain_from_env,
     is_disabled,
-    make_brain,
-    normalize,
 )
 
 __all__ = [
-    "Brain",
-    "BrainSession",
     "BrainContext",
     "Turn",
-    "PCMAudioSink",
     "load_context",
-    "make_brain",
-    "available_providers",
+    "TextBrain",
+    "TextBrainDecision",
+    "build_text_brain_from_env",
     "is_disabled",
-    "normalize",
 ]

@@ -1,278 +1,213 @@
-# Voice Brain (realtime providers)
+# Voice Brain (router half-cascade text)
 
-Lớp định tuyến tuỳ chọn đặt **trước** pipeline STT → OpenClaw hiện có.
-Thay vì mọi câu nói đều đẩy qua OpenClaw, brain mới chia làm 2 nhánh:
+Lớp routing tuỳ chọn, đặt **sau** pipeline STT hiện tại và **trước**
+OpenClaw. STT (Deepgram nova-3) vẫn lo phần audio→text; brain quyết
+định cho mỗi câu user nói:
 
 ```
-mic ─► TTS echo gate ─► <provider> (server VAD) ─┬─► tool_call delegate_to_lumi ─► OpenClaw (flow cũ)
-                           └─► audio out trực tiếp ───────► loa (chit-chat)
+mic ─► VAD ─► STT (Deepgram) ─► final transcript ─┬─► brain.decide ─┬─► chit-chat reply ─► TTSService ─► loa
+                                                                     └─► delegate ────────► OpenClaw (/api/sensing/event)
 ```
 
-**Vì sao cần:** OpenClaw tốn token + latency cho mọi lượt nói, kể cả
-"chào", "cảm ơn". Brain "ngắn mạch" các câu chit-chat thường, dùng đúng
-một cuộc gọi realtime trả lời bằng giọng. Chỉ yêu cầu cần tool, hành
-động, hay câu trả lời dài mới được đẩy lên OpenClaw.
+**Vì sao:** OpenClaw tốn token + latency cho mọi câu, kể cả "hello"
+hay "cảm ơn". Brain bắt mấy câu chit-chat đơn giản, chỉ escalate sang
+OpenClaw mấy thứ thật sự cần (điều khiển thiết bị, nhắc nhở, lookup,
+nhạc, bất cứ gì cần memory / sensing / skill).
 
 Brain là **opt-in**. Với `LELAMP_BRAIN_PROVIDER=none` (mặc định, hoặc
-không set) lelamp giữ nguyên hành vi như bản trước khi có brain.
+không set) thì pipeline STT → OpenClaw chạy nguyên như cũ.
 
 ---
 
-## 1. Provider
+## 1. Providers
 
-| Provider | Giá trị env | API | Model mặc định | SDK |
-| --- | --- | --- | --- | --- |
-| Google Gemini Live | `gemini` | `google.genai` `live.connect` | `gemini-3.1-flash-live-preview` | `google-genai>=0.7.0` |
-| OpenAI Realtime    | `openai` | `openai.beta.realtime.connect` | `gpt-realtime` | `openai>=1.40.0` |
+| Provider | Env value | API | Default model |
+| --- | --- | --- | --- |
+| Google Gemini | `gemini` | `generativelanguage.googleapis.com/v1beta/models/{model}:generateContent` | `gemini-2.5-flash` |
+| OpenAI        | `openai` | `api.openai.com/v1/chat/completions` | `gpt-4o-mini` |
 
-Tên provider theo convention LiteLLM / LangChain / OpenRouter (vendor
-name, không phải product name). Sau khi benchmark muốn loại provider
-nào thì xoá file module + xoá 1 dòng trong
-`lelamp/service/brain/factory.py:_PROVIDERS` — không phải sửa file
-nào khác.
+Cả 2 provider gọi qua **HTTP thuần** (`requests`). Không dùng vendor
+SDK — message array được build tay nên mình kiểm soát hoàn toàn wire
+shape, history merge, và prompt cache prefix.
 
 `LELAMP_BRAIN_PROVIDER` chấp nhận:
 
-| Giá trị | Ý nghĩa |
+| Value | Nghĩa |
 | --- | --- |
-| chưa set / `none` / `off` / `classic` / `disabled` | brain tắt, chạy STT classic |
-| `gemini` | Gemini Live realtime |
-| `openai` | OpenAI Realtime |
-| khác | log unknown rồi fallback STT classic |
+| unset / `none` / `off` / `classic` / `disabled` | tắt brain, transcript STT gửi thẳng OpenClaw |
+| `gemini` | route qua Gemini chat completion |
+| `openai` | route qua OpenAI chat completion |
+| giá trị khác | log unknown, brain tắt |
 
 ---
 
-## 2. Cách brain quyết định
+## 2. Cơ chế quyết định
 
-Provider được chọn nhận cùng một system prompt (`DECISION_RULES` trong
-`lelamp/service/brain/prompts.py`) cộng audio người dùng và tự phân
-loại từng lượt:
+Cả 2 provider dùng chung prompt (`DECISION_RULES` trong
+`lelamp/service/brain/prompts.py`) và cùng 1 function declaration
+`delegate_to_lumi`. Model chọn đúng 1 trong:
 
-| Nhánh | Khi nào kích hoạt | lelamp làm gì |
+| Nhánh | Trigger | lelamp làm gì |
 | --- | --- | --- |
-| **(A) Trò chuyện** | Model nói lại bằng giọng | `PCMAudioSink` phát PCM 24 kHz thẳng ra loa. Không gửi gì sang OpenClaw. |
-| **(B) Nhiệm vụ** | Model gọi `delegate_to_lumi(transcript=…)` | Transcript được forward sang Lumi y hệt như STT final: `POST /api/sensing/event`. OpenClaw xử lý tiếp như bình thường. |
+| **(A) Chit-chat** | Model trả về plain text | Text vào `TTSService.speak_queue(...)` — cùng giọng ElevenLabs/OpenAI với task reply. Không gửi gì cho OpenClaw. |
+| **(B) Delegate** | Model gọi `delegate_to_lumi(transcript=…)` | Transcript được forward qua `POST /api/sensing/event` y như pipeline STT cổ điển. OpenClaw chạy turn bình thường. |
+| **(error)** | HTTP error / parse error / response rỗng | Fall through xuống Lumi như delegate. Safe default — input của user không bao giờ bị silently drop. |
 
-Dùng chung 1 prompt giữa các provider giúp chất lượng quyết định so
-sánh được — điểm khác duy nhất giữa các provider là wire protocol.
+`DECISION_RULES` cố tình giữ ngắn + chỉ viết bằng tiếng Anh (reply vẫn
+ra ngôn ngữ user qua language hint — xem §4). Prompt dài làm tăng
+first-token latency và khó hit prompt cache window.
 
 ---
 
 ## 3. Bật brain mode
 
 ```bash
-# Chung
+# Shared
 export LELAMP_BRAIN_PROVIDER=gemini       # hoặc openai, hoặc none
-export LELAMP_BRAIN_TTS=native            # native | fallback (mặc định native)
 
-# Gemini Live
-export GEMINI_API_KEY=...                 # bắt buộc khi provider=gemini
-export LELAMP_GEMINI_LIVE_MODEL=gemini-3.1-flash-live-preview
-export LELAMP_GEMINI_LIVE_VOICE=Aoede
-export LELAMP_GEMINI_LIVE_LANGUAGE=vi-VN  # rỗng/auto → để Gemini tự detect
+# Gemini
+export GEMINI_API_KEY=...                 # hoặc GOOGLE_API_KEY
+export LELAMP_GEMINI_TEXT_MODEL=gemini-2.5-flash
 
-# OpenAI Realtime
-export OPENAI_API_KEY=...                 # bắt buộc khi provider=openai
-export LELAMP_OPENAI_REALTIME_MODEL=gpt-realtime
-export LELAMP_OPENAI_REALTIME_VOICE=alloy
+# OpenAI
+export OPENAI_API_KEY=...
+export LELAMP_OPENAI_TEXT_MODEL=gpt-4o-mini
 
-# Context (chung cho cả 2)
-export OPENCLAW_WORKSPACE=/root/.openclaw/workspace
-export OPENCLAW_AGENTS_DIR=/root/.openclaw/agents/main
-export OPENCLAW_SESSION_KEY=agent:main:main
-export LUMI_BASE_URL=http://127.0.0.1:5000
+# HTTP timeout (shared)
+export LELAMP_BRAIN_HTTP_TIMEOUT=15       # giây, mặc định 15
+
+# Session memory persistence (chit-chat history)
+export LELAMP_BRAIN_SESSION_LOG=/root/local/brain/session.jsonl  # hoặc /dev/null để tắt
+export LELAMP_BRAIN_SESSION_HISTORY_MAX=10                       # số turn chit-chat tối đa (default 10)
+
+# Context cho static system prompt (chia sẻ với OpenClaw)
+export OPENCLAW_WORKSPACE=/root/.openclaw/workspace      # cho IDENTITY/USER/MEMORY/KNOWLEDGE/SOUL .md
+export OPENCLAW_AGENTS_DIR=/root/.openclaw/agents/main   # cho sessions/sessions.json (history)
+export OPENCLAW_SESSION_KEY=agent:main:main              # session nào để mirror
+export LUMI_BASE_URL=http://127.0.0.1:5000               # fallback history source khi JSONL không có
+
+# Cap size cho static block (tail-trim nếu vượt)
+export LELAMP_BRAIN_USER_MD_MAX=3000
+export LELAMP_BRAIN_MEMORY_MD_MAX=5000
+export LELAMP_BRAIN_KNOWLEDGE_MD_MAX=2000
+export LELAMP_BRAIN_MEMORY_FILES_KEEP=3
 ```
 
-Khi bật brain, **pipeline STT cổ điển bị bypass hoàn toàn**. Mọi
-frame mic được đẩy thẳng sang provider, provider tự chạy server VAD
-để quyết turn boundary — client KHÔNG còn lớp VAD nào nữa. Phần
-gating duy nhất còn lại ở client là TTS echo gate (drop frame khi
-chính Lumi đang phát) và reverb-decay gate (đợi RMS xuống dưới
-`ECHO_RMS_FLOOR` sau khi loa tắt), để brain không tự nghe chính
-nó.
+`VoiceService.__init__` đọc `LELAMP_BRAIN_PROVIDER` 1 lần khi khởi
+động. Nếu fail (thiếu key, provider lạ) thì log warning và giữ
+nguyên pipeline STT cổ điển — production luôn an toàn.
 
-Không còn nhánh "STT-shaped fallback per-utterance" — đã thử nhưng
-silence-timeout của VoiceService cứ cắt giọng giữa chừng.
-
-Speaker recognition, SER, wake-word filter **không chạy** trong brain
-mode (cần buffer audio per-session mà loop này không giữ). Cần lại
-thì set `LELAMP_BRAIN_PROVIDER=none` để dùng STT cũ.
-
-### `LELAMP_BRAIN_TTS`
-
-| Giá trị | Ý nghĩa |
-| --- | --- |
-| `native` (mặc định) | Phát PCM 24 kHz của provider thẳng qua aplay (sounddevice fallback trên Mac). Latency thấp nhất nhưng giọng khác task reply. |
-| `fallback` | Audio chunks của provider bị drop, text transcribe được buffer rồi đưa cho `TTSService.speak_queue` khi turn-complete — giọng giống hệt task reply (ElevenLabs/OpenAI), nhưng tốn cả realtime audio (vứt) + TTS synth (phát). |
-
-`VoiceService.__init__` đọc `LELAMP_BRAIN_PROVIDER` một lần khi khởi
-động. Bất cứ lỗi nào (không có key, chưa cài SDK, mở loa fail, tên
-provider không hợp lệ) đều log warning và **fallback về STT classic**
-— production luôn an toàn.
-
-Cài SDK:
-
-```bash
-pip install google-genai "openai[realtime]"
-# hoặc dùng uv (lelamp đang dùng):
-uv pip install google-genai "openai[realtime]"
-```
-
-Extra `[realtime]` kéo về dep `websockets` mà `client.realtime.connect`
-cần. Nếu thiếu, brain log `"You need to install openai[realtime]…"` và
-fallback STT classic.
-
-(Chỉ cần SDK của provider đang chọn; cài cả 2 nếu muốn A/B test bằng
-cách đổi `LELAMP_BRAIN_PROVIDER`.)
+Không cần cài thêm dep Python nào — `requests` đã có sẵn trong project.
 
 ---
 
-## 4. Cấu trúc package
+## 4. Bố cục package
 
 ```
 lelamp/service/brain/
-  __init__.py        — public exports + re-export factory.make_brain
-  base.py            — abstract Brain / BrainSession
-  prompts.py         — DECISION_RULES + DELEGATE_TOOL_* dùng chung cho mọi provider
-  factory.py         — registry provider (LELAMP_BRAIN_PROVIDER → Brain class)
-  context_loader.py  — đọc SOUL.md + JSONL session main (mirror chat.history)
-  audio_sink.py      — PCMAudioSink — aplay subprocess primary, sounddevice fallback
-  gemini_live.py     — GeminiLiveBrain / GeminiLiveSession (google-genai)
-  openai_realtime.py — OpenAIRealtimeBrain / OpenAIRealtimeSession (openai SDK)
-lelamp/brain_demo.py — script demo standalone Mac/Linux (không cần Lumi)
+  __init__.py        — public exports (TextBrain, build_text_brain_from_env, load_context, …)
+  prompts.py         — DECISION_RULES, DELEGATE_TOOL_*, language_hint(), resolve_stt_language()
+  context_loader.py  — đọc IDENTITY / USER / MEMORY / KNOWLEDGE / SOUL + OpenClaw session JSONL
+  text_router.py     — class TextBrain với 2 backend HTTP `gemini` / `openai`
 lelamp/test/test_brain.py — unit test cho context loader
 ```
 
 ### Context brain nhận được
 
-Giống y context của OpenClaw, **không có skills** (skills = nhiệm vụ =
-thuộc về nhánh B rồi):
+**Static** system prompt — build 1 lần ở startup, cache trong suốt
+process lifetime để mọi request dùng lại đúng cùng 1 prefix byte-stable
+(prompt cache hit từ call #2 trở đi):
 
-- `SOUL.md` — khối nhân vật từ `$OPENCLAW_WORKSPACE/SOUL.md`
-- **History session main** — đọc thẳng từ JSONL của OpenClaw, đúng
-  nguồn `chat.history` WS RPC cũng đọc. Path lấy qua
-  `$OPENCLAW_AGENTS_DIR/sessions/sessions.json` →
-  `<sessionFile>` cho sessionKey `agent:main:main` (override bằng
-  `OPENCLAW_SESSION_KEY`). Quét ngược từ cuối file, chỉ giữ `role` ∈
-  {`user`, `assistant`} với part `type == "text"`, bỏ noise
-  `[OpenClaw heartbeat poll]` / `HEARTBEAT_OK`, strip
-  `[HW:/...]`, `[sensing:…]`, `[wellbeing_context: {...}]`, date
-  headers, rồi lấy `history_limit` lượt cuối theo thứ tự thời gian.
-- **Fallback:** nếu workspace không truy cập được (vd đang dev trên
-  Mac), loader chuyển sang `GET {LUMI_BASE_URL}/api/agent/recent`
-  — log monitor của Lumi. Độ chi tiết thấp hơn JSONL nhưng đủ để
-  chit-chat khi dev.
+1. `DECISION_RULES` — routing rules (tiếng Anh, ngắn).
+2. Language hint — ví dụ `LANGUAGE: The user is speaking Vietnamese. …`
+   khi `stt_language` được set trong lumi config.
+3. **IDENTITY** — `IDENTITY.md` đầy đủ (given name + species + traits).
+4. **OWNER / USER PROFILE** — `USER.md` đầy đủ (name, preferences, timezone).
+5. **LONG-TERM MEMORY** — `workspace/memory/*.md` (concat
+   `MEMORY_FILES_KEEP` file mới nhất, tail-trim) hoặc fallback `MEMORY.md`.
+6. **KNOWLEDGE** — `KNOWLEDGE.md` (mistakes agent đã học không lặp lại).
+7. **PERSONA** — `SOUL.md` (giọng văn).
 
-Path resolve theo 2 dạng:
-- `OPENCLAW_WORKSPACE=/root/.openclaw/workspace` (nơi `SOUL.md` ở);
-  loader tự suy ra `agents/main` từ cha của nó.
-- `OPENCLAW_AGENTS_DIR=/root/.openclaw/agents/main` để override
-  thẳng nếu layout khác.
+Thiếu file nào thì silent skip; brain vẫn boot mà không có file đó.
 
-Nguồn nào không lấy được thì bỏ qua im lặng — brain vẫn chạy, chỉ là
-thiếu phần đó trong prompt.
+### History brain nhận được (per call)
+
+Build lại mỗi lần `decide()` — pass qua array `contents` / `messages`,
+**không** nhúng vào system prompt, để prefix cache giữ byte-stable.
+
+`_merge_history()` interleave 2 nguồn rồi sort theo timestamp:
+
+- **OpenClaw session JSONL** (luồng delegate) — đọc trực tiếp từ
+  `$OPENCLAW_AGENTS_DIR/sessions/<sessionFile>` (resolve qua
+  `sessions.json` index bằng `OPENCLAW_SESSION_KEY`). Cùng data mà
+  `chat.history` WS RPC trả về. Hardware command, sensing tag, context
+  blob, date header, `NO_REPLY`, heartbeat token đều bị strip — brain
+  chỉ thấy text hội thoại.
+- **In-process chit-chat log** (mấy turn chit-chat brain tự xử,
+  không bao giờ tới OpenClaw) — giữ trong `_session_history` + persist
+  JSONL ở `LELAMP_BRAIN_SESSION_LOG` để restart service không quên
+  history cũ.
+
+Cả 2 nguồn đều stamp `ts` Unix epoch; `merged.sort(key=...)` ra timeline
+chronological. Cap ở `2 * LELAMP_BRAIN_SESSION_HISTORY_MAX` entry tổng
+(giữ newest tail) để OpenClaw log dài không làm phình prompt.
 
 ---
 
-## 5. Chạy thử trên Mac
+## 5. Tích hợp với VoiceService
 
-```bash
-cd lelamp
-export LELAMP_BRAIN_PROVIDER=gemini   # hoặc openai
-export GEMINI_API_KEY=...             # (hoặc OPENAI_API_KEY)
-python -m lelamp.brain_demo
+`VoiceService._stream_session` chạy pipeline STT cổ điển. Khi STT
+finalize transcript (`final_text`) và event type = `voice` (speech
+thường — wake-word event vẫn route riêng):
+
+```python
+decision = self._text_brain.decide(final_text, speaker=user)
+if decision.decision == "chitchat" and decision.reply:
+    self._tts.speak_queue(decision.reply)            # nhánh A
+elif decision.decision == "delegate":
+    self._send_to_lumi(final_msg, event_type="voice")  # nhánh B
+else:  # decision.decision == "error"
+    self._send_to_lumi(final_msg, event_type="voice")  # safe fallback
 ```
 
-Mở mic + loa mặc định, in `[lumi] …` cho text deltas (nếu có) và
-`>>> [TASK → would POST to Lumi] '…'` mỗi lần brain escalate một câu
-sang flow task. Không cần Lumi server hay OpenClaw — tiện thử voice /
-câu chữ mà không phải redeploy lên thiết bị.
-
-Nếu chưa set `OPENCLAW_WORKSPACE`, demo dùng persona dev built-in để
-brain vẫn nói "đúng giọng Lumi" trên máy sạch.
+Speaker recognition, SER, wake-word router chạy trước brain — brain chỉ
+thấy final transcript, không bao giờ thấy raw audio.
 
 ---
 
-## 6. Tích hợp với VoiceService
+## 6. Prompt caching
 
-`VoiceService.__init__` đọc `LELAMP_BRAIN_PROVIDER`. Nếu giá trị là
-một provider hợp lệ AND SDK + key OK, nó gọi
-`brain.make_brain(provider, …)` lấy về 1 instance `Brain` và mở
-`PCMAudioSink` đặt vào `self._brain` / `self._brain_sink`. `_loop()`
-sau đó fork qua `_continuous_brain_loop()` thay vì VAD loop cũ.
+Static system instruction (mọi thứ trong §4 trừ per-call history) build
+1 lần trong `TextBrain.__init__` và cache cho suốt process lifetime.
+Đọc lại `IDENTITY.md` / `USER.md` / `MEMORY.md` / etc. sau khi sửa
+phải restart service — chấp nhận được với loại file này.
 
-`_continuous_brain_loop` mở 1 mic duy nhất + 1 brain session duy nhất
-suốt thời gian service chạy. Mỗi mic frame được gửi thẳng tới
-realtime API của provider. 3 callbacks wire trong loop:
+Vì sao quan trọng: với prefix byte-stable, cả 2 provider đều kick prompt
+cache từ call #2:
 
-- `on_delegate(transcript)` → `_send_to_lumi(transcript, "voice")`
-- `on_audio_chunk(pcm)`     → `_brain_sink.push(pcm)` (chỉ native mode)
-- `on_text(text, is_final)` → buffer, rồi `TTSService.speak_queue(text)`
-  khi `turn_complete` (chỉ fallback mode)
+- **OpenAI**: tự động cho mọi prefix ≥ 1024 token; cached input
+  tính ~50 % rate bình thường.
+- **Gemini**: implicit cache trên cùng prefix, discount tương đương.
 
-Khi brain session kết thúc (delegate fire, provider disconnect, idle
-timeout…) loop mở session mới rồi tiếp tục.
-
-`_tts_is_speaking()` được mở rộng để trả `True` khi brain sink đang
-phát audio, để mic gate chống echo TTS cũng chống echo voice của
-brain. Lớp 2 là RMS-based reverb gate — mic im cho đến khi RMS đo
-được < `LELAMP_ECHO_RMS_FLOOR`.
+Nếu cached prefix đổi (ví dụ sửa `MEMORY.md` rồi restart) thì call kế
+tiếp trả full price; mấy call sau cache lại.
 
 ---
 
-## 7. Định dạng audio
+## 7. Hạn chế / follow-up
 
-| Chiều | Format | Ghi chú |
-| --- | --- | --- |
-| Mic → brain | PCM int16 LE mono, **16 kHz** | output resample sẵn của VoiceService |
-| Mic → Gemini Live | 16 kHz, gửi nguyên | Gemini Live nhận 16 kHz `audio/pcm` |
-| Mic → OpenAI Realtime | **24 kHz**, polyphase resample trong `openai_realtime.py` | OpenAI Realtime cần 24 kHz `pcm16` |
-| Brain → loa | PCM int16 LE mono, **24 kHz** | Cả 2 provider đều stream 24 kHz — khớp `PCMAudioSink` mặc định |
-
-`PCMAudioSink` mở 1 backend duy nhất cho cả session (aplay subprocess
-ưu tiên, sounddevice là fallback). Trên Pi chỗ PortAudio giữ độc quyền
-card seeed/wm8960 cho TTSService, đặt `LELAMP_BRAIN_OUTPUT_ALSA` về 1
-device dmix/plug để aplay share output.
-
----
-
-## 8. Thêm provider mới
-
-Muốn thêm (vd) `anthropic`:
-
-1. Tạo `lelamp/service/brain/anthropic_realtime.py` implement `Brain`
-   + `BrainSession`. Dùng lại `prompts.DECISION_RULES`,
-   `prompts.DELEGATE_TOOL_NAME`, `prompts.DELEGATE_TOOL_DESCRIPTION`,
-   và `context_loader.load_context` để persona / routing / context
-   giống y các provider khác.
-2. Thêm 1 dòng vào `lelamp/service/brain/factory.py:_PROVIDERS`:
-   ```python
-   "anthropic": ("lelamp.service.brain.anthropic_realtime", "AnthropicRealtimeBrain"),
-   ```
-3. Document env var trong file này. Không cần sửa gì khác.
-
-Retire provider thì làm ngược lại — xoá module file + xoá dòng đó.
-
----
-
-## 9. Hạn chế đã biết / follow-up
-
-- **Khác giọng giữa hai nhánh (native mode)** — chit-chat dùng giọng
-  provider (`Aoede` cho Gemini, `alloy` cho OpenAI), task quay về TTS
-  ElevenLabs/OpenAI. Khắc phục: set `LELAMP_BRAIN_TTS=fallback` để 1
-  giọng duy nhất (đánh đổi latency cao hơn cho chit-chat).
-- **Không ngắt lời giữa chừng** — khi brain đang nói thì mic bị gate,
-  user chưa "đè" lên được. Muốn ngắt thì phải tích hợp echo-cancel
-  biết buffer phát của brain.
-- **Mất speaker recognition / SER / wake-word trong brain mode** —
-  các pipeline đó cần buffer audio per-utterance, loop
-  1-session-liên-tục không giữ. Cần lại thì hoặc về STT classic
-  (`LELAMP_BRAIN_PROVIDER=none`), hoặc wire 1 buffer per-turn vào
-  `_continuous_brain_loop` đọc `turn_complete` / `response.done` từ
-  provider.
-- **History chỉ đọc** — brain đọc lịch sử Lumi nhưng không ghi ngược.
-  Chit-chat reply không hiện trong Flow Monitor. Nếu cần audit thì
-  sau POST một event tổng hợp khi brain xử lý xong lượt.
-- **Không nhớ giữa các session** — stateless cho MVP. Khi cần liền
-  mạch hội thoại mới gắn thêm `session_resumption` (Gemini) hoặc
-  `conversation.item.retrieve` replay (OpenAI).
+- **Không streaming reply** — `chat.completions` trả full reply trong
+  1 HTTP response, nên chit-chat reply về 1 cục. Với reply 1–2 câu
+  ngắn thì perceived latency chủ yếu do model generation time, không
+  phải round-trip; streaming chỉ tiết kiệm tí mà nhân đôi parse
+  complexity.
+- **OpenClaw history read-only** — brain đọc JSONL của OpenClaw nhưng
+  không write back. Chit-chat reply nằm trong JSONL riêng của brain
+  (`LELAMP_BRAIN_SESSION_LOG`); không xuất hiện trong OpenClaw chat
+  history hay Flow Monitor. Trade-off cross-process visibility.
+- **Không barge-in** — khi TTSService đang phát chit-chat reply thì
+  mic gate đang on; user không thể ngắt giữa chừng.
+- **Static prompt = process-lifetime** — edit IDENTITY / USER / MEMORY
+  / KNOWLEDGE / SOUL phải restart lelamp mới ăn vào brain. Luồng
+  OpenClaw delegate thì pick-up ngay — chỉ fast path chit-chat ôm
+  snapshot.
