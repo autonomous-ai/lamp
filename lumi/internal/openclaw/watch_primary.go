@@ -179,12 +179,15 @@ func (s *Service) syncPrimaryFromFile() {
 		return
 	}
 
-	if s.config.LLMModel == modelKey {
+	// Read LLMModel under config.mu (LLMModelKey) to avoid a data race with
+	// concurrent WithLockSave calls from HTTP handlers.
+	currentModel := s.config.LLMModelKey()
+	if currentModel == modelKey {
 		return // already in sync
 	}
 
 	slog.Info("[primarysync] external model change detected, syncing to Lumi config",
-		"old", s.config.LLMModel, "new", modelKey)
+		"old", currentModel, "new", modelKey)
 	// SetLLMModel acquires the config mutex so this write cannot race with
 	// device.UpdateConfig's concurrent UpdateLLMModel + Save call.
 	if err := s.config.SetLLMModel(modelKey); err != nil {

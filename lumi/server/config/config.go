@@ -224,27 +224,30 @@ func (c *Config) ResetToDefault() error {
 }
 
 // WithLockSave is the canonical way to mutate config fields and persist them.
-// It acquires mu, runs fn (which may set any fields on c), marshals the result
-// under the same lock so no concurrent goroutine can see a partial snapshot,
-// then releases mu and writes the marshalled bytes to disk.
+// It acquires mu, runs fn (which may set any fields on c), marshals the result,
+// and writes to disk — all under the same lock so two concurrent callers cannot
+// produce a "newer marshal wins the race but older write lands last" stale
+// snapshot on disk.
 //
-// All config mutations that need to be persisted atomically should go through
-// this helper. The file write and notify happen outside the lock so the
-// critical section stays short.
+// The notify send happens after the lock is released to keep the critical
+// section as short as possible.
 func (c *Config) WithLockSave(fn func(*Config)) error {
 	c.mu.Lock()
 	fn(c)
 	data, err := json.MarshalIndent(c, "", "  ")
-	c.mu.Unlock()
 	if err != nil {
+		c.mu.Unlock()
 		return fmt.Errorf("marshal config: %w", err)
 	}
 	dir := filepath.Dir(configPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
+	if mkErr := os.MkdirAll(dir, 0755); mkErr != nil {
+		c.mu.Unlock()
+		return fmt.Errorf("create config dir: %w", mkErr)
 	}
-	if err := os.WriteFile(configPath, data, 0600); err != nil {
-		return fmt.Errorf("write config %s: %w", configPath, err)
+	writeErr := os.WriteFile(configPath, data, 0600)
+	c.mu.Unlock() // release before notify so listeners are not blocked
+	if writeErr != nil {
+		return fmt.Errorf("write config %s: %w", configPath, writeErr)
 	}
 	if c.notify != nil {
 		select {
