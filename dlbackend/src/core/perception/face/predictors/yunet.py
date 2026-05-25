@@ -6,19 +6,20 @@ from typing import Any
 import cv2
 import cv2.typing as cv2t
 import numpy as np
-import numpy.typing as npt
 from typing_extensions import override
 
+from core.enums.files import ModelEnum
 from core.models.face import RawFaceDetection
-from core.perception.face.constants import RESOURCES_DIR
 from core.perception.face.predictors.base import FaceDetector
 from core.utils.common import get_or_default
+from core.utils.files import ensure_downloaded, get_default_cdn_url, get_default_model_path
 
 
 class YuNetFaceDetector(FaceDetector):
     """YuNet-based face detector using OpenCV's FaceDetectorYN."""
 
-    DEFAULT_MODEL_PATH: Path = RESOURCES_DIR / "face_detection_yunet_2023mar.onnx"
+    DEFAULT_MODEL_PATH: Path = get_default_model_path(ModelEnum.YUNET)
+    DEFAULT_REMOTE_URL: str | None = get_default_cdn_url(ModelEnum.YUNET)
     DEFAULT_INPUT_SIZE: tuple[int, int] = (320, 320)
     DEFAULT_SCORE_THRESHOLD: float = 0.7
     DEFAULT_NMS_THRESHOLD: float = 0.3
@@ -27,6 +28,7 @@ class YuNetFaceDetector(FaceDetector):
     def __init__(
         self,
         model_path: Path | None = None,
+        remote_url: str | None = None,
         input_size: tuple[int, int] | None = None,
         score_threshold: float | None = None,
         nms_threshold: float | None = None,
@@ -34,6 +36,7 @@ class YuNetFaceDetector(FaceDetector):
     ) -> None:
         super().__init__()
         self._model_path: Path = get_or_default(model_path, self.DEFAULT_MODEL_PATH)
+        self._remote_url: str | None = get_or_default(remote_url, self.DEFAULT_REMOTE_URL)
         self._input_size: tuple[int, int] = get_or_default(input_size, self.DEFAULT_INPUT_SIZE)
         self._score_threshold: float = get_or_default(score_threshold, self.DEFAULT_SCORE_THRESHOLD)
         self._nms_threshold: float = get_or_default(nms_threshold, self.DEFAULT_NMS_THRESHOLD)
@@ -46,6 +49,7 @@ class YuNetFaceDetector(FaceDetector):
         if self._running:
             self._logger.info("Already running")
             return
+        self._model_path = ensure_downloaded(self._model_path, remote=self._remote_url)
         self._logger.info("Loading model from %s", self._model_path)
         self._detector = cv2.FaceDetectorYN.create(
             str(self._model_path),
@@ -73,7 +77,9 @@ class YuNetFaceDetector(FaceDetector):
         return input
 
     @override
-    def _predict_impl(self, input: list[cv2t.MatLike], *, preprocess: bool = True, **kwargs: Any) -> list[RawFaceDetection]:
+    def _predict_impl(
+        self, input: list[cv2t.MatLike], *, preprocess: bool = True, **kwargs: Any
+    ) -> list[RawFaceDetection]:
         """Detect faces in a batch of BGR frames.
 
         Returns one RawFaceDetection per frame with bbox_xyxy and confidence

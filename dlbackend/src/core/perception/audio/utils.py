@@ -15,6 +15,7 @@ class AudioEmbedderFactory(PredictorFactory[AudioEmbedder]):
         self,
         model_name: AudioEmbedderEnum,
         model_path: Path | None = None,
+        remote_url: str | None = None,
         processor_factory: AudioProcessorFactory | None = None,
         window_frames: int | None = None,
         hop_frames: int | None = None,
@@ -22,19 +23,21 @@ class AudioEmbedderFactory(PredictorFactory[AudioEmbedder]):
         num_mel_bins: int | None = None,
         batch_size: int | None = None,
     ) -> None:
-        self._model_name = model_name
-        self._model_path = model_path
-        self._processor_factory = processor_factory
-        self._window_frames = window_frames
-        self._hop_frames = hop_frames
-        self._sample_rate = sample_rate
-        self._num_mel_bins = num_mel_bins
-        self._batch_size = batch_size
+        self._model_name: AudioEmbedderEnum = model_name
+        self._model_path: Path | None = model_path
+        self._remote_url: str | None = remote_url
+        self._processor_factory: AudioProcessorFactory | None = processor_factory
+        self._window_frames: int | None = window_frames
+        self._hop_frames: int | None = hop_frames
+        self._sample_rate: int | None = sample_rate
+        self._num_mel_bins: int | None = num_mel_bins
+        self._batch_size: int | None = batch_size
 
     def create(self) -> AudioEmbedder:
         return create_embedder(
             self._model_name,
             self._model_path,
+            remote_url=self._remote_url,
             processor_factory=self._processor_factory,
             window_frames=self._window_frames,
             hop_frames=self._hop_frames,
@@ -47,6 +50,7 @@ class AudioEmbedderFactory(PredictorFactory[AudioEmbedder]):
 def create_embedder(
     model_name: AudioEmbedderEnum,
     model_path: Path | None,
+    remote_url: str | None = None,
     processor_factory: AudioProcessorFactory | None = None,
     window_frames: int | None = None,
     hop_frames: int | None = None,
@@ -66,6 +70,7 @@ def create_embedder(
 
     return cls(
         model_path,
+        remote_url=remote_url,
         processor_factory=processor_factory,
         window_frames=window_frames,
         hop_frames=hop_frames,

@@ -23,7 +23,7 @@ class GroundingDINODetector(ObjectDetector):
     Classes are joined into a period-separated text prompt per request.
     """
 
-    DEFAULT_MODEL_PATH: Path = Path("IDEA-Research/grounding-dino-tiny")
+    DEFAULT_MODEL_PATH: Path | None = Path("IDEA-Research/grounding-dino-tiny")
     DEFAULT_THRESHOLD: float = 0.25
     DEFAULT_TEXT_THRESHOLD: float = 0.25
 

@@ -15,6 +15,7 @@ from core.perception.audio.processors import CompositeAudioProcessor
 from core.perception.audio.processors.utils import AudioProcessorFactory
 from core.perception.base import PredictorBase
 from core.utils.common import get_or_default
+from core.utils.files import ensure_downloaded
 from core.utils.runtime import prepare_ort_session
 
 
@@ -28,6 +29,7 @@ class AudioEmbedder(PredictorBase[Audio, RawAudioEmbedding]):
     """
 
     DEFAULT_MODEL_PATH: Path | None = None
+    DEFAULT_REMOTE_URL: str | None = None
     DEFAULT_PROCESSOR_FACTORY: AudioProcessorFactory = AudioProcessorFactory()
 
     DEFAULT_WINDOW_FRAMES: int = 200
@@ -39,6 +41,7 @@ class AudioEmbedder(PredictorBase[Audio, RawAudioEmbedding]):
     def __init__(
         self,
         model_path: Path | None = None,
+        remote_url: str | None = None,
         processor_factory: AudioProcessorFactory | None = None,
         window_frames: int | None = None,
         hop_frames: int | None = None,
@@ -49,6 +52,7 @@ class AudioEmbedder(PredictorBase[Audio, RawAudioEmbedding]):
         super().__init__()
 
         self._model_path: Path | None = get_or_default(model_path, self.DEFAULT_MODEL_PATH)
+        self._remote_url: str | None = get_or_default(remote_url, self.DEFAULT_REMOTE_URL)
         self._processor_factory: AudioProcessorFactory = get_or_default(
             processor_factory, self.DEFAULT_PROCESSOR_FACTORY
         )
@@ -70,6 +74,7 @@ class AudioEmbedder(PredictorBase[Audio, RawAudioEmbedding]):
         if self._model_path is None:
             raise RuntimeError(f"{self.__class__.__name__} has no model_path configured")
 
+        self._model_path = ensure_downloaded(self._model_path, remote=self._remote_url)
         self._processor = self._processor_factory.create()
         self._processor.start()
         self._logger.info("Loading audio embedder from %s", self._model_path)

@@ -162,8 +162,7 @@ info:
 # Test
 # ---------------------------------------------------------------------------
 
-test:
-	python -m pytest tests/ -v
+test: test-api test-local
 
 test-api: test-action-api test-fer-api test-ser-api test-pose-api test-object-api test-audio-api test-crypto-api
 
