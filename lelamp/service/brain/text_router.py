@@ -456,6 +456,29 @@ class TextBrain:
             return ""
         return f"[Earlier in this conversation: {summary}]"
 
+    def _log_outbound_context(self, role_text_pairs: list[tuple[str, str]]) -> None:
+        """Multi-line dump of every message about to hit the LLM.
+
+        Static system message is replaced with a ``<N chars cached
+        static prompt>`` placeholder because it never changes between
+        turns — printing 15k chars per request floods journalctl and
+        adds nothing observable. Everything else (rolling summary,
+        history turns, current user input) is logged verbatim so an
+        operator can reconstruct what the model saw on each decision.
+        """
+        logger.info("brain.context [%s] n=%d", self._provider, len(role_text_pairs))
+        for i, (role, text) in enumerate(role_text_pairs):
+            if role == "system":
+                logger.info(
+                    "brain.context [%s] #%02d %s: <%d chars cached static prompt>",
+                    self._provider, i, role, len(text),
+                )
+            else:
+                logger.info(
+                    "brain.context [%s] #%02d %s: %s",
+                    self._provider, i, role, text,
+                )
+
     # --- gemini path (raw HTTP) ----------------------------------------------
 
     def _decide_gemini(self, text: str, speaker: str) -> TextBrainDecision:
@@ -487,6 +510,14 @@ class TextBrain:
             role = "user" if entry["role"] == "user" else "model"
             contents.append({"role": role, "parts": [{"text": entry["text"]}]})
         contents.append({"role": "user", "parts": [{"text": text}]})
+
+        # Per-turn dump of everything the model is about to see —
+        # system prompt stays as a length placeholder so the log is
+        # readable, history + summary + current input are full text.
+        self._log_outbound_context(
+            [("system", self._cached_static_system)]
+            + [(c["role"], c["parts"][0]["text"]) for c in contents]
+        )
 
         payload = {
             "systemInstruction": {"parts": [{"text": self._cached_static_system}]},
@@ -602,6 +633,13 @@ class TextBrain:
         for entry in self._merge_history():
             messages.append({"role": entry["role"], "content": entry["text"]})
         messages.append({"role": "user", "content": text})
+
+        # Per-turn dump of everything the model is about to see —
+        # system prompt stays as a length placeholder so the log is
+        # readable, history + summary + current input are full text.
+        self._log_outbound_context(
+            [(m["role"], m["content"]) for m in messages]
+        )
 
         payload = {
             "model": self._model,
