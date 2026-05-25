@@ -223,22 +223,26 @@ func (c *Config) ResetToDefault() error {
 	return c.Save()
 }
 
-// Save writes the config to the config file. Uses a pointer receiver so the
-// mutex is not copied. Acquires mu during marshalling to ensure the snapshot
-// is consistent with any concurrent SetLLMModel / UpdateLLMModel calls.
-func (c *Config) Save() error {
+// WithLockSave is the canonical way to mutate config fields and persist them.
+// It acquires mu, runs fn (which may set any fields on c), marshals the result
+// under the same lock so no concurrent goroutine can see a partial snapshot,
+// then releases mu and writes the marshalled bytes to disk.
+//
+// All config mutations that need to be persisted atomically should go through
+// this helper. The file write and notify happen outside the lock so the
+// critical section stays short.
+func (c *Config) WithLockSave(fn func(*Config)) error {
 	c.mu.Lock()
+	fn(c)
 	data, err := json.MarshalIndent(c, "", "  ")
 	c.mu.Unlock()
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
-
 	dir := filepath.Dir(configPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
-
 	if err := os.WriteFile(configPath, data, 0600); err != nil {
 		return fmt.Errorf("write config %s: %w", configPath, err)
 	}
@@ -251,21 +255,28 @@ func (c *Config) Save() error {
 	return nil
 }
 
-// UpdateLLMModel atomically sets LLMModel without saving. Callers must call
-// Save() afterwards. Use this in paths that batch-update many config fields
-// before a single Save (e.g. device.UpdateConfig).
-func (c *Config) UpdateLLMModel(key string) {
-	c.mu.Lock()
-	c.LLMModel = key
-	c.mu.Unlock()
+// Save flushes the current config fields to disk under the config mutex.
+// Prefer WithLockSave for any path that also mutates fields.
+func (c *Config) Save() error {
+	return c.WithLockSave(func(*Config) {})
 }
 
-// SetLLMModel atomically sets LLMModel and saves the config in one step.
-// Intended for background goroutines (e.g. the primary-model watcher) that
-// need to persist a single-field change without touching other config fields.
+// SetLLMModel atomically sets LLMModel and saves the config in a single lock
+// cycle (no gap between the field write and the marshal). Intended for
+// background goroutines (e.g. primary-model watcher) updating a single field.
 func (c *Config) SetLLMModel(key string) error {
-	c.UpdateLLMModel(key)
-	return c.Save()
+	return c.WithLockSave(func(c *Config) {
+		c.LLMModel = key
+	})
+}
+
+// LLMModelKey returns LLMModel under the config mutex. Use this in goroutines
+// that read LLMModel concurrently with WithLockSave paths.
+func (c *Config) LLMModelKey() string {
+	c.mu.Lock()
+	key := c.LLMModel
+	c.mu.Unlock()
+	return key
 }
 
 // GetTTSAPIKey returns the TTS provider API key, falling back to LLMAPIKey
