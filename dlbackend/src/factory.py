@@ -22,9 +22,9 @@ from core.perception.audio.processors.utils import AudioProcessorFactory
 from core.perception.audio.utils import create_embedder
 from core.perception.audio_emotion.perception import AudioEmotionPerception
 from core.perception.audio_emotion.utils import AudioEmotionRecognizerFactory
+from core.perception.face.utils import FaceDetectorFactory
 from core.perception.facial_emotion.perception import EmotionPerception
 from core.perception.facial_emotion.utils import EmotionRecognizerFactory
-from core.perception.face.utils import FaceDetectorFactory
 from core.perception.object.perception import ObjectPerception
 from core.perception.object.utils import ObjectDetectorFactory
 from core.perception.person.utils import PersonDetectorFactory

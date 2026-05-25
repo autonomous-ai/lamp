@@ -128,3 +128,26 @@ class TestSession:
         assert result is not None
         # With very high threshold, most classes should be filtered
         assert len(result.emotions) < len(perception.labels)
+
+
+class TestRejection:
+    def test_predict_before_start_raises(self, happy_audio):
+        rec = Emotion2VecPlusLargeRecognizer(model_path=MODEL_PATH)
+        with pytest.raises(RuntimeError, match="not ready"):
+            rec.predict([happy_audio])
+
+    def test_predict_after_stop_raises(self, happy_audio):
+        rec = Emotion2VecPlusLargeRecognizer(model_path=MODEL_PATH)
+        rec.start()
+        rec.stop()
+        with pytest.raises(RuntimeError, match="not ready"):
+            rec.predict([happy_audio])
+
+    def test_perception_predict_before_start_raises(self, happy_audio):
+        factory = AudioEmotionRecognizerFactory(
+            model_name=SpeechEmotionRecognizerEnum.EMOTION2VEC_PLUS_LARGE,
+            model_path=MODEL_PATH,
+        )
+        p = AudioEmotionPerception(audio_emotion_recognizer_factory=factory)
+        with pytest.raises(RuntimeError):
+            asyncio.run(p.predict_audio(happy_audio))

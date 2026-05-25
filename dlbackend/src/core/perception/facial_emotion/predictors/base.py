@@ -134,18 +134,18 @@ class EmotionRecognizer(PredictorBase[cv2t.MatLike, RawEmotionDetection]):
         input_np = (input_np / 255.0 - self.MEAN) / self.STD
         input_np = input_np.transpose(0, 3, 1, 2)  # (N, C, H, W)
 
-        (raw_logits,) = self._session.run(None, {"input": input_np})
-        logits = cast(npt.NDArray[np.float32], raw_logits)
-        return self._postprocess_batch(logits, N)
+        raw_outputs: list[npt.NDArray[np.float32]] = self._session.run(None, {"input": input_np})
+        return self._postprocess_batch(raw_outputs, len(input))
 
     def _postprocess_batch(
-        self, logits: npt.NDArray[np.float32], N: int
+        self, raw_outputs: list[npt.NDArray[np.float32]], N: int
     ) -> list[RawEmotionDetection]:
         """Convert batched ONNX output to per-sample RawEmotionDetection.
 
         Default: first output is expression logits (N, C). Subclasses
         override for models with additional outputs (valence, arousal).
         """
+        logits: npt.NDArray[np.float32] = cast(npt.NDArray[np.float32], raw_outputs[0])
         probs: npt.NDArray[np.float32] = softmax(logits, axis=-1)  # (N, C)
 
         return [RawEmotionDetection(expression_probs=probs[i]) for i in range(N)]
