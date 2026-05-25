@@ -4,7 +4,7 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Tag
 
-from core.models.emotion import EmotionDetection
+from core.models.facial_emotion import EmotionDetection
 from core.types import Omit, omit
 
 

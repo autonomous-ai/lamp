@@ -2,7 +2,7 @@
        start start-dlserver start-lbserver \
        start-runpod-master start-runpod-slave start-nginx start-runpod-dlserver start-runpod-lbserver stop-runpod-dlserver stop-runpod-lbserver start-jupyter \
        info \
-       test test-api test-local test-action test-action-api test-action-local test-emotion test-emotion-api test-emotion-local test-pose test-pose-api test-pose-local test-audio test-audio-api test-audio-local lint
+       test test-api test-local test-action test-action-api test-action-local test-emotion test-emotion-api test-emotion-local test-pose test-pose-api test-pose-local test-audio test-audio-api test-audio-local test-audio-emotion test-audio-emotion-api test-audio-emotion-local lint
 
 # ---------------------------------------------------------------------------
 # Variables
@@ -156,9 +156,9 @@ info:
 test:
 	python -m pytest tests/ -v
 
-test-api: test-action-api test-emotion-api test-pose-api test-object-api test-audio-api
+test-api: test-action-api test-emotion-api test-pose-api test-object-api test-audio-api test-audio-emotion-api
 
-test-local: test-action-local test-emotion-local test-pose-local test-object-local test-audio-local
+test-local: test-action-local test-emotion-local test-pose-local test-object-local test-audio-local test-audio-emotion-local
 
 test-action: test-action-api test-action-local
 
@@ -199,6 +199,14 @@ test-audio-api:
 
 test-audio-local:
 	python -m pytest tests/audio_local/ -v
+
+test-audio-emotion: test-audio-emotion-api test-audio-emotion-local
+
+test-audio-emotion-api:
+	python -m pytest tests/audio_emotion_api/ -v
+
+test-audio-emotion-local:
+	python -m pytest tests/audio_emotion_local/ -v
 
 lint:
 	ruff check src/ tests/

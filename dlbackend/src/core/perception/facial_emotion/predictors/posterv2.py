@@ -11,8 +11,8 @@ from pathlib import Path
 import numpy as np
 import numpy.typing as npt
 
-from core.perception.emotion.constants import RESOURCES_DIR
-from core.perception.emotion.predictors.base import EmotionRecognizer
+from core.perception.facial_emotion.constants import RESOURCES_DIR
+from core.perception.facial_emotion.predictors.base import EmotionRecognizer
 
 
 class PosterV2Recognizer(EmotionRecognizer):

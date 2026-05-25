@@ -12,15 +12,15 @@ import cv2.typing as cv2t
 import numpy as np
 from typing_extensions import override
 
-from core.models.emotion import (
+from core.models.facial_emotion import (
     Emotion,
     EmotionDetection,
     EmotionPerceptionSessionConfig,
     RawEmotionDetection,
 )
-from core.perception.base import PerceptionSessionBase
-from core.perception.emotion.predictors.base import EmotionRecognizer
 from core.models.face import FaceCrop
+from core.perception.base import PerceptionSessionBase
+from core.perception.facial_emotion.predictors.base import EmotionRecognizer
 from core.perception.face.predictors.base import FaceDetector
 from core.types import Omit, omit
 
@@ -67,7 +67,9 @@ class EmotionPerceptionSession(
 
     @override
     def is_ready(self) -> bool:
-        return self._running and self._emotion_recognizer.is_ready() and self._face_detector.is_ready()
+        return (
+            self._running and self._emotion_recognizer.is_ready() and self._face_detector.is_ready()
+        )
 
     @override
     async def update(self, input: cv2t.MatLike) -> EmotionDetection | None:
@@ -83,8 +85,8 @@ class EmotionPerceptionSession(
         face_crops: list[FaceCrop] = face_crops_per_frame[0] if face_crops_per_frame else []
 
         if not face_crops:
-            self._last_prediction = EmotionDetection(emotions=[])
-            self._last_update_ts = cur_ts
+            self._last_prediction: EmotionDetection = EmotionDetection(emotions=[])
+            self._last_update_ts: float = cur_ts
             return self._last_prediction
 
         # Classify emotions on each face crop

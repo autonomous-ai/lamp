@@ -12,7 +12,7 @@ from config import settings
 from core.enums.face import FaceDetectorEnum
 from core.enums.object import ObjectDetectorEnum
 from core.models.action import ActionPerceptionSessionConfig
-from core.models.emotion import EmotionPerceptionSessionConfig
+from core.models.facial_emotion import EmotionPerceptionSessionConfig
 from core.models.object import ObjectPerceptionSessionConfig
 from core.models.pose import PosePerceptionSessionConfig
 from core.perception.action.perception import ActionPerception
@@ -20,8 +20,10 @@ from core.perception.action.utils import ActionRecognizerFactory
 from core.perception.audio.predictors.base import AudioEmbedder
 from core.perception.audio.processors.utils import AudioProcessorFactory
 from core.perception.audio.utils import create_embedder
-from core.perception.emotion.perception import EmotionPerception
-from core.perception.emotion.utils import EmotionRecognizerFactory
+from core.perception.audio_emotion.perception import AudioEmotionPerception
+from core.perception.audio_emotion.utils import AudioEmotionRecognizerFactory
+from core.perception.facial_emotion.perception import EmotionPerception
+from core.perception.facial_emotion.utils import EmotionRecognizerFactory
 from core.perception.face.utils import FaceDetectorFactory
 from core.perception.object.perception import ObjectPerception
 from core.perception.object.utils import ObjectDetectorFactory
@@ -222,4 +224,20 @@ def build_audio_embedder() -> AudioEmbedder:
         model_name=settings.audio_embedder.model,
         model_path=model_path,
         processor_factory=processor_factory,
+    )
+
+
+def build_audio_emotion_perception() -> AudioEmotionPerception:
+    """Create AudioEmotionPerception from settings."""
+    ckpt_path: Path | None = (
+        Path(settings.ser_recognition_ckpt_path) if settings.ser_recognition_ckpt_path else None
+    )
+
+    factory = AudioEmotionRecognizerFactory(
+        model_name=settings.ser_recognition_model,
+        model_path=ckpt_path,
+    )
+
+    return AudioEmotionPerception(
+        audio_emotion_recognizer_factory=factory,
     )

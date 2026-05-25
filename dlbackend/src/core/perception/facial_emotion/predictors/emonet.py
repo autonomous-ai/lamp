@@ -14,9 +14,9 @@ import numpy as np
 import numpy.typing as npt
 from typing_extensions import override
 
-from core.models.emotion import RawEmotionDetection
-from core.perception.emotion.constants import RESOURCES_DIR
-from core.perception.emotion.predictors.base import EmotionRecognizer
+from core.models.facial_emotion import RawEmotionDetection
+from core.perception.facial_emotion.constants import RESOURCES_DIR
+from core.perception.facial_emotion.predictors.base import EmotionRecognizer
 from core.utils.compute import softmax
 
 

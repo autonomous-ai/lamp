@@ -12,7 +12,7 @@ import numpy as np
 import numpy.typing as npt
 from typing_extensions import override
 
-from core.models.emotion import (
+from core.models.facial_emotion import (
     Emotion,
     EmotionDetection,
     EmotionPerceptionSessionConfig,
@@ -20,9 +20,9 @@ from core.models.emotion import (
 )
 from core.models.face import FaceCrop
 from core.perception.base import PerceptionBase
-from core.perception.emotion.predictors.base import EmotionRecognizer
-from core.perception.emotion.session import EmotionPerceptionSession
-from core.perception.emotion.utils import EmotionRecognizerFactory
+from core.perception.facial_emotion.predictors.base import EmotionRecognizer
+from core.perception.facial_emotion.session import EmotionPerceptionSession
+from core.perception.facial_emotion.utils import EmotionRecognizerFactory
 from core.perception.face.predictors.base import FaceDetector
 from core.perception.face.utils import FaceDetectorFactory
 

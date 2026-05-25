@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import TypeAdapter, ValidationError
 
-from dlserver.models.emotion import (
+from dlserver.models.facial_emotion import (
     EmotionConfigRequest,
     EmotionFrameRequest,
     EmotionHeartBeatRequest,

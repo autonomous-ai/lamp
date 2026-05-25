@@ -71,6 +71,7 @@ class SpeechEmotionRecognizerSetting(BaseModel):
     forwarded to the engine constructor.
     """
 
+    enabled: bool = True
     sample_rate: int = 16000
     intra_op_threads: int = 4
     # ONNX Runtime execution providers, comma-separated. Leave empty for
