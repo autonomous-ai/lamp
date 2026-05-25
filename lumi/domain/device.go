@@ -216,6 +216,12 @@ const (
 // KindTTSSet is the kind field for cmd:"data" tts.set downlinks from BFF.
 const KindTTSSet = "tts.set"
 
+// Data kinds carried inside CommandData envelope.
+const (
+	KindOAuthSet    = "oauth.set"    // store/replace OAuth token for a provider
+	KindOAuthRemove = "oauth.remove" // delete OAuth token for a provider
+)
+
 // Message is the standard envelope for MQTT messages from the server (fa_channel).
 // Server sends: {"cmd": "info"}, {"cmd": "add_channel", ...}, {"cmd": "data", "kind": "tts.set", ...}
 type MQTTMessage struct {
@@ -354,6 +360,61 @@ func NewMQTTInfoResponse(cfg *config.Config, msgType string, mac string) MQTTInf
 		TTSVoice:    cfg.TTSVoice,
 		STTLanguage: cfg.STTLanguage,
 	}
+}
+
+// MQTTDataCommand is the fa_channel payload for cmd:"data" — a generic envelope.
+// Sub-handlers branch on Kind and unmarshal Data into a kind-specific struct.
+type MQTTDataCommand struct {
+	Kind string          `json:"kind"`
+	Data json.RawMessage `json:"data"`
+}
+
+// MQTTDataResponse is the fd_channel reply for cmd:"data".
+// Echoes Kind so the server can correlate with its outbound request.
+type MQTTDataResponse struct {
+	MQTTInfoResponse
+	Kind   string      `json:"kind"`
+	Status string      `json:"status"`
+	Error  string      `json:"error,omitempty"`
+	Data   interface{} `json:"data,omitempty"`
+}
+
+// MQTTOAuthSetData is the Data payload for kind:"oauth.set".
+// Provider is a free-form key (e.g. "google", "twitter", "github") used as the
+// map key in access_tokens.json.
+type MQTTOAuthSetData struct {
+	Provider     string   `json:"provider"`
+	AccessToken  string   `json:"access_token"`
+	RefreshToken string   `json:"refresh_token,omitempty"`
+	TokenType    string   `json:"token_type,omitempty"`
+	ExpiresAt    int64    `json:"expires_at,omitempty"` // unix seconds; 0 = never expires
+	Scopes       []string `json:"scopes,omitempty"`
+	UserEmail    string   `json:"user_email,omitempty"`
+	ClientID     string   `json:"client_id,omitempty"`
+}
+
+// MQTTOAuthRemoveData is the Data payload for kind:"oauth.remove".
+type MQTTOAuthRemoveData struct {
+	Provider string `json:"provider"`
+}
+
+// OAuthTokenEntry is the on-disk representation of a single provider's token
+// inside access_tokens.json.
+type OAuthTokenEntry struct {
+	AccessToken  string   `json:"access_token"`
+	RefreshToken string   `json:"refresh_token,omitempty"`
+	TokenType    string   `json:"token_type,omitempty"`
+	ExpiresAt    int64    `json:"expires_at,omitempty"`
+	Scopes       []string `json:"scopes,omitempty"`
+	UserEmail    string   `json:"user_email,omitempty"`
+	ClientID     string   `json:"client_id,omitempty"`
+	ObtainedAt   int64    `json:"obtained_at"` // unix seconds when this device received the token
+}
+
+// AccessTokensFile is the on-disk schema for workspace/configs/access_tokens.json.
+type AccessTokensFile struct {
+	Version   int                        `json:"version"`
+	Providers map[string]OAuthTokenEntry `json:"providers"`
 }
 
 // MQTTTTSSetData is the nested data payload for cmd:"data", kind:"tts.set" downlinks.
