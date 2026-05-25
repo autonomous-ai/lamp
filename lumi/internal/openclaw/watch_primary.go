@@ -185,8 +185,9 @@ func (s *Service) syncPrimaryFromFile() {
 
 	slog.Info("[primarysync] external model change detected, syncing to Lumi config",
 		"old", s.config.LLMModel, "new", modelKey)
-	s.config.LLMModel = modelKey
-	if err := s.config.Save(); err != nil {
+	// SetLLMModel acquires the config mutex so this write cannot race with
+	// device.UpdateConfig's concurrent UpdateLLMModel + Save call.
+	if err := s.config.SetLLMModel(modelKey); err != nil {
 		slog.Error("[primarysync] save Lumi config failed", "err", err)
 	}
 }

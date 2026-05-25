@@ -373,7 +373,9 @@ func (s *Service) UpdateConfig(data domain.UpdateConfigRequest) error {
 	}
 	prevModel := s.config.LLMModel
 	if data.LLMModel != "" {
-		s.config.LLMModel = data.LLMModel
+		// UpdateLLMModel acquires the config mutex so this write is serialised
+		// with syncPrimaryFromFile's concurrent SetLLMModel call (watcher goroutine).
+		s.config.UpdateLLMModel(data.LLMModel)
 	}
 	modelChanged := data.LLMModel != "" && data.LLMModel != prevModel
 	thinkingChanged := data.LLMDisableThinking != nil

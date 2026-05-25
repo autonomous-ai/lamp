@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"go-lamp.autonomous.ai/lib/mqtt"
 )
@@ -19,6 +20,11 @@ const configPath = "config/config.json"
 var LumiVersion = "dev"
 
 type Config struct {
+	// mu serialises LLMModel mutations and config.Save() so the primary-model
+	// watcher goroutine (syncPrimaryFromFile) cannot race with HTTP handlers
+	// (device.UpdateConfig) that set LLMModel concurrently.
+	mu sync.Mutex
+
 	HttpPort int `json:"httpPort" yaml:"httpPort" validate:"required"`
 
 	// Channel type: "telegram" or "slack" (empty defaults to telegram for backward compat)
@@ -217,9 +223,13 @@ func (c *Config) ResetToDefault() error {
 	return c.Save()
 }
 
-// Save writes the config to the config file.
-func (c Config) Save() error {
+// Save writes the config to the config file. Uses a pointer receiver so the
+// mutex is not copied. Acquires mu during marshalling to ensure the snapshot
+// is consistent with any concurrent SetLLMModel / UpdateLLMModel calls.
+func (c *Config) Save() error {
+	c.mu.Lock()
 	data, err := json.MarshalIndent(c, "", "  ")
+	c.mu.Unlock()
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
@@ -239,6 +249,23 @@ func (c Config) Save() error {
 		}
 	}
 	return nil
+}
+
+// UpdateLLMModel atomically sets LLMModel without saving. Callers must call
+// Save() afterwards. Use this in paths that batch-update many config fields
+// before a single Save (e.g. device.UpdateConfig).
+func (c *Config) UpdateLLMModel(key string) {
+	c.mu.Lock()
+	c.LLMModel = key
+	c.mu.Unlock()
+}
+
+// SetLLMModel atomically sets LLMModel and saves the config in one step.
+// Intended for background goroutines (e.g. the primary-model watcher) that
+// need to persist a single-field change without touching other config fields.
+func (c *Config) SetLLMModel(key string) error {
+	c.UpdateLLMModel(key)
+	return c.Save()
 }
 
 // GetTTSAPIKey returns the TTS provider API key, falling back to LLMAPIKey

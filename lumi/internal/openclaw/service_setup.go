@@ -527,28 +527,44 @@ func (s *Service) RefreshModelsConfig() error {
 		}
 	}
 
-	// Also sync primary model in case LLMModel changed alongside the thinking
-	// setting. This avoids a second gateway restart from UpdatePrimaryModel
-	// when both fields change in a single UpdateConfig call.
-	newPrimary := customProviderName + "/" + s.config.LLMModel
-	agents := ensureMap(configData, "agents")
-	defaults := ensureMap(agents, "defaults")
-	modelMap := ensureMap(defaults, "model")
-	modelMap["primary"] = newPrimary
-	defaults["model"] = modelMap
-	agents["defaults"] = defaults
-	configData["agents"] = agents
+	// Conditionally sync agents.defaults.model.primary. Only overwrite it when
+	// the current provider is autonomous — if the user switched OpenClaw to a
+	// non-autonomous provider (e.g. openai/gpt-4) externally, we must not
+	// silently reset it back to the Lumi-managed model.
+	currentPrimary := extractPrimaryModel(configData)
+	prov, _, _ := splitProviderModel(currentPrimary)
+	var flagPrimary string // value written into the Lumi-write flag
+	if currentPrimary == "" || prov == customProviderName {
+		// No primary set yet, or it belongs to us — safe to update.
+		newPrimary := customProviderName + "/" + s.config.LLMModel
+		agents := ensureMap(configData, "agents")
+		defaults := ensureMap(agents, "defaults")
+		modelMap := ensureMap(defaults, "model")
+		modelMap["primary"] = newPrimary
+		defaults["model"] = modelMap
+		agents["defaults"] = defaults
+		configData["agents"] = agents
+		flagPrimary = newPrimary
+		slog.Info("refreshed models config in openclaw.json", "component", "openclaw", "disableThinking", disableThinking, "primary", newPrimary)
+	} else {
+		// Non-autonomous provider is active; preserve it and log state drift so
+		// operators know why the Lumi-side model and OpenClaw diverge.
+		flagPrimary = currentPrimary
+		slog.Warn("[refresh] non-autonomous provider active, skipping primary patch (state drift)",
+			"current", currentPrimary, "lumi_model", s.config.LLMModel)
+	}
 
 	written, err := json.MarshalIndent(configData, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal openclaw config: %w", err)
 	}
-	// Write the new primary into the flag so the watcher skips this write.
-	setLumiWriteFlag(s.config.OpenclawConfigDir, newPrimary)
+	// Write the flag BEFORE the file so the watcher can match by content and
+	// correctly skip this Lumi-initiated write regardless of the provider.
+	setLumiWriteFlag(s.config.OpenclawConfigDir, flagPrimary)
 	if err := os.WriteFile(configPath, written, 0600); err != nil {
 		return fmt.Errorf("write openclaw config: %w", err)
 	}
-	slog.Info("refreshed models config in openclaw.json", "component", "openclaw", "disableThinking", disableThinking, "primary", newPrimary)
+	slog.Debug("wrote openclaw.json after models config refresh", "component", "openclaw", "disableThinking", disableThinking)
 
 	if err := restartOpenclawGateway(); err != nil {
 		return err
