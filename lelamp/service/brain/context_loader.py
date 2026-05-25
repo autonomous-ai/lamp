@@ -101,7 +101,8 @@ class BrainContext:
     identity: str = ""               # full IDENTITY.md (given name, species, traits)
     identity_name: str = ""          # just the parsed given name (Noah, etc.) for quick checks
     user_profile: str = ""           # full USER.md (owner — name, preferences, timezone, …)
-    memory: str = ""                 # curated long-term memory — workspace/memory/*.md (newest tail) or MEMORY.md
+    memory: str = ""                 # curated long-term memory — OpenClaw workspace/memory/*.md (newest tail) or MEMORY.md
+    brain_memory: str = ""           # brain-curated per-day diary entries — brain workspace/MEMORY.md
     knowledge: str = ""              # KNOWLEDGE.md — mistakes the agent learned to not repeat
     soul: str = ""                   # full SOUL.md (persona narrative)
     recent_turns: List[Turn] = field(default_factory=list)
@@ -127,9 +128,24 @@ class BrainContext:
             parts.append(
                 "=== OWNER / USER PROFILE (USER.md) ===\n" + self.user_profile.strip()
             )
-        if self.memory.strip():
+        if self.memory.strip() or self.brain_memory.strip():
+            # OpenClaw-curated memory first, brain's per-day chit-chat
+            # diary appended underneath as a labelled sub-section. Two
+            # separators are intentional — they keep the boundary visible
+            # so the model treats "things Lumi the agent decided to
+            # remember" and "things the voice front door has been
+            # hearing in chit-chat" as separate tracks, while still
+            # living in the same MEMORY block.
+            memory_parts: list[str] = []
+            if self.memory.strip():
+                memory_parts.append(self.memory.strip())
+            if self.brain_memory.strip():
+                memory_parts.append(
+                    "--- BRAIN CHIT-CHAT SUMMARIES ---\n"
+                    + self.brain_memory.strip()
+                )
             parts.append(
-                "=== LONG-TERM MEMORY ===\n" + self.memory.strip()
+                "=== LONG-TERM MEMORY ===\n" + "\n\n".join(memory_parts)
             )
         if self.knowledge.strip():
             parts.append(

@@ -19,8 +19,23 @@ Why raw HTTP instead of google-genai / openai SDKs:
     history with the in-process chit-chat log and sort by timestamp.
   - Logs are byte-exact — what we send is what's on the wire, no SDK
     transform hiding in between.
-  - SDK upgrades have broken us twice before; the REST endpoints below
-    are stable contracts.
+
+Memory layout — see ``workspace.py`` and ``summarizer.py``:
+
+  - The brain owns a workspace dir (``LELAMP_BRAIN_WORKSPACE``,
+    default ``/root/.brain/workspace``) mirroring OpenClaw's
+    convention. Inside it: ``MEMORY.md`` (per-day diary) and
+    ``session/<date>.jsonl`` + ``bench/<date>.jsonl`` rotated daily.
+  - Recent chit-chat turns + delegated turns from OpenClaw's JSONL are
+    merged per call into a chronological history. When the merged
+    window exceeds the cap, the oldest slice is folded into a rolling
+    summary (async, off the critical path) and prepended to the LLM
+    request so older context degrades to a summary instead of being
+    dropped.
+  - At day rollover the previous day's rolling summary + raw turns are
+    summarized into a 3-6 bullet diary entry appended to brain
+    ``MEMORY.md``, which then feeds the static system prompt on the
+    next process restart.
 """
 
 import json
@@ -28,7 +43,6 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Optional
 
 import requests
@@ -49,6 +63,8 @@ from lelamp.service.brain.prompts import (
     language_hint,
     resolve_stt_language,
 )
+from lelamp.service.brain.summarizer import RollingSummary
+from lelamp.service.brain.workspace import BrainWorkspace
 
 logger = logging.getLogger("lelamp.brain.text")
 
@@ -59,6 +75,11 @@ _DISABLED_VALUES = frozenset({"", "none", "off", "classic", "disabled"})
 # Per-call HTTP timeout. Chat completion latency is usually 1-3s; 15s
 # gives some headroom for slow networks without wedging the voice loop.
 _HTTP_TIMEOUT_S = float(os.environ.get("LELAMP_BRAIN_HTTP_TIMEOUT", "15"))
+
+# How many evicted turns to batch before refreshing the rolling
+# summary. Smaller = fresher summary but more LLM calls; 10 keeps cost
+# at ~$0.003/day in typical chit-chat usage.
+_SUMMARY_EVICT_BATCH = int(os.environ.get("LELAMP_BRAIN_SUMMARY_EVICT_BATCH", "10"))
 
 _GEMINI_ENDPOINT = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -112,25 +133,28 @@ class TextBrain:
         self._language = resolve_stt_language()
         self._api_key: Optional[str] = None
         self._model: str = ""
-        # In-process session memory — chit-chat turns the brain handled
-        # directly never reach OpenClaw, so without this they vanish
-        # between turns and the brain forgets its own conversation.
-        # Stores ``[{"role": "user"|"assistant", "text": "...",
-        # "ts": float}, ...]`` in chronological order, capped at
-        # SESSION_HISTORY_MAX turns (each turn = 2 entries).
-        #
-        # Also persisted to a JSONL file so a service restart no longer
-        # wipes the chit-chat memory — we reload the last N entries on
-        # init. Disable persistence by setting
-        # LELAMP_BRAIN_SESSION_LOG=/dev/null (or unsetting the path
-        # and pointing it at a non-writable location — both gracefully
-        # degrade to in-memory only).
+
+        # In-memory mirror of the recent session log (user + assistant
+        # chit-chat turns the brain handled itself). Bounded so a long-
+        # running process doesn't grow unbounded; the workspace's daily
+        # JSONL files are the authoritative store on disk.
         self._session_history: list[dict] = []
         self._session_history_max = int(
             os.environ.get("LELAMP_BRAIN_SESSION_HISTORY_MAX", "10")
         ) * 2
-        self._session_log_path: Optional[Path] = self._init_session_log()
-        self._load_session_log()
+
+        # Filesystem layer: workspace dir, daily JSONL writers, MEMORY.md.
+        self._workspace = BrainWorkspace()
+        self._restore_session_from_workspace()
+
+        # Compression layer: rolling summary + day-rollover diary.
+        # ``llm_call`` is bound to ``self._complete_text`` at use time
+        # (the summarizer is provider-agnostic; it just needs a
+        # ``prompt -> text`` callable).
+        self._summary = RollingSummary(
+            self._workspace,
+            evict_batch=_SUMMARY_EVICT_BATCH,
+        )
 
         if self._provider == "gemini":
             self._init_gemini()
@@ -156,6 +180,10 @@ class TextBrain:
                 "TextBrain[%s] static prompt cached (%d chars) — recent turns fetched per call",
                 self._provider, len(self._cached_static_system),
             )
+            # Kick a one-shot catch-up pass for any past days that have
+            # a session file but no matching entry in MEMORY.md — runs
+            # on a background thread so init isn't blocked.
+            self._summary.catch_up_unsummarized_days(self._complete_text)
         else:
             self._cached_static_system = ""
 
@@ -219,6 +247,10 @@ class TextBrain:
             return TextBrainDecision(
                 decision="delegate", transcript=text, error="brain not available",
             )
+        # Day rollover detector — kicks an async diary write for
+        # yesterday if today's date just changed. Cheap; safe to call
+        # every turn.
+        self._summary.maybe_close_day(self._complete_text)
         if self._provider == "gemini":
             decision = self._decide_gemini(text, speaker)
         elif self._provider == "openai":
@@ -235,13 +267,39 @@ class TextBrain:
                 "TextBrain[%s] session_history size=%d (cap=%d)",
                 self._provider, len(self._session_history), self._session_history_max,
             )
+        self._write_bench(text, speaker, decision)
         return decision
+
+    # --- session history (in-memory mirror of workspace session JSONL) ------
+
+    def _restore_session_from_workspace(self) -> None:
+        """Replay the tail of the workspace's daily session files into
+        ``self._session_history`` so a restart picks up where the
+        previous process left off. ``role: "summary"`` checkpoints are
+        not chat turns and are filtered out here (the RollingSummary
+        re-reads them separately on its own init)."""
+        records = self._workspace.session.load_tail_records(self._session_history_max)
+        self._session_history = [
+            {
+                "role": r["role"],
+                "text": (r.get("text") or "").strip(),
+                "ts": float(r.get("ts") or 0.0),
+            }
+            for r in records
+            if r.get("role") in ("user", "assistant")
+            and (r.get("text") or "").strip()
+        ]
+        if self._session_history:
+            logger.info(
+                "TextBrain: restored %d session entries from workspace %s",
+                len(self._session_history), self._workspace.session.dir,
+            )
 
     def _append_session_turn(self, role: str, text: str) -> None:
         """Push a turn onto the in-process session log + trim to cap.
         Stamps each entry with ``time.time()`` so the per-call merge
         with OpenClaw history can sort everything chronologically.
-        Also appends to the JSONL log on disk (best-effort) so a
+        Also appends to the workspace's daily JSONL (best-effort) so a
         service restart can reload the recent session."""
         text = (text or "").strip()
         if not text:
@@ -250,87 +308,36 @@ class TextBrain:
         self._session_history.append(entry)
         if len(self._session_history) > self._session_history_max:
             self._session_history = self._session_history[-self._session_history_max:]
-        self._write_session_log(entry)
+        self._workspace.session.write(entry)
 
-    def _init_session_log(self) -> Optional[Path]:
-        """Resolve the JSONL persistence path + make sure the parent
-        dir exists. Returns ``None`` (disabled persistence) on any
-        failure — brain still works, just loses memory on restart."""
-        raw = os.environ.get(
-            "LELAMP_BRAIN_SESSION_LOG", "/root/local/brain/session.jsonl"
-        ).strip()
-        if not raw or raw in ("/dev/null", "off", "none"):
-            logger.info("TextBrain[%s] session log persistence disabled", self._provider)
-            return None
-        path = Path(raw)
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-        except OSError as e:
-            logger.warning(
-                "TextBrain[%s] session log parent dir %s unavailable: %s — "
-                "running in-memory only", self._provider, path.parent, e,
-            )
-            return None
-        logger.info(
-            "TextBrain[%s] session log persistence enabled at %s",
-            self._provider, path,
-        )
-        return path
+    # --- bench -------------------------------------------------------------
 
-    def _load_session_log(self) -> None:
-        """Replay the JSONL tail into ``self._session_history`` so a
-        restart picks up where the previous process left off.
-
-        Reads ONLY the last ``session_history_max`` lines (the tail
-        TextBrain.decide will actually use) — no point loading megabytes
-        of old session log on init."""
-        if self._session_log_path is None or not self._session_log_path.exists():
+    def _write_bench(self, user_text: str, speaker: str, decision: TextBrainDecision) -> None:
+        """Append one JSONL record per decide() call to the workspace's
+        daily bench file. Truncates long texts so the file stays
+        grep-friendly — full text already lives in the session log and
+        OpenClaw JSONL."""
+        if not self._workspace.bench.enabled:
             return
-        try:
-            with open(self._session_log_path, "r", encoding="utf-8", errors="replace") as f:
-                lines = f.readlines()
-        except OSError as e:
-            logger.warning(
-                "TextBrain[%s] could not read session log %s: %s",
-                self._provider, self._session_log_path, e,
-            )
-            return
-        tail = lines[-self._session_history_max:]
-        loaded = 0
-        for line in tail:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            role = obj.get("role")
-            text = (obj.get("text") or "").strip()
-            ts = float(obj.get("ts") or 0.0)
-            if role not in ("user", "assistant") or not text:
-                continue
-            self._session_history.append({"role": role, "text": text, "ts": ts})
-            loaded += 1
-        if loaded:
-            logger.info(
-                "TextBrain[%s] session log restored %d entries from %s",
-                self._provider, loaded, self._session_log_path,
-            )
+        truncate = 200
+        record = {
+            "ts": time.time(),
+            "provider": self._provider,
+            "model": self._model,
+            "decision": decision.decision,
+            "latency_s": round(decision.latency_s, 3),
+            "prompt_tokens": decision.prompt_tokens,
+            "response_tokens": decision.response_tokens,
+            "total_tokens": decision.total_tokens,
+            "speaker": speaker,
+            "user_text": user_text[:truncate],
+            "reply": (decision.reply or "")[:truncate],
+            "transcript": (decision.transcript or "")[:truncate],
+            "error": decision.error,
+        }
+        self._workspace.bench.write(record)
 
-    def _write_session_log(self, entry: dict) -> None:
-        """Append one entry as a JSONL line. Silent on failure — disk
-        I/O errors shouldn't break the brain decision path."""
-        if self._session_log_path is None:
-            return
-        try:
-            with open(self._session_log_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        except OSError as e:
-            logger.debug(
-                "TextBrain[%s] session log write failed: %s",
-                self._provider, e,
-            )
+    # --- timestamp utilities ------------------------------------------------
 
     @staticmethod
     def _to_epoch(value) -> float:
@@ -357,15 +364,14 @@ class TextBrain:
         except (ValueError, TypeError):
             return 0.0
 
-    def _merge_history(self) -> list[dict]:
-        """Return a single chronologically-sorted list of turns, merging
-        recent OpenClaw conversation (delegate flow) with the in-process
-        session_history (chit-chat the brain handled itself).
+    # --- merged history + eviction-trigger ---------------------------------
 
-        Each entry is ``{"role": "user"|"assistant", "text": str,
-        "ts": float}``. Capped at ``2 * _session_history_max`` total
-        entries (newest tail) so a long OpenClaw log doesn't blow up
-        the prompt.
+    def _merge_history(self) -> list[dict]:
+        """Return the chronologically-sorted list of turns to pass to
+        the LLM. Capped at ``2 * _session_history_max`` (newest tail).
+        When the cap evicts entries, kick an async rolling-summary
+        refresh so older context degrades to a summary rather than
+        being dropped on the floor.
         """
         merged: list[dict] = []
         for turn in self._load_recent_turns():
@@ -389,30 +395,10 @@ class TextBrain:
         merged.sort(key=lambda e: e["ts"])
         cap = self._session_history_max * 2
         if len(merged) > cap:
+            evicted = merged[: len(merged) - cap]
+            self._summary.summarize_evicted_async(evicted, self._complete_text)
             merged = merged[-cap:]
         return merged
-
-    # --- prompt assembly -----------------------------------------------------
-
-    def _build_static_system_instruction(self) -> str:
-        """Cache-friendly system instruction: DECISION_RULES + language
-        hint + IDENTITY + USER + MEMORY + KNOWLEDGE + SOUL. Recent
-        conversation turns are NOT included here — they're appended as
-        chat history per-call so the cached prefix stays byte-stable."""
-        parts = [DECISION_RULES]
-        hint = language_hint(self._language)
-        if hint:
-            parts.append(hint)
-        try:
-            ctx = load_context(include_history=False)
-        except Exception as e:
-            logger.debug("context_loader (static) failed in text brain: %s", e)
-            ctx = None
-        if ctx is not None:
-            block = ctx.to_system_prompt_block()
-            if block:
-                parts.append(block)
-        return "\n\n".join(parts)
 
     def _load_recent_turns(self):
         """Per-call fetch of just the recent OpenClaw conversation
@@ -438,6 +424,38 @@ class TextBrain:
             logger.debug("recent_turns fetch failed: %s", e)
             return []
 
+    # --- prompt assembly -----------------------------------------------------
+
+    def _build_static_system_instruction(self) -> str:
+        """Cache-friendly system instruction: DECISION_RULES + language
+        hint + IDENTITY + USER + (OpenClaw MEMORY + brain MEMORY) +
+        KNOWLEDGE + SOUL. Recent conversation turns are NOT included
+        here — they're appended as chat history per-call so the cached
+        prefix stays byte-stable."""
+        parts = [DECISION_RULES]
+        hint = language_hint(self._language)
+        if hint:
+            parts.append(hint)
+        try:
+            ctx = load_context(include_history=False)
+        except Exception as e:
+            logger.debug("context_loader (static) failed in text brain: %s", e)
+            ctx = None
+        if ctx is not None:
+            ctx.brain_memory = self._workspace.read_memory_md()
+            block = ctx.to_system_prompt_block()
+            if block:
+                parts.append(block)
+        return "\n\n".join(parts)
+
+    def _rolling_summary_message_text(self) -> str:
+        """Format the rolling summary as a single user-message string,
+        or ``""`` when there is no summary to inject."""
+        summary = self._summary.text
+        if not summary:
+            return ""
+        return f"[Earlier in this conversation: {summary}]"
+
     # --- gemini path (raw HTTP) ----------------------------------------------
 
     def _decide_gemini(self, text: str, speaker: str) -> TextBrainDecision:
@@ -462,6 +480,9 @@ class TextBrain:
         # instruction stays byte-stable (cache-friendly). Gemini roles
         # are "user" / "model".
         contents: list[dict] = []
+        summary_msg = self._rolling_summary_message_text()
+        if summary_msg:
+            contents.append({"role": "user", "parts": [{"text": summary_msg}]})
         for entry in self._merge_history():
             role = "user" if entry["role"] == "user" else "model"
             contents.append({"role": role, "parts": [{"text": entry["text"]}]})
@@ -486,8 +507,6 @@ class TextBrain:
                     },
                 }],
             }],
-            # AUTO is the API default; making it explicit so the choice
-            # is documented in code (force tool-or-text, never both).
             "toolConfig": {"functionCallingConfig": {"mode": "AUTO"}},
         }
         try:
@@ -525,8 +544,6 @@ class TextBrain:
         resp_tok = int(usage.get("candidatesTokenCount") or 0)
         total_tok = int(usage.get("totalTokenCount") or (prompt_tok + resp_tok))
 
-        # Walk candidates[].content.parts looking for either a
-        # functionCall (= delegate) or text (= chitchat).
         for cand in (data.get("candidates") or []):
             content = cand.get("content") or {}
             for part in (content.get("parts") or []):
@@ -576,13 +593,12 @@ class TextBrain:
             }
         """
         t0 = time.time()
-        # Build message list with the static system at index 0 + the
-        # timestamp-merged conversation history + current user. The
-        # system message is byte-stable so OpenAI's prompt cache (auto
-        # for prefixes ≥1024 tokens) kicks in.
         messages: list[dict] = [
             {"role": "system", "content": self._cached_static_system},
         ]
+        summary_msg = self._rolling_summary_message_text()
+        if summary_msg:
+            messages.append({"role": "user", "content": summary_msg})
         for entry in self._merge_history():
             messages.append({"role": entry["role"], "content": entry["text"]})
         messages.append({"role": "user", "content": text})
@@ -683,6 +699,82 @@ class TextBrain:
             prompt_tokens=prompt_tok, response_tokens=resp_tok,
             total_tokens=total_tok,
         )
+
+    # --- plain-text completion (for summarizer) -----------------------------
+
+    def _complete_text(self, prompt: str) -> str:
+        """Synchronous plain-text completion (no tools, no chat
+        history) used by the rolling summarizer / day-rollover diary.
+        Re-uses the same provider/model as decide() — the cost
+        differential isn't worth a second model + key.
+
+        Returns ``""`` on any failure so the summarizer can skip the
+        update without raising into a daemon thread."""
+        prompt = (prompt or "").strip()
+        if not prompt or not self.available:
+            return ""
+        try:
+            if self._provider == "openai":
+                return self._complete_text_openai(prompt)
+            if self._provider == "gemini":
+                return self._complete_text_gemini(prompt)
+        except requests.RequestException as e:
+            logger.warning("TextBrain[%s] summary completion HTTP error: %s",
+                           self._provider, e)
+        except Exception as e:
+            logger.warning("TextBrain[%s] summary completion failed: %s",
+                           self._provider, e)
+        return ""
+
+    def _complete_text_openai(self, prompt: str) -> str:
+        resp = requests.post(
+            _OPENAI_ENDPOINT,
+            headers={
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": self._model,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=_HTTP_TIMEOUT_S,
+        )
+        if resp.status_code != 200:
+            logger.warning(
+                "TextBrain[openai] summary HTTP %d: %s",
+                resp.status_code, resp.text[:200],
+            )
+            return ""
+        data = resp.json()
+        choices = data.get("choices") or []
+        if not choices:
+            return ""
+        msg = choices[0].get("message") or {}
+        return (msg.get("content") or "").strip()
+
+    def _complete_text_gemini(self, prompt: str) -> str:
+        url = _GEMINI_ENDPOINT.format(model=self._model)
+        resp = requests.post(
+            url,
+            params={"key": self._api_key},
+            json={
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            },
+            timeout=_HTTP_TIMEOUT_S,
+        )
+        if resp.status_code != 200:
+            logger.warning(
+                "TextBrain[gemini] summary HTTP %d: %s",
+                resp.status_code, resp.text[:200],
+            )
+            return ""
+        data = resp.json()
+        for cand in (data.get("candidates") or []):
+            for part in ((cand.get("content") or {}).get("parts") or []):
+                text = part.get("text")
+                if text:
+                    return text.strip()
+        return ""
 
 
 def build_text_brain_from_env() -> Optional[TextBrain]:

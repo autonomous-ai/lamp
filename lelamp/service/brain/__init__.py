@@ -8,15 +8,19 @@ See docs/voice-brain.md for the architecture.
 """
 
 from lelamp.service.brain.context_loader import BrainContext, Turn, load_context
+from lelamp.service.brain.summarizer import RollingSummary
 from lelamp.service.brain.text_router import (
     TextBrain,
     TextBrainDecision,
     build_text_brain_from_env,
     is_disabled,
 )
+from lelamp.service.brain.workspace import BrainWorkspace
 
 __all__ = [
     "BrainContext",
+    "BrainWorkspace",
+    "RollingSummary",
     "Turn",
     "load_context",
     "TextBrain",
