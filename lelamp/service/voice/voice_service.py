@@ -502,6 +502,44 @@ class VoiceService:
         the mic gate to prevent echo loopback."""
         return self._tts is not None and self._tts.speaking
 
+    def _track_chitchat_e2e(self, user, t_voice_final, decision) -> None:
+        """Spawn a daemon thread that waits for the queued chit-chat
+        reply to finish playing through TTS, then emits one
+        ``brain.chitchat.e2e`` log line with the full STT-final →
+        speech-end latency broken down into decide vs TTS portions.
+
+        Approach: poll ``tts.speaking`` (cheap — bool flag). Wait up
+        to 5s for playback to start (it queues behind whatever else
+        TTS was doing) and up to 60s for it to finish (long replies on
+        slow synth). Both caps are generous safety nets; in normal
+        chit-chat the reply is 1-3 short sentences ≈ 2-6s of speech.
+        """
+        if self._tts is None:
+            return
+
+        def _run():
+            poll = 0.05
+            start_deadline = time.time() + 5.0
+            # 1) Wait until playback actually engages (or timeout).
+            while time.time() < start_deadline and not self._tts.speaking:
+                time.sleep(poll)
+            t_play_start = time.time()
+            end_deadline = time.time() + 60.0
+            while time.time() < end_deadline and self._tts.speaking:
+                time.sleep(poll)
+            t_play_end = self._tts.last_spoken_time or time.time()
+            total = t_play_end - t_voice_final
+            tts_span = t_play_end - t_play_start
+            logger.info(
+                "brain.chitchat.e2e [%s] total=%.2fs (decide=%.2fs tts=%.2fs) reply=%r",
+                user, total, decision.latency_s, tts_span,
+                decision.reply[:80],
+            )
+
+        threading.Thread(
+            target=_run, daemon=True, name="brain-chitchat-e2e",
+        ).start()
+
     def _music_is_playing(self) -> bool:
         """Check if music is currently playing."""
         return self._music is not None and self._music.playing
@@ -1124,6 +1162,11 @@ class VoiceService:
                     logger.info(
                         "brain.input  [%s] %r", user, final_text,
                     )
+                    # t0 for end-to-end timing: the moment the STT
+                    # transcript is in hand and we hand it to the brain.
+                    # That's also the moment the user has stopped
+                    # speaking from the listener's perspective.
+                    t_voice_final = time.time()
                     decision = self._text_brain.decide(final_text, speaker=user)
                     logger.info(
                         "brain.decide [%s] decision=%s latency=%.2fs tokens=%d (prompt=%d response=%d)",
@@ -1138,6 +1181,16 @@ class VoiceService:
                                     self._tts.speak_queue(decision.reply)
                                 else:
                                     self._tts.speak(decision.reply)
+                                # Spawn an off-loop tracker that waits
+                                # for TTS playback to finish, then logs
+                                # the full STT-final → speech-end
+                                # latency. Daemon thread; never blocks
+                                # the voice loop. Only meaningful for
+                                # chit-chat (delegate path's "end" is
+                                # OpenClaw's own response).
+                                self._track_chitchat_e2e(
+                                    user, t_voice_final, decision,
+                                )
                             except Exception as e:
                                 logger.warning("brain chitchat speak failed: %s", e)
                         routed_to_brain = True
