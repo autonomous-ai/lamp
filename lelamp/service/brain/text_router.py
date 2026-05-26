@@ -734,6 +734,19 @@ class TextBrain:
             # responses.
             "stream_options": {"include_usage": True},
         }
+        # Optional `reasoning_effort` override — relevant for the
+        # gpt-5 / gpt-5.x family which defaults to "medium" reasoning
+        # and burns multiple seconds of hidden thinking tokens before
+        # emitting the first output token. For a voice front-door we
+        # want the lowest possible TTFB, so set this to "minimal"
+        # (gpt-5*) or "none" (gpt-5.1+) when running on a reasoning
+        # model. Sent only when the env var is set so older non-
+        # reasoning models (gpt-4o*, gpt-4.1*) don't reject the field.
+        reasoning_effort = os.environ.get(
+            "LELAMP_OPENAI_REASONING_EFFORT", ""
+        ).strip()
+        if reasoning_effort:
+            payload["reasoning_effort"] = reasoning_effort
         try:
             resp = requests.post(
                 _OPENAI_ENDPOINT,
