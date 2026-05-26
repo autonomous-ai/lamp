@@ -9,6 +9,7 @@ Usage:
 """
 
 import argparse
+import asyncio
 import logging
 import os
 import secrets
@@ -102,7 +103,7 @@ async def lifespan(app: FastAPI):
         logger.info("Loading audio embedder...")
         try:
             audio_embedder = build_audio_embedder()
-            audio_embedder.start()
+            await asyncio.to_thread(audio_embedder.start)
             set_audio_embedder(audio_embedder)
             logger.info("Audio embedder ready")
         except Exception as e:
@@ -157,7 +158,7 @@ async def lifespan(app: FastAPI):
         await model.stop()
     audio_embedder = get_audio_embedder()
     if audio_embedder is not None:
-        audio_embedder.stop()
+        await asyncio.to_thread(audio_embedder.stop)
     audio_emotion_model = get_audio_emotion_model()
     if audio_emotion_model is not None:
         await audio_emotion_model.stop()
