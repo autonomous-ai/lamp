@@ -1165,7 +1165,19 @@ class VoiceService:
                     # That's also the moment the user has stopped
                     # speaking from the listener's perspective.
                     t_voice_final = time.time()
-                    decision = self._text_brain.decide(final_text, speaker=user)
+                    # Stream each completed sentence straight into the
+                    # TTS queue so playback starts on the first
+                    # sentence while the model is still generating the
+                    # rest of the reply. Skips delegate replies — the
+                    # brain only fires this callback once it has
+                    # confirmed the reply is chit-chat (not the
+                    # `[DELEGATE]` marker).
+                    on_sentence = None
+                    if self._tts is not None and hasattr(self._tts, "speak_queue"):
+                        on_sentence = self._tts.speak_queue
+                    decision = self._text_brain.decide(
+                        final_text, speaker=user, on_sentence=on_sentence,
+                    )
                     logger.info(
                         "brain.decide [%s] decision=%s latency=%.2fs tokens=%d (prompt=%d response=%d)",
                         user, decision.decision, decision.latency_s,
@@ -1173,24 +1185,25 @@ class VoiceService:
                     )
                     if decision.decision == "chitchat" and decision.reply:
                         logger.info("brain.chitchat [%s] %r", user, decision.reply)
-                        if self._tts is not None:
-                            try:
-                                if hasattr(self._tts, "speak_queue"):
-                                    self._tts.speak_queue(decision.reply)
-                                else:
-                                    self._tts.speak(decision.reply)
-                                # Spawn an off-loop tracker that waits
-                                # for TTS playback to finish, then logs
-                                # the full STT-final → speech-end
-                                # latency. Daemon thread; never blocks
-                                # the voice loop. Only meaningful for
-                                # chit-chat (delegate path's "end" is
-                                # OpenClaw's own response).
-                                self._track_chitchat_e2e(
-                                    user, t_voice_final, decision,
-                                )
-                            except Exception as e:
-                                logger.warning("brain chitchat speak failed: %s", e)
+                        try:
+                            # If we couldn't stream sentence-by-sentence
+                            # (no speak_queue available), fall back to
+                            # the original single-shot dispatch so the
+                            # reply still gets spoken.
+                            if on_sentence is None and self._tts is not None:
+                                self._tts.speak(decision.reply)
+                            # Spawn an off-loop tracker that waits for
+                            # TTS playback to finish, then logs the
+                            # full STT-final → speech-end latency.
+                            # Daemon thread; never blocks the voice
+                            # loop. Only meaningful for chit-chat
+                            # (delegate path's "end" is OpenClaw's own
+                            # response).
+                            self._track_chitchat_e2e(
+                                user, t_voice_final, decision,
+                            )
+                        except Exception as e:
+                            logger.warning("brain chitchat speak failed: %s", e)
                         routed_to_brain = True
                     elif decision.decision == "delegate":
                         logger.info("brain.delegate [%s] → Lumi", user)

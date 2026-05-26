@@ -3,14 +3,20 @@ Half-cascade text brain — raw HTTP, no vendor SDK.
 
 The classic STT pipeline (RMS gate + Deepgram nova-3 WS) delivers a
 final transcript; that text is routed through a cheap chat-completion
-HTTP call (Gemini Flash / GPT-4o mini) with function calling. The model
-picks one of two paths:
+HTTP call (Gemini Flash / GPT-4o mini). The model returns plain text
+which the brain inspects to pick one of two paths:
 
-  - **chit-chat**: returns a short reply text → spoken via the existing
-    TTSService (one consistent ElevenLabs voice across both paths).
-  - **delegate**: calls ``delegate_to_lumi(transcript=…)`` → caller
-    forwards the original transcript to OpenClaw via ``/api/sensing/
-    event`` (classic flow unchanged).
+  - **chit-chat**: arbitrary reply text → streamed sentence-by-sentence
+    into the existing TTSService (one consistent ElevenLabs voice
+    across both paths). With the OpenAI provider the stream lets TTS
+    start synthesising sentence 1 while the model is still generating
+    sentence 2 — ~3-4s off time-to-first-audio vs the old non-stream
+    tool-call path.
+  - **delegate**: the literal token ``[DELEGATE]`` as the very first
+    characters of the reply → caller forwards the original transcript
+    to OpenClaw via ``/api/sensing/event`` (classic flow unchanged).
+    Streaming clients short-circuit on this marker after the first
+    SSE delta and never wait for the rest of the response.
 
 Why raw HTTP instead of google-genai / openai SDKs:
   - One vendored dependency to keep up to date (``requests``, already
@@ -41,9 +47,10 @@ Memory layout — see ``workspace.py`` and ``summarizer.py``:
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 import requests
 
@@ -58,8 +65,7 @@ from lelamp.service.brain.context_loader import (
 )
 from lelamp.service.brain.prompts import (
     DECISION_RULES,
-    DELEGATE_TOOL_DESCRIPTION,
-    DELEGATE_TOOL_NAME,
+    DELEGATE_PREFIX,
     language_hint,
     resolve_stt_language,
 )
@@ -85,6 +91,26 @@ _GEMINI_ENDPOINT = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 )
 _OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
+
+# Sentence boundary for streaming → TTS chunking. Splits after `.`, `!`,
+# `?`, `…` followed by whitespace, or on any run of newlines. Covers
+# Vietnamese / English / most other Latin-script languages — punctuation
+# semantics are the same. Each match is the *gap*; the punctuation char
+# is kept with the preceding sentence so TTS prosody stays natural.
+_SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?…])\s+|\n+")
+
+
+def _drain_complete_sentences(buffer: str, on_sentence: Callable[[str], None]) -> str:
+    """Emit any *complete* sentences sitting at the head of ``buffer``
+    via ``on_sentence``; return the unconsumed tail (a partial sentence
+    still being assembled by the streaming LLM)."""
+    last = 0
+    for m in _SENTENCE_BOUNDARY.finditer(buffer):
+        sent = buffer[last:m.end()].strip()
+        if sent:
+            on_sentence(sent)
+        last = m.end()
+    return buffer[last:]
 
 
 @dataclass
@@ -227,10 +253,23 @@ class TextBrain:
     def model(self) -> str:
         return self._model
 
-    def decide(self, text: str, speaker: str = "unknown") -> TextBrainDecision:
+    def decide(
+        self,
+        text: str,
+        speaker: str = "unknown",
+        on_sentence: Optional[Callable[[str], None]] = None,
+    ) -> TextBrainDecision:
         """Send ``text`` to the brain and return a Decision. Never
         raises — always returns a TextBrainDecision (delegate-on-error
         is the safe default).
+
+        ``on_sentence``: optional callback invoked with each complete
+        sentence as the streaming reply arrives (OpenAI only — Gemini
+        path still buffers, then fires the callback once at the end so
+        callers don't need a separate code path). Used to feed
+        ``TTSService.speak_queue`` so audio playback starts ~3-4s
+        sooner on chit-chat replies. If ``None``, the brain accumulates
+        the reply silently and the caller handles TTS dispatch.
 
         Side effect: on a chit-chat decision the (user, reply) pair is
         appended to the in-process session history so the next call sees
@@ -252,9 +291,9 @@ class TextBrain:
         # every turn.
         self._summary.maybe_close_day(self._complete_text)
         if self._provider == "gemini":
-            decision = self._decide_gemini(text, speaker)
+            decision = self._decide_gemini(text, speaker, on_sentence)
         elif self._provider == "openai":
-            decision = self._decide_openai(text, speaker)
+            decision = self._decide_openai(text, speaker, on_sentence)
         else:
             return TextBrainDecision(
                 decision="delegate", transcript=text,
@@ -481,8 +520,18 @@ class TextBrain:
 
     # --- gemini path (raw HTTP) ----------------------------------------------
 
-    def _decide_gemini(self, text: str, speaker: str) -> TextBrainDecision:
+    def _decide_gemini(
+        self,
+        text: str,
+        speaker: str,
+        on_sentence: Optional[Callable[[str], None]] = None,
+    ) -> TextBrainDecision:
         """POST to Gemini ``generateContent`` and parse the response.
+
+        Routing is decided by inspecting the model's *text* output: a
+        reply that starts with the literal ``[DELEGATE]`` token means
+        hand the turn off to OpenClaw; anything else is the chit-chat
+        reply. See ``prompts.DECISION_RULES`` for the prompt side.
 
         Request shape (v1beta REST):
 
@@ -492,10 +541,14 @@ class TextBrain:
               "contents": [
                 {"role": "user"|"model", "parts": [{"text": "..."}]},
                 ...
-              ],
-              "tools": [{"functionDeclarations": [{...}]}],
-              "toolConfig": {"functionCallingConfig": {"mode": "AUTO"}}
+              ]
             }
+
+        Gemini path is non-streaming (one request → one full response).
+        When ``on_sentence`` is provided, the buffered reply is split
+        into sentences once at the end and dispatched in order — same
+        callback shape as the streaming OpenAI path so callers don't
+        branch on provider.
         """
         t0 = time.time()
         url = _GEMINI_ENDPOINT.format(model=self._model)
@@ -522,23 +575,6 @@ class TextBrain:
         payload = {
             "systemInstruction": {"parts": [{"text": self._cached_static_system}]},
             "contents": contents,
-            "tools": [{
-                "functionDeclarations": [{
-                    "name": DELEGATE_TOOL_NAME,
-                    "description": DELEGATE_TOOL_DESCRIPTION,
-                    "parameters": {
-                        "type": "OBJECT",
-                        "properties": {
-                            "transcript": {
-                                "type": "STRING",
-                                "description": "Exact transcript of what the user just said.",
-                            },
-                        },
-                        "required": ["transcript"],
-                    },
-                }],
-            }],
-            "toolConfig": {"functionCallingConfig": {"mode": "AUTO"}},
         }
         try:
             resp = requests.post(
@@ -575,38 +611,61 @@ class TextBrain:
         resp_tok = int(usage.get("candidatesTokenCount") or 0)
         total_tok = int(usage.get("totalTokenCount") or (prompt_tok + resp_tok))
 
+        # Concatenate every text part Gemini returned (usually just one).
+        out = ""
         for cand in (data.get("candidates") or []):
             content = cand.get("content") or {}
             for part in (content.get("parts") or []):
-                fn = part.get("functionCall")
-                if fn and fn.get("name") == DELEGATE_TOOL_NAME:
-                    args = fn.get("args") or {}
-                    transcript = str(args.get("transcript", text)).strip() or text
-                    return TextBrainDecision(
-                        decision="delegate", transcript=transcript,
-                        latency_s=latency,
-                        prompt_tokens=prompt_tok, response_tokens=resp_tok,
-                        total_tokens=total_tok,
-                    )
-                text_part = part.get("text")
-                if text_part:
-                    return TextBrainDecision(
-                        decision="chitchat", reply=text_part.strip(),
-                        latency_s=latency,
-                        prompt_tokens=prompt_tok, response_tokens=resp_tok,
-                        total_tokens=total_tok,
-                    )
+                t = part.get("text")
+                if t:
+                    out += t
+
+        out = out.strip()
+        if not out:
+            return TextBrainDecision(
+                decision="delegate", transcript=text, latency_s=latency,
+                error="no text in response",
+                prompt_tokens=prompt_tok, response_tokens=resp_tok,
+                total_tokens=total_tok,
+            )
+
+        # Delegate marker takes the entire reply by contract; case-
+        # insensitive match in case the model lowercases it.
+        if out.upper().startswith(DELEGATE_PREFIX):
+            return TextBrainDecision(
+                decision="delegate", transcript=text, latency_s=latency,
+                prompt_tokens=prompt_tok, response_tokens=resp_tok,
+                total_tokens=total_tok,
+            )
+
+        # Chit-chat: optionally fan out sentences via callback so the
+        # caller can stream them into TTS one by one.
+        if on_sentence is not None:
+            _drain_complete_sentences(out + "\n", on_sentence)
         return TextBrainDecision(
-            decision="delegate", transcript=text, latency_s=latency,
-            error="no usable parts in response",
+            decision="chitchat", reply=out, latency_s=latency,
             prompt_tokens=prompt_tok, response_tokens=resp_tok,
             total_tokens=total_tok,
         )
 
     # --- openai path (raw HTTP) ----------------------------------------------
 
-    def _decide_openai(self, text: str, speaker: str) -> TextBrainDecision:
-        """POST to OpenAI ``chat.completions`` and parse the response.
+    def _decide_openai(
+        self,
+        text: str,
+        speaker: str,
+        on_sentence: Optional[Callable[[str], None]] = None,
+    ) -> TextBrainDecision:
+        """POST to OpenAI ``chat.completions`` with SSE streaming and
+        parse the response incrementally.
+
+        Routing is decided by inspecting the first few tokens of the
+        streamed reply: if they form the literal ``[DELEGATE]`` marker,
+        we short-circuit the stream and hand the turn off to OpenClaw
+        without waiting for the rest of the response. Otherwise, every
+        complete sentence is dispatched via ``on_sentence`` as it
+        arrives so the TTS pipeline can start synthesising the first
+        sentence while the model is still generating the second.
 
         Request shape:
 
@@ -614,13 +673,9 @@ class TextBrain:
             Authorization: Bearer KEY
             {
               "model": "...",
-              "messages": [
-                {"role": "system", "content": "..."},
-                {"role": "user"|"assistant", "content": "..."},
-                ...
-              ],
-              "tools": [{"type": "function", "function": {...}}],
-              "tool_choice": "auto"
+              "messages": [...],
+              "stream": true,
+              "stream_options": {"include_usage": true}
             }
         """
         t0 = time.time()
@@ -644,24 +699,11 @@ class TextBrain:
         payload = {
             "model": self._model,
             "messages": messages,
-            "tools": [{
-                "type": "function",
-                "function": {
-                    "name": DELEGATE_TOOL_NAME,
-                    "description": DELEGATE_TOOL_DESCRIPTION,
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "transcript": {
-                                "type": "string",
-                                "description": "Exact transcript of what the user just said.",
-                            },
-                        },
-                        "required": ["transcript"],
-                    },
-                },
-            }],
-            "tool_choice": "auto",
+            "stream": True,
+            # Final SSE chunk carries the usage block — without this the
+            # bench file would always log zero tokens for streamed
+            # responses.
+            "stream_options": {"include_usage": True},
         }
         try:
             resp = requests.post(
@@ -669,9 +711,11 @@ class TextBrain:
                 headers={
                     "Authorization": f"Bearer {self._api_key}",
                     "Content-Type": "application/json",
+                    "Accept": "text/event-stream",
                 },
                 json=payload,
                 timeout=_HTTP_TIMEOUT_S,
+                stream=True,
             )
         except requests.RequestException as e:
             logger.warning("TextBrain[openai] HTTP error: %s", e)
@@ -680,60 +724,124 @@ class TextBrain:
                 latency_s=time.time() - t0, error=str(e),
             )
 
-        latency = time.time() - t0
         if resp.status_code != 200:
             err = f"HTTP {resp.status_code}: {resp.text[:200]}"
             logger.warning("TextBrain[openai] %s", err)
+            resp.close()
             return TextBrainDecision(
-                decision="error", transcript=text, latency_s=latency, error=err,
+                decision="error", transcript=text,
+                latency_s=time.time() - t0, error=err,
             )
+
+        # Streaming state:
+        # - ``buffer`` is the full accumulated content (chit-chat
+        #   reply, or the prefix-detection window).
+        # - ``pending`` is the slice of ``buffer`` that hasn't been
+        #   drained into ``on_sentence`` yet.
+        # - ``prefix_decided`` flips True once we know the reply is
+        #   chit-chat (i.e. not the delegate marker). Until then we
+        #   buffer rather than fan out, so a delegate reply never
+        #   leaks audio.
+        buffer = ""
+        pending = ""
+        prefix_decided = False
+        is_delegate = False
+        prompt_tok = resp_tok = total_tok = 0
+
         try:
-            data = resp.json()
-        except ValueError as e:
-            logger.warning("TextBrain[openai] non-JSON response: %s", e)
-            return TextBrainDecision(
-                decision="error", transcript=text, latency_s=latency,
-                error="non-JSON response",
-            )
+            for raw_line in resp.iter_lines(decode_unicode=True):
+                if not raw_line:
+                    continue
+                if not raw_line.startswith("data: "):
+                    continue
+                payload_str = raw_line[len("data: "):]
+                if payload_str == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(payload_str)
+                except json.JSONDecodeError:
+                    continue
 
-        usage = data.get("usage") or {}
-        prompt_tok = int(usage.get("prompt_tokens") or 0)
-        resp_tok = int(usage.get("completion_tokens") or 0)
-        total_tok = int(usage.get("total_tokens") or (prompt_tok + resp_tok))
+                # Usage chunk (always last when stream_options is on)
+                # has no choices array.
+                usage = chunk.get("usage")
+                if usage:
+                    prompt_tok = int(usage.get("prompt_tokens") or 0)
+                    resp_tok = int(usage.get("completion_tokens") or 0)
+                    total_tok = int(
+                        usage.get("total_tokens") or (prompt_tok + resp_tok)
+                    )
+                    continue
 
-        choices = data.get("choices") or []
-        if not choices:
+                choices = chunk.get("choices") or []
+                if not choices:
+                    continue
+                delta = (choices[0].get("delta") or {}).get("content") or ""
+                if not delta:
+                    continue
+                buffer += delta
+
+                if not prefix_decided:
+                    # We only need to inspect what comes after any
+                    # leading whitespace; the prompt says "no leading
+                    # whitespace" but models occasionally emit one.
+                    stripped = buffer.lstrip()
+                    if not stripped:
+                        continue
+                    if stripped[0] == "[":
+                        # Could be the delegate marker OR a voice marker
+                        # like "[chuckle]". Wait until we have enough
+                        # chars to disambiguate.
+                        if len(stripped) >= len(DELEGATE_PREFIX):
+                            if stripped.upper().startswith(DELEGATE_PREFIX):
+                                is_delegate = True
+                                break
+                            prefix_decided = True
+                            pending = buffer  # nothing fanned out yet
+                        else:
+                            # Keep buffering until we have ~10 chars.
+                            continue
+                    else:
+                        prefix_decided = True
+                        pending = buffer
+
+                # Chit-chat path: drain any complete sentences sitting
+                # at the head of ``pending`` into the callback.
+                else:
+                    pending += delta
+
+                if not is_delegate and on_sentence is not None and pending:
+                    pending = _drain_complete_sentences(pending, on_sentence)
+        finally:
+            resp.close()
+
+        latency = time.time() - t0
+
+        if is_delegate:
             return TextBrainDecision(
                 decision="delegate", transcript=text, latency_s=latency,
-                error="no choices in response",
                 prompt_tokens=prompt_tok, response_tokens=resp_tok,
                 total_tokens=total_tok,
             )
-        msg = choices[0].get("message") or {}
-        for tc in (msg.get("tool_calls") or []):
-            fn = tc.get("function") or {}
-            if fn.get("name") != DELEGATE_TOOL_NAME:
-                continue
-            try:
-                args = json.loads(fn.get("arguments") or "{}")
-            except json.JSONDecodeError:
-                args = {}
-            transcript = str(args.get("transcript", text)).strip() or text
+
+        full_reply = buffer.strip()
+        if not full_reply:
             return TextBrainDecision(
-                decision="delegate", transcript=transcript, latency_s=latency,
+                decision="delegate", transcript=text, latency_s=latency,
+                error="empty stream",
                 prompt_tokens=prompt_tok, response_tokens=resp_tok,
                 total_tokens=total_tok,
             )
-        content = (msg.get("content") or "").strip()
-        if content:
-            return TextBrainDecision(
-                decision="chitchat", reply=content, latency_s=latency,
-                prompt_tokens=prompt_tok, response_tokens=resp_tok,
-                total_tokens=total_tok,
-            )
+
+        # Flush the final partial sentence (no trailing punctuation) so
+        # the user hears the whole reply.
+        if on_sentence is not None:
+            tail = pending.strip()
+            if tail:
+                on_sentence(tail)
+
         return TextBrainDecision(
-            decision="delegate", transcript=text, latency_s=latency,
-            error="no content/tool_call in response",
+            decision="chitchat", reply=full_reply, latency_s=latency,
             prompt_tokens=prompt_tok, response_tokens=resp_tok,
             total_tokens=total_tok,
         )

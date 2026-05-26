@@ -45,14 +45,37 @@ the wire shape, the history merge, and the prompt cache prefix.
 ## 2. How it decides
 
 Both providers see the same prompt (`DECISION_RULES` in
-`lelamp/service/brain/prompts.py`) and the same `delegate_to_lumi`
-function declaration. The model picks exactly one of:
+`lelamp/service/brain/prompts.py`) and emit **plain text** — no tool
+calls, no JSON. The brain inspects the first few characters of the
+reply to pick exactly one of:
 
 | Branch | Trigger | What lelamp does |
 | --- | --- | --- |
-| **(A) Chit-chat** | Model returns plain text | The text is passed to `TTSService.speak_queue(...)` — same ElevenLabs/OpenAI voice as task replies. Nothing is sent to OpenClaw. |
-| **(B) Delegate** | Model calls `delegate_to_lumi(transcript=…)` | The transcript is forwarded to Lumi via `POST /api/sensing/event` exactly the way the classic STT path forwards it. OpenClaw runs its normal turn. |
-| **(error)** | HTTP error / parse error / empty response | Falls through to Lumi as a delegate. Safe default — user input is never silently dropped. |
+| **(A) Chit-chat** | Reply does NOT start with `[DELEGATE]` | Each complete sentence is fanned out to `TTSService.speak_queue(...)` as the model streams it — same ElevenLabs voice as task replies. Nothing is sent to OpenClaw. |
+| **(B) Delegate** | Reply starts with the literal token `[DELEGATE]` (case-insensitive) and nothing else | The brain short-circuits the stream after the first few tokens. The *original* user transcript is forwarded to Lumi via `POST /api/sensing/event` exactly the way the classic STT path forwards it. OpenClaw runs its normal turn. |
+| **(error)** | HTTP error / empty stream | Falls through to Lumi as a delegate. Safe default — user input is never silently dropped. |
+
+Why the text-prefix protocol instead of function calling:
+
+- The OpenAI path can stream the reply (`stream: true` + SSE). Sentence
+  boundaries are detected on the fly and pushed into TTS' `speak_queue`,
+  so the user hears the first sentence ~1-2s after they stop speaking
+  while the model is still generating sentence 2. With the old tool-call
+  protocol the whole reply had to arrive before TTS could begin —
+  ~3-4s of extra wait per chit-chat turn.
+- The delegate path also benefits: as soon as the first ~10 streamed
+  characters resolve to `[DELEGATE]`, the brain breaks the stream and
+  dispatches to OpenClaw. The transcript field is no longer echoed by
+  the LLM (it was always identical to the input anyway — the brain has
+  it in hand from STT), so we skip a full round of token generation.
+- One less moving part: no tool schema in the payload, no JSON
+  argument parsing, identical wire shape across OpenAI and Gemini.
+
+Voice-style markers (`[chuckle]`, `[sigh]`, `[laughs softly]`) inside
+chit-chat replies do **not** trigger delegation — the brain only treats
+`[DELEGATE]` (full token, at start) as the marker; anything else
+starting with `[` is buffered for a few more chars and then resolved
+as chit-chat once it doesn't match.
 
 `DECISION_RULES` is intentionally short and English-only (replies still
 come back in the user's language via the language hint — see §4). Long
@@ -108,7 +131,7 @@ No extra Python deps required — `requests` is already a project dep.
 ```
 lelamp/service/brain/
   __init__.py        — public exports (TextBrain, build_text_brain_from_env, load_context, …)
-  prompts.py         — DECISION_RULES, DELEGATE_TOOL_*, language_hint(), resolve_stt_language()
+  prompts.py         — DECISION_RULES, DELEGATE_PREFIX, language_hint(), resolve_stt_language()
   context_loader.py  — reads IDENTITY / USER / MEMORY / KNOWLEDGE / SOUL + OpenClaw session JSONL
   text_router.py     — TextBrain class with `gemini` and `openai` HTTP backends
 lelamp/test/test_brain.py — context loader unit tests
@@ -165,9 +188,16 @@ finalises a transcript (`final_text`) and the event type is `voice`
 (plain speech — wake-word events still route their own way):
 
 ```python
-decision = self._text_brain.decide(final_text, speaker=user)
+# Stream each completed sentence straight into the TTS queue. The
+# callback only fires once the brain has confirmed the reply is
+# chit-chat (not the `[DELEGATE]` marker), so audio never leaks on a
+# delegated turn.
+on_sentence = self._tts.speak_queue if self._tts else None
+decision = self._text_brain.decide(
+    final_text, speaker=user, on_sentence=on_sentence,
+)
 if decision.decision == "chitchat" and decision.reply:
-    self._tts.speak_queue(decision.reply)            # branch A
+    pass  # sentences already queued during the stream
 elif decision.decision == "delegate":
     self._send_to_lumi(final_msg, event_type="voice")  # branch B
 else:  # decision.decision == "error"
@@ -202,11 +232,11 @@ the next call pays full price; subsequent calls cache again.
 
 ## 7. Known limitations / follow-ups
 
-- **No streaming reply** — `chat.completions` returns the full reply in
-  one HTTP response, so chit-chat replies arrive in one chunk. For
-  typical 1–2 sentence replies the perceived latency is dominated by
-  the model's generation time, not the round-trip; streaming would
-  shave a fraction of a second but doubles the parsing complexity.
+- **Gemini path is non-streaming** — only the OpenAI provider streams
+  sentences into TTS as they arrive. The Gemini path buffers the full
+  reply and then fires `on_sentence` once at the end so callers don't
+  branch on provider, but it doesn't get the time-to-first-audio win.
+  Promoting Gemini to `:streamGenerateContent` is a follow-up.
 - **History reads are read-only for OpenClaw** — the brain reads
   OpenClaw's JSONL but never writes back. Chit-chat replies live in
   the brain's own JSONL (`LELAMP_BRAIN_SESSION_LOG`); they don't show

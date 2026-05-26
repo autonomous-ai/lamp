@@ -44,14 +44,35 @@ shape, history merge, và prompt cache prefix.
 ## 2. Cơ chế quyết định
 
 Cả 2 provider dùng chung prompt (`DECISION_RULES` trong
-`lelamp/service/brain/prompts.py`) và cùng 1 function declaration
-`delegate_to_lumi`. Model chọn đúng 1 trong:
+`lelamp/service/brain/prompts.py`) và đều trả về **plain text** —
+không tool call, không JSON. Brain check vài ký tự đầu của reply để
+chọn 1 trong:
 
 | Nhánh | Trigger | lelamp làm gì |
 | --- | --- | --- |
-| **(A) Chit-chat** | Model trả về plain text | Text vào `TTSService.speak_queue(...)` — cùng giọng ElevenLabs/OpenAI với task reply. Không gửi gì cho OpenClaw. |
-| **(B) Delegate** | Model gọi `delegate_to_lumi(transcript=…)` | Transcript được forward qua `POST /api/sensing/event` y như pipeline STT cổ điển. OpenClaw chạy turn bình thường. |
-| **(error)** | HTTP error / parse error / response rỗng | Fall through xuống Lumi như delegate. Safe default — input của user không bao giờ bị silently drop. |
+| **(A) Chit-chat** | Reply KHÔNG bắt đầu bằng `[DELEGATE]` | Mỗi câu hoàn chỉnh được fan-out vào `TTSService.speak_queue(...)` ngay khi model stream xong câu đó — cùng giọng ElevenLabs với task reply. Không gửi gì cho OpenClaw. |
+| **(B) Delegate** | Reply bắt đầu bằng đúng token `[DELEGATE]` (case-insensitive) và không có gì sau | Brain ngắt stream ngay sau vài token đầu. Transcript **gốc** của user được forward qua `POST /api/sensing/event` y như pipeline STT cổ điển. OpenClaw chạy turn bình thường. |
+| **(error)** | HTTP error / stream rỗng | Fall through xuống Lumi như delegate. Safe default — input của user không bao giờ bị silently drop. |
+
+Vì sao đổi từ function call sang text-prefix:
+
+- Path OpenAI có thể stream reply (`stream: true` + SSE). Boundary
+  câu được phát hiện on-the-fly và push vào TTS `speak_queue`, nên
+  user nghe câu đầu sau ~1-2s ngay khi vừa hết nói, trong khi model
+  còn đang gen câu 2. Với tool call cũ phải đợi full reply mới TTS
+  được — phí thêm ~3-4s/turn chit-chat.
+- Path delegate cũng nhanh hơn: vừa thấy ~10 ký tự đầu khớp
+  `[DELEGATE]` là brain ngắt stream và dispatch OpenClaw ngay.
+  Transcript không còn phải để model echo lại (vì nó luôn giống input,
+  brain đã có sẵn từ STT) — tiết kiệm 1 round token gen.
+- Bớt 1 thành phần phức tạp: không có tool schema trong payload, không
+  parse JSON argument, OpenAI và Gemini cùng wire shape giống hệt.
+
+Voice-style marker (`[chuckle]`, `[sigh]`, `[laughs softly]`) trong
+reply chit-chat **không** kích hoạt delegate — brain chỉ coi
+`[DELEGATE]` (token đầy đủ, ngay đầu reply) là marker; bất cứ cái gì
+khác bắt đầu bằng `[` sẽ được buffer thêm vài char rồi resolve thành
+chit-chat khi thấy nó không match.
 
 `DECISION_RULES` cố tình giữ ngắn + chỉ viết bằng tiếng Anh (reply vẫn
 ra ngôn ngữ user qua language hint — xem §4). Prompt dài làm tăng
