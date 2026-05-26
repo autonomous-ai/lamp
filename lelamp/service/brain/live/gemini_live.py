@@ -32,17 +32,14 @@ logger = logging.getLogger("lelamp.brain.gemini")
 
 # Gemini Live model selection.
 #
-# We keep ONE model regardless of `LELAMP_BRAIN_TTS` mode:
-#   - `gemini-3.1-flash-live-preview` (latest, AUDIO-only response modality)
-#
-# Why not auto-switch to a text-only "half-cascade" model in fallback?
-# It would skip audio synth cost but the only Developer API model that
-# accepts response_modalities=[TEXT] is `gemini-2.0-flash-live-001` —
-# an older generation with weaker decision quality. The newer 2.5 /
-# 3.1 Live models only exist in AUDIO shape on the Developer tier.
-# Net trade: keep newer model + pay audio synth cost in fallback (we
-# drop the chunks on receive). When 3.x ships a text-capable Live
-# model on Developer API, swap this default.
+# Default: `gemini-3.1-flash-live-preview` (latest, AUDIO-only response
+# modality). We always route reply text through ElevenLabs so the audio
+# stream is wasted — `output_audio_transcription` gives us the text we
+# need. The older `gemini-2.0-flash-live-001` does support
+# response_modalities=[TEXT] but the routing quality is noticeably
+# weaker, so we pay the wasted-audio cost in exchange for a smarter
+# brain. Swap the default once a text-capable 3.x Live model ships on
+# the Developer tier.
 #
 # `LELAMP_GEMINI_LIVE_MODEL` overrides if you want to A/B test
 # 2.0-flash-live-001 (or any other model id).
@@ -93,16 +90,14 @@ def _resolve_language(language: Optional[str]) -> str:
         return ""
     return _STT_LANG_TO_BCP47.get(candidate.lower(), candidate)
 
-# How the chit-chat reply is rendered to the user:
-#   "native"   — Gemini Live streams 24 kHz PCM out, we play it directly.
-#   "fallback" — Gemini Live emits text only; we hand it to the existing
-#                TTSService so the user keeps the same ElevenLabs/OpenAI
-#                voice as task replies.
-# Default is "fallback" — companion deployments want one consistent
-# voice across chit-chat AND task replies; the alternative ("native")
-# changes voice per branch.
-DEFAULT_TTS_OUTPUT_MODE = os.environ.get("LELAMP_BRAIN_TTS", "fallback").strip().lower()
-VALID_TTS_OUTPUT_MODES = ("native", "fallback")
+# Reply rendering: hard-wired to ElevenLabs (via TTSService.speak_queue
+# in LiveBrainRunner). Gemini Live still emits AUDIO chunks because the
+# 3.x Live models on Developer API don't support a text-only response
+# modality — we drop the chunks and rely on output_audio_transcription
+# for the words we feed into ElevenLabs. The previous LELAMP_BRAIN_TTS
+# env var (native | fallback) is gone — companion deployments always
+# want one consistent voice across both branches, no toggle needed.
+
 
 class GeminiLiveBrain(Brain):
     """Factory holding the shared client + system prompt for the session."""
@@ -115,13 +110,8 @@ class GeminiLiveBrain(Brain):
         language: str = DEFAULT_LANGUAGE,
         context: Optional[BrainContext] = None,
         decision_rules: str = DECISION_RULES,
-        tts_output_mode: str = DEFAULT_TTS_OUTPUT_MODE,
     ):
         self._api_key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-        if tts_output_mode not in VALID_TTS_OUTPUT_MODES:
-            logger.warning("unknown tts_output_mode=%r — defaulting to 'fallback'", tts_output_mode)
-            tts_output_mode = "fallback"
-        self._tts_output_mode = tts_output_mode
         self._model = model
         self._voice = voice
         self._language = _resolve_language(language)
@@ -150,8 +140,8 @@ class GeminiLiveBrain(Brain):
             self._client = genai.Client(api_key=self._api_key)
             self._types = types
             logger.info(
-                "GeminiLiveBrain ready (model=%s, voice=%s, lang=%s, tts=%s)",
-                self._model, self._voice, self._language, self._tts_output_mode,
+                "GeminiLiveBrain ready (model=%s, voice=%s, lang=%s, tts=elevenlabs)",
+                self._model, self._voice, self._language,
             )
         except ImportError as e:
             self._import_error = e
@@ -182,7 +172,6 @@ class GeminiLiveBrain(Brain):
             voice=self._voice,
             language=self._language,
             system_instruction=system_instruction,
-            tts_output_mode=self._tts_output_mode,
             resumption_handle=self._get_handle(),
             on_handle_update=self._set_handle,
         )
@@ -218,7 +207,6 @@ class GeminiLiveSession(BrainSession):
         voice: str,
         language: str,
         system_instruction: str,
-        tts_output_mode: str = "native",
         resumption_handle: Optional[str] = None,
         on_handle_update: Optional[Callable[[Optional[str]], None]] = None,
     ):
@@ -228,7 +216,6 @@ class GeminiLiveSession(BrainSession):
         self._voice = voice
         self._language = language
         self._system_instruction = system_instruction
-        self._tts_output_mode = tts_output_mode
         self._resumption_handle = resumption_handle
         self._on_handle_update = on_handle_update
 
@@ -431,12 +418,11 @@ class GeminiLiveSession(BrainSession):
             ),
         )
 
-        # Single shape for both `LELAMP_BRAIN_TTS` modes: request AUDIO
-        # modality (the only one this model supports on Developer API),
-        # plus output_audio_transcription so we get text we can route
-        # to ElevenLabs in fallback mode. In native mode we play the
-        # PCM directly; in fallback we drop the audio chunks in
-        # _handle_server_content but still consume the transcription.
+        # Request AUDIO modality (the only one this model supports on
+        # Developer API) plus output_audio_transcription so we get
+        # text to feed into ElevenLabs. The PCM chunks themselves are
+        # dropped in _handle_server_content — LiveBrainRunner only
+        # cares about the transcript.
         speech_kwargs = dict(
             voice_config=types.VoiceConfig(
                 prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=self._voice),
@@ -691,21 +677,12 @@ class GeminiLiveSession(BrainSession):
         if content is None:
             return
 
-        # Audio chunks → speaker, but only in native mode. In fallback
-        # we drop them on purpose; the transcription below gives us the
-        # same words and the caller speaks them via ElevenLabs for one
-        # consistent voice across chit-chat and task replies.
-        if self._tts_output_mode == "native":
-            turn = getattr(content, "model_turn", None)
-            if turn is not None:
-                for part in turn.parts or []:
-                    inline = getattr(part, "inline_data", None)
-                    if inline is not None and getattr(inline, "data", None):
-                        if self._on_audio_chunk is not None:
-                            try:
-                                self._on_audio_chunk(inline.data)
-                            except Exception as e:
-                                logger.warning("on_audio_chunk callback raised: %s", e)
+        # Audio chunks intentionally dropped — LiveBrainRunner routes
+        # everything through ElevenLabs via on_text. The Live model
+        # still produces PCM (the 3.x Live tier doesn't support a
+        # text-only response modality on Developer API), we just
+        # don't forward it. on_audio_chunk is still part of the Brain
+        # interface so legacy callers don't break.
 
         # Brain-reply transcription — what Gemini just said. Used by
         # Flow Monitor logging in native mode and by TTSService route

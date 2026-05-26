@@ -30,8 +30,8 @@ logger = logging.getLogger("lelamp.brain")
 # vendor SDKs installed still boot — the missing one just fails to load
 # when selected and falls back to classic STT.
 _PROVIDERS: dict[str, tuple[str, str]] = {
-    "gemini": ("lelamp.service.brain.gemini_live",     "GeminiLiveBrain"),
-    "openai": ("lelamp.service.brain.openai_realtime", "OpenAIRealtimeBrain"),
+    "gemini": ("lelamp.service.brain.live.gemini_live",     "GeminiLiveBrain"),
+    "openai": ("lelamp.service.brain.live.openai_realtime", "OpenAIRealtimeBrain"),
 }
 
 # Values that mean "no brain, use classic STT". Anything outside this set

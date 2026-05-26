@@ -75,12 +75,12 @@ DEFAULT_TRANSCRIBE_MODEL = os.environ.get(
     "LELAMP_OPENAI_TRANSCRIBE_MODEL", "whisper-1"
 )
 
-# Output rendering — same env var as Gemini, same semantics:
-#   "native"   — play OpenAI's PCM audio out the speaker directly.
-#   "fallback" — drop the audio chunks; speak the transcribed reply via
-#                the existing TTSService for a single consistent voice.
-DEFAULT_TTS_OUTPUT_MODE = os.environ.get("LELAMP_BRAIN_TTS", "native").strip().lower()
-VALID_TTS_OUTPUT_MODES = ("native", "fallback")
+# Output rendering: hard-wired to ElevenLabs via LiveBrainRunner.
+# OpenAI Realtime still streams 24 kHz PCM out (we have no text-only
+# realtime tier), we drop the chunks in _handle_response_audio_delta
+# and rely on the transcript events for the words we feed into
+# ElevenLabs. Previous LELAMP_BRAIN_TTS env var (native | fallback)
+# removed — companion deployments want one voice everywhere.
 
 # OpenAI Realtime uses 24 kHz mono PCM16 on both directions. VoiceService
 # captures 16 kHz so we polyphase-resample 16 → 24 (up=3, down=2) before
@@ -100,7 +100,6 @@ class OpenAIRealtimeBrain(Brain):
         language: str = DEFAULT_LANGUAGE,
         context: Optional[BrainContext] = None,
         decision_rules: str = DECISION_RULES,
-        tts_output_mode: str = DEFAULT_TTS_OUTPUT_MODE,
     ):
         self._api_key = api_key or os.environ.get("OPENAI_API_KEY")
         self._model = model
@@ -115,10 +114,6 @@ class OpenAIRealtimeBrain(Brain):
         self._language = (language or DEFAULT_LANGUAGE or resolve_stt_language() or "").strip()
         self._decision_rules = decision_rules
         self._context = context  # if None, loaded lazily per session (always fresh)
-        if tts_output_mode not in VALID_TTS_OUTPUT_MODES:
-            logger.warning("unknown tts_output_mode=%r — defaulting to 'native'", tts_output_mode)
-            tts_output_mode = "native"
-        self._tts_output_mode = tts_output_mode
         self._client = None
         self._import_error: Optional[Exception] = None
 
@@ -130,8 +125,8 @@ class OpenAIRealtimeBrain(Brain):
             from openai import AsyncOpenAI
             self._client = AsyncOpenAI(api_key=self._api_key)
             logger.info(
-                "OpenAIRealtimeBrain ready (model=%s, voice=%s, lang=%s, tts=%s)",
-                self._model, self._voice, self._language or "auto", self._tts_output_mode,
+                "OpenAIRealtimeBrain ready (model=%s, voice=%s, lang=%s, tts=elevenlabs)",
+                self._model, self._voice, self._language or "auto",
             )
         except ImportError as e:
             self._import_error = e
@@ -153,7 +148,6 @@ class OpenAIRealtimeBrain(Brain):
             voice=self._voice,
             language=self._language,
             system_instruction=system_instruction,
-            tts_output_mode=self._tts_output_mode,
         )
 
     def _build_system_instruction(self, ctx: BrainContext) -> str:
@@ -185,7 +179,6 @@ class OpenAIRealtimeSession(BrainSession):
         model: str,
         voice: str,
         system_instruction: str,
-        tts_output_mode: str = "native",
         language: str = "",
     ):
         self._client = client
@@ -193,7 +186,6 @@ class OpenAIRealtimeSession(BrainSession):
         self._voice = voice
         self._language = language
         self._system_instruction = system_instruction
-        self._tts_output_mode = tts_output_mode
 
         # State shared across threads — guarded by simple flags + Events.
         self._thread: Optional[threading.Thread] = None
@@ -324,10 +316,9 @@ class OpenAIRealtimeSession(BrainSession):
                 # of `transcription.model` shows up as the next
                 # `session.updated` not containing it.
                 logger.info(
-                    "OpenAI Realtime session.update sent — model=%s voice=%s lang=%s tts=%s "
+                    "OpenAI Realtime session.update sent — model=%s voice=%s lang=%s "
                     "transcription=%s tool_choice=%s",
                     self._model, self._voice, self._language or "auto",
-                    self._tts_output_mode,
                     config.get("audio", {}).get("input", {}).get("transcription"),
                     config.get("tool_choice"),
                 )
@@ -524,20 +515,11 @@ class OpenAIRealtimeSession(BrainSession):
         )
 
     async def _on_response_audio_delta(self, conn, event) -> None:
-        if self._tts_output_mode != "native":
-            return  # fallback mode plays the reply via TTSService, not raw PCM
-        delta = getattr(event, "delta", None)
-        if not delta:
-            return
-        try:
-            pcm = base64.b64decode(delta)
-        except Exception:
-            return
-        if pcm and self._on_audio_chunk is not None:
-            try:
-                self._on_audio_chunk(pcm)
-            except Exception as e:
-                logger.warning("on_audio_chunk callback raised: %s", e)
+        # Audio chunks intentionally dropped — LiveBrainRunner routes
+        # everything through ElevenLabs via on_text. Kept as a no-op so
+        # the response.audio.delta event handler still consumes the
+        # event (otherwise the SDK queues them).
+        return
 
     async def _on_response_text_delta(self, conn, event) -> None:
         delta = getattr(event, "delta", None) or ""
