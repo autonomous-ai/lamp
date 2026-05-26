@@ -131,12 +131,17 @@ func (s *Service) sendChat(message string, imageBase64 string, fixedReqID string
 
 	s.SetPendingChatTrace(idempotencyKey, message)
 
-	slog.Info("[hermes /v1/responses] >>> sending", "component", "hermes",
-		"reqId", reqID, "runId", idempotencyKey,
+	slog.Info("hermes >>> SEND  user message", "component", "hermes",
+		"reqId", reqID,
+		"runId", idempotencyKey,
 		"sessionKey", s.GetSessionKey(),
-		"messagePreview", truncRunes(message, 200),
+		"conversation", body.Conversation,
+		"model", body.Model,
+		"source", sourceType,
 		"hasImage", hasImage,
-		"conversation", body.Conversation)
+		"imageBytes", len(imageBase64),
+		"msgLen", len(message),
+		"message", truncRunes(message, 500))
 
 	flow.Log("chat_send", map[string]any{
 		"run_id":      idempotencyKey,
@@ -200,10 +205,15 @@ func (s *Service) runStream(runID string, body streamRequest) {
 	}
 
 	if res.Errored {
-		slog.Warn("hermes response.failed", "component", "hermes", "runID", runID, "msg", res.ErrorText)
+		slog.Warn("hermes <<< turn FAILED", "component", "hermes",
+			"runID", runID, "responseID", res.ResponseID, "error", res.ErrorText)
 	} else {
-		slog.Info("hermes turn complete", "component", "hermes", "runID", runID,
-			"responseID", res.ResponseID, "finalLen", len(res.FinalText))
+		slog.Info("hermes <<< turn COMPLETE", "component", "hermes",
+			"runID", runID,
+			"responseID", res.ResponseID,
+			"sessionID", s.GetSessionKey(),
+			"finalLen", len(res.FinalText),
+			"finalPreview", truncRunes(res.FinalText, 300))
 	}
 }
 

@@ -106,6 +106,11 @@ func (s *Service) handleResponseCreated(probe map[string]json.RawMessage, dispat
 		result.SessionID = inner.Response.SessionID
 	}
 
+	slog.Info("hermes <<< SSE response.created (turn started)", "component", "hermes",
+		"responseID", respID,
+		"sessionID", s.GetSessionKey(),
+		"model", inner.Response.Model)
+
 	payload, _ := json.Marshal(map[string]any{
 		"runId":      respID,
 		"sessionKey": s.GetSessionKey(),
@@ -144,6 +149,12 @@ func (s *Service) handleOutputItemAdded(probe map[string]json.RawMessage, dispat
 	case "function_call":
 		// Surface as tool start. Arguments are a JSON string; embed verbatim
 		// so the OpenClaw handler's ToolArguments() helper picks it up.
+		slog.Info("hermes <<< SSE tool CALL", "component", "hermes",
+			"runID", runID,
+			"tool", inner.Item.Name,
+			"toolCallId", inner.Item.CallID,
+			"argsLen", len(inner.Item.Arguments),
+			"args", truncRunes(inner.Item.Arguments, 400))
 		payload, _ := json.Marshal(map[string]any{
 			"runId":      runID,
 			"sessionKey": s.GetSessionKey(),
@@ -165,6 +176,11 @@ func (s *Service) handleOutputItemAdded(probe map[string]json.RawMessage, dispat
 		if len(result) == 0 {
 			result = json.RawMessage(`""`)
 		}
+		slog.Info("hermes <<< SSE tool RESULT", "component", "hermes",
+			"runID", runID,
+			"toolCallId", inner.Item.CallID,
+			"resultLen", len(result),
+			"result", truncRunes(string(result), 400))
 		payload, _ := json.Marshal(map[string]any{
 			"runId":      runID,
 			"sessionKey": s.GetSessionKey(),
@@ -180,6 +196,8 @@ func (s *Service) handleOutputItemAdded(probe map[string]json.RawMessage, dispat
 	case "message":
 		// Assistant message item — no event needed here; the text will come
 		// via response.output_text.delta and be finalised at response.completed.
+		slog.Debug("hermes <<< SSE assistant message item opened (waiting for deltas)", "component", "hermes",
+			"runID", runID, "itemId", inner.Item.ID)
 	}
 }
 
@@ -198,6 +216,10 @@ func (s *Service) handleOutputTextDelta(probe map[string]json.RawMessage, dispat
 		return
 	}
 	runID, _ := s.lastResponseID.Load().(string)
+	// Delta logging stays at Debug — a single assistant reply can emit 100+
+	// deltas and would drown the log. Final text is logged once at completed.
+	slog.Debug("hermes <<< SSE delta", "component", "hermes",
+		"runID", runID, "delta", inner.Delta)
 	payload, _ := json.Marshal(map[string]any{
 		"runId":      runID,
 		"sessionKey": s.GetSessionKey(),
@@ -249,6 +271,21 @@ func (s *Service) handleResponseCompleted(probe map[string]json.RawMessage, disp
 	}
 	finalText := b.String()
 	result.FinalText = finalText
+
+	usage := inner.Response.Usage
+	logArgs := []any{
+		"component", "hermes",
+		"runID", runID,
+		"finalLen", len(finalText),
+		"final", truncRunes(finalText, 500),
+	}
+	if usage != nil {
+		logArgs = append(logArgs,
+			"inputTokens", usage.InputTokens,
+			"outputTokens", usage.OutputTokens,
+			"totalTokens", usage.TotalTokens)
+	}
+	slog.Info("hermes <<< SSE response.completed (assistant final)", logArgs...)
 
 	// (a) Emit chat.final so handler_events.go's session.message handler picks
 	//     up the assistant reply for TTS / [HW:/...] dispatch.
@@ -305,6 +342,9 @@ func (s *Service) handleResponseFailed(probe map[string]json.RawMessage, dispatc
 	if runID == "" {
 		runID, _ = s.lastResponseID.Load().(string)
 	}
+
+	slog.Warn("hermes <<< SSE response.failed", "component", "hermes",
+		"runID", runID, "error", msg)
 	payload, _ := json.Marshal(map[string]any{
 		"runId":      runID,
 		"sessionKey": s.GetSessionKey(),
