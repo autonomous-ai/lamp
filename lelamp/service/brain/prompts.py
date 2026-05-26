@@ -134,6 +134,79 @@ etc.). YOU are only the voice front-door, so:
     like `[chuckle]` instead.
 """
 
+# ---------------------------------------------------------------------------
+# Live-mode variant of DECISION_RULES.
+#
+# Live realtime providers (Gemini Live, OpenAI Realtime) expose a function-
+# calling channel separate from the audio output, so they don't need the
+# ``[DELEGATE]`` text marker the call-mode brain relies on. Emitting the
+# marker as TEXT is actively harmful for live providers: once the literal
+# string lands in Gemini's dialog history the model spirals into
+# ``response=0`` for every subsequent turn (verified 2026-05-26 — the only
+# recovery is a session restart, which kills in-session memory).
+#
+# So live mode gets a near-clone of DECISION_RULES with the "Output format"
+# + the SOUL footer rewritten to point at the function tool instead of the
+# text marker. Everything else (rules A/B/C/D, chit-chat list, persona note)
+# stays identical so both modes agree on what counts as a delegate.
+DECISION_RULES_LIVE = DECISION_RULES.replace(
+    """# Output format — STRICT
+
+You output PLAIN TEXT only. Exactly one of two shapes:
+
+  (a) **Chit-chat reply** — your spoken response in the user's language.
+      Just the words to be spoken. No prefix, no markdown, no JSON.
+
+  (b) **Delegate** — output the literal token `[DELEGATE]` as the very
+      first characters of your reply, with NOTHING after it. No
+      transcript echo, no explanation, no follow-up text. The voice
+      front-door already has the user's original text and will forward
+      it to the Lumi agent.
+
+Examples:
+  user: "hello"             →  Hi! [chuckle] How can I help?
+  user: "what time is it?"  →  [DELEGATE]
+  user: "turn on the lamp"  →  [DELEGATE]
+  user: "tell me a joke"    →  Why did the lamp cross the road? …
+
+The `[DELEGATE]` marker MUST be the very first thing emitted — no
+leading whitespace, no preamble, no markdown fences. Streaming
+clients short-circuit on it after the first few tokens.
+
+Voice-style markers inside chit-chat replies (`[chuckle]`, `[sigh]`,
+`[laughs softly]`) are fine and do NOT trigger delegation. Never emit
+operator markup — no `[HW:/...]`, no `/emotion ...`, no JSON blobs.""",
+    """# Output format — STRICT
+
+For each user utterance pick ONE:
+
+  (a) **Chit-chat reply** — speak your response in the user's
+      language. Plain prose only.
+
+  (b) **Delegate** — call the function `delegate_to_lumi` with the
+      user's original transcript. Do NOT speak. The function call
+      itself routes the request — no text is needed.
+
+Examples:
+  user: "hello"             →  Hi! [chuckle] How can I help?
+  user: "what time is it?"  →  call delegate_to_lumi(transcript=...)
+  user: "turn on the lamp"  →  call delegate_to_lumi(transcript=...)
+  user: "tell me a joke"    →  Why did the lamp cross the road? …
+
+NEVER emit the literal text "[DELEGATE]" — that's a different mode's
+protocol. You have a function tool for this; use it.
+
+Voice-style markers inside chit-chat replies (`[chuckle]`, `[sigh]`,
+`[laughs softly]`) are fine and do NOT trigger delegation. Never emit
+operator markup — no `[HW:/...]`, no `/emotion ...`, no JSON blobs.""",
+).replace(
+    """  - BUT you cannot trigger any of them yourself. To actually do them,
+    emit `[DELEGATE]`.""",
+    """  - BUT you cannot trigger any of them yourself. To actually do them,
+    call the `delegate_to_lumi` function tool.""",
+)
+
+
 # Literal token the model must emit (and nothing else) to hand the turn
 # off to OpenClaw. Kept short so streaming clients can identify it
 # within the first SSE delta — usually 1-2 tokens with modern BPE.
@@ -147,9 +220,16 @@ DELEGATE_PREFIX = "[DELEGATE]"
 # in one place.
 DELEGATE_TOOL_NAME = "delegate_to_lumi"
 DELEGATE_TOOL_DESCRIPTION = (
-    "Delegate the user's request to the Lumi backend (OpenClaw). "
-    "Call this for any request that needs an action, tool, lookup, "
-    "schedule, or long-form answer. Do not speak when calling this."
+    "Hand the user's turn off to the Lumi agent. ONLY call this when "
+    "the user clearly wants one of the device skills listed in the "
+    "OPENCLAW SKILLS block (device control, music, scheduling, "
+    "wellbeing, vision, etc.), needs a real-time external fact "
+    "(weather, prices, current time), or asks about something not in "
+    "the chat history above (older sessions, MEMORY entries). DO NOT "
+    "call this for greetings, smalltalk, mumbled / garbled input, "
+    "short reactions, or questions you can answer from your own "
+    "knowledge — those are chit-chat, just reply directly. When in "
+    "doubt, prefer chit-chat over delegating."
 )
 
 
