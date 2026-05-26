@@ -126,7 +126,19 @@ class TextBrainDecision:
         transcript: echoed STT text — populated when ``decision ==
             "delegate"``. Usually identical to the input but the model is
             free to clean it up before delegating.
-        latency_s: wall-clock time of the brain HTTP call.
+        latency_s: wall-clock time of the brain HTTP call (until the
+            LLM finishes streaming the last token).
+        first_sentence_s: wall-clock time from ``decide()`` start to
+            when the first complete sentence was handed to
+            ``on_sentence`` (i.e. pushed into ``TTSService.speak_queue``
+            on the OpenAI streaming path). This is the closest proxy
+            for time-to-first-audio that the brain can measure without
+            instrumenting the TTS pipeline. ``0.0`` when no callback
+            was provided, the turn was a delegate, or the reply had no
+            sentence boundaries (single-shot tail flush at the end).
+            On the Gemini non-streaming path, this collapses to
+            ``≈ latency_s`` because every sentence ships in one batch
+            after the full reply lands.
         error: human-readable error string when ``decision == "error"``.
     """
 
@@ -134,6 +146,7 @@ class TextBrainDecision:
     reply: str = ""
     transcript: str = ""
     latency_s: float = 0.0
+    first_sentence_s: float = 0.0
     error: str = ""
     prompt_tokens: int = 0
     response_tokens: int = 0
@@ -365,6 +378,12 @@ class TextBrain:
             "model": self._model,
             "decision": decision.decision,
             "latency_s": round(decision.latency_s, 3),
+            # Time-to-first-sentence — proxy for time-to-first-audio.
+            # ``0.0`` for delegate turns and single-shot replies that
+            # had no callback wired up; otherwise the wall-clock gap
+            # from ``decide()`` start to the first sentence handed off
+            # to ``on_sentence`` (i.e. pushed into TTS).
+            "first_sentence_s": round(decision.first_sentence_s, 3),
             "prompt_tokens": decision.prompt_tokens,
             "response_tokens": decision.response_tokens,
             "total_tokens": decision.total_tokens,
@@ -639,11 +658,21 @@ class TextBrain:
             )
 
         # Chit-chat: optionally fan out sentences via callback so the
-        # caller can stream them into TTS one by one.
+        # caller can stream them into TTS one by one. ``first_sentence``
+        # captures the moment the first sentence is handed off — for the
+        # non-streaming Gemini path this is essentially ``latency`` (the
+        # full reply lands as one chunk) but the field is reported for
+        # parity with the OpenAI streaming path.
+        first_sentence: list[Optional[float]] = [None]
         if on_sentence is not None:
-            _drain_complete_sentences(out + "\n", on_sentence)
+            def _tracked(s: str) -> None:
+                if first_sentence[0] is None:
+                    first_sentence[0] = time.time() - t0
+                on_sentence(s)
+            _drain_complete_sentences(out + "\n", _tracked)
         return TextBrainDecision(
             decision="chitchat", reply=out, latency_s=latency,
+            first_sentence_s=first_sentence[0] or 0.0,
             prompt_tokens=prompt_tok, response_tokens=resp_tok,
             total_tokens=total_tok,
         )
@@ -742,11 +771,32 @@ class TextBrain:
         #   chit-chat (i.e. not the delegate marker). Until then we
         #   buffer rather than fan out, so a delegate reply never
         #   leaks audio.
+        # - ``first_sentence_ts`` captures the wall-clock moment the
+        #   first sentence hands off to the TTS callback — the closest
+        #   proxy for time-to-first-audio that the brain can observe
+        #   without instrumenting the audio path. Reported via
+        #   ``TextBrainDecision.first_sentence_s`` so the bench file
+        #   can plot real perceived latency rather than the
+        #   full-stream-complete number.
         buffer = ""
         pending = ""
         prefix_decided = False
         is_delegate = False
         prompt_tok = resp_tok = total_tok = 0
+        first_sentence_ts: Optional[float] = None
+
+        # Wrap the caller's callback so the first sentence stamps a
+        # timer without touching the call sites below. Cheap (one if
+        # check per sentence) and keeps the streaming loop readable.
+        tracked_on_sentence: Optional[Callable[[str], None]] = None
+        if on_sentence is not None:
+            user_cb = on_sentence
+
+            def tracked_on_sentence(s: str) -> None:
+                nonlocal first_sentence_ts
+                if first_sentence_ts is None:
+                    first_sentence_ts = time.time()
+                user_cb(s)
 
         try:
             for raw_line in resp.iter_lines(decode_unicode=True):
@@ -810,8 +860,8 @@ class TextBrain:
                 else:
                     pending += delta
 
-                if not is_delegate and on_sentence is not None and pending:
-                    pending = _drain_complete_sentences(pending, on_sentence)
+                if not is_delegate and tracked_on_sentence is not None and pending:
+                    pending = _drain_complete_sentences(pending, tracked_on_sentence)
         finally:
             resp.close()
 
@@ -834,14 +884,20 @@ class TextBrain:
             )
 
         # Flush the final partial sentence (no trailing punctuation) so
-        # the user hears the whole reply.
-        if on_sentence is not None:
+        # the user hears the whole reply. Goes through the tracked
+        # wrapper so a single-sentence reply with no internal terminator
+        # still records a first_sentence_s.
+        if tracked_on_sentence is not None:
             tail = pending.strip()
             if tail:
-                on_sentence(tail)
+                tracked_on_sentence(tail)
 
+        first_sentence_s = (
+            (first_sentence_ts - t0) if first_sentence_ts is not None else 0.0
+        )
         return TextBrainDecision(
             decision="chitchat", reply=full_reply, latency_s=latency,
+            first_sentence_s=first_sentence_s,
             prompt_tokens=prompt_tok, response_tokens=resp_tok,
             total_tokens=total_tok,
         )
