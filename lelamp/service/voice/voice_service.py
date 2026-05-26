@@ -272,22 +272,57 @@ class VoiceService:
         else:
             logger.info("Silero VAD disabled via LELAMP_SILERO_ENABLED=false")
 
-        # Half-cascade text brain. Activated via LELAMP_BRAIN_PROVIDER
-        # (gemini | openai | none). When active, the classic STT
-        # pipeline still does the audio→text work — only the routing
-        # decision after STT goes through the brain. See
-        # lelamp/service/brain/text_router.py for the design rationale.
+        # Brain mode picker — env LELAMP_BRAIN_MODE = call (default) | live.
+        #   call: half-cascade text brain. Classic STT pipeline (RMS +
+        #         Silero + Deepgram) does the audio→text work; the brain
+        #         only picks chit-chat vs delegate after STT.
+        #         See lelamp/service/brain/call/text_router.py.
+        #   live: realtime brain (Gemini Live / OpenAI Realtime). Mic
+        #         frames stream straight to the provider, which does
+        #         server-side VAD + STT + decision. The reply text is
+        #         routed through ElevenLabs via LiveBrainRunner so the
+        #         user keeps one voice across both modes.
+        # In live mode the local VAD pipeline is bypassed entirely —
+        # the runner owns the mic and the only shared state it touches
+        # is TTSService (for the echo gate + speak_queue dispatch).
+        self._brain_mode = os.environ.get("LELAMP_BRAIN_MODE", "call").strip().lower()
         self._text_brain = None
-        try:
-            from lelamp.service.brain.text_router import build_text_brain_from_env
-            self._text_brain = build_text_brain_from_env()
-            if self._text_brain is not None:
-                logger.info(
-                    "VoiceService brain mode active (text router — provider=%s, model=%s)",
-                    self._text_brain.provider, self._text_brain.model,
-                )
-        except Exception as e:
-            logger.warning("Text brain init failed, keeping classic STT path: %s", e)
+        self._live_runner = None
+        if self._brain_mode == "live":
+            try:
+                from lelamp.service.brain.live.factory import make_brain
+                from lelamp.service.brain.live.runner import LiveBrainRunner
+                provider = os.environ.get("LELAMP_BRAIN_PROVIDER", "gemini").strip().lower()
+                live_brain = make_brain(provider)
+                if live_brain is not None and live_brain.available:
+                    self._live_runner = LiveBrainRunner(
+                        brain=live_brain,
+                        tts_service=self._tts,
+                        alsa_device=self._alsa_device,
+                        input_device=self._input_device,
+                    )
+                    logger.info(
+                        "VoiceService brain mode=live (provider=%s) — classic VAD bypassed",
+                        provider,
+                    )
+                else:
+                    logger.warning(
+                        "Live brain init failed (provider=%s) — falling back to classic STT",
+                        provider,
+                    )
+            except Exception as e:
+                logger.warning("Live brain init exception, keeping classic STT path: %s", e)
+        else:
+            try:
+                from lelamp.service.brain import build_text_brain_from_env
+                self._text_brain = build_text_brain_from_env()
+                if self._text_brain is not None:
+                    logger.info(
+                        "VoiceService brain mode=call (text router — provider=%s, model=%s)",
+                        self._text_brain.provider, self._text_brain.model,
+                    )
+            except Exception as e:
+                logger.warning("Text brain init failed, keeping classic STT path: %s", e)
 
     def set_music_service(self, music_service) -> None:
         self._music = music_service
@@ -313,6 +348,16 @@ class VoiceService:
     def start(self):
         if self._running:
             return
+        # Live mode short-circuits the entire classic pipeline — the
+        # runner owns the mic + provider + sentence dispatch to TTS.
+        # We don't even need the local STT provider to be available.
+        if self._live_runner is not None:
+            self._running = True
+            self._live_runner.start()
+            logger.info(
+                "VoiceService started in LIVE mode — classic VAD/STT loop not running"
+            )
+            return
         if not self.available:
             logger.warning(
                 "VoiceService not starting — sd=%s np=%s stt=%s",
@@ -328,6 +373,8 @@ class VoiceService:
 
     def stop(self):
         self._running = False
+        if self._live_runner is not None:
+            self._live_runner.stop()
         if self._thread:
             self._thread.join(timeout=5)
             self._thread = None
