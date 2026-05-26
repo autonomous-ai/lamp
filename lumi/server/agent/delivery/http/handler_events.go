@@ -1107,8 +1107,9 @@ func (h *AgentHandler) HandleEvent(ctx context.Context, evt domain.WSEvent) erro
 			if len(msgPreview) > 120 {
 				msgPreview = msgPreview[:120] + "…"
 			}
-			slog.Info("openclaw chat event (lumi)", "component", "agent",
-				"openclaw_run_id", payload.RunID,
+			slog.Info("agent chat event (lumi)", "component", "agent",
+				"backend", h.agentGateway.Name(),
+				"agent_run_id", payload.RunID,
 				"flow_run_id", flowRunID,
 				"role", payload.Role,
 				"state", payload.State,
@@ -1422,9 +1423,17 @@ func (h *AgentHandler) HandleEvent(ctx context.Context, evt domain.WSEvent) erro
 			if len(displayMsg) > 200 {
 				displayMsg = displayMsg[:200] + "…"
 			}
-			slog.Info("channel turn started (session.message)", "component", "agent",
-				"session_key", sm.SessionKey, "run_id", runID,
-				"sender", senderLabel, "msg_preview", displayMsg)
+			slog.Info("INBOUND from channel → agent",
+				"component", "agent",
+				"backend", h.agentGateway.Name(),
+				"source", "channel",
+				"channel", chName,
+				"session_key", sm.SessionKey,
+				"run_id", runID,
+				"sender", senderLabel,
+				"telegram_id", telegramID,
+				"msg_len", len(text),
+				"message", displayMsg)
 			flow.Log("chat_input", map[string]any{
 				"run_id":  runID,
 				"source":  "channel",

@@ -898,8 +898,9 @@ func (s *Server) handleSetUpCompleteChange(setupCompleted bool) {
 			// Prompt is localized by STTLanguage so the very first turn
 			// lands in the owner's language without relying on the agent
 			// to translate the priming message.
-			slog.Info("Lumi → agent FORWARD (startup greeting)",
-				"component", "server", "backend", s.agentGateway.Name())
+			slog.Info("INBOUND from system → agent (startup greeting)",
+				"component", "server", "backend", s.agentGateway.Name(),
+				"source", "wake_greeting")
 			if _, err := s.agentGateway.SendSystemChatMessage(wakeGreetingPrompt()); err != nil {
 				slog.Warn("startup greeting failed", "component", "server", "backend", s.agentGateway.Name(), "error", err)
 			}
