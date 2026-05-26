@@ -43,7 +43,7 @@ from typing import Any, Callable, Optional
 from lelamp.service.brain.live.base import Brain, BrainSession
 from lelamp.service.brain.context_loader import BrainContext, load_context
 from lelamp.service.brain.prompts import (
-    DECISION_RULES,
+    DECISION_RULES_LIVE,
     DELEGATE_TOOL_DESCRIPTION,
     DELEGATE_TOOL_NAME,
     language_hint,
@@ -99,7 +99,7 @@ class OpenAIRealtimeBrain(Brain):
         voice: str = DEFAULT_VOICE,
         language: str = DEFAULT_LANGUAGE,
         context: Optional[BrainContext] = None,
-        decision_rules: str = DECISION_RULES,
+        decision_rules: str = DECISION_RULES_LIVE,
     ):
         self._api_key = api_key or os.environ.get("OPENAI_API_KEY")
         self._model = model

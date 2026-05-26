@@ -300,6 +300,20 @@ class VoiceService:
                         tts_service=self._tts,
                         alsa_device=self._alsa_device,
                         input_device=self._input_device,
+                        # Hook back into VoiceService so delegate
+                        # turns from live mode go through the same
+                        # speaker-prefix + echo-filter + retry
+                        # pipeline as call mode (otherwise OpenClaw
+                        # sees a raw transcript without the
+                        # ``"<Name>: …"`` prefix).
+                        decorate_callback=self._identify_and_decorate,
+                        send_to_lumi_callback=self._send_to_lumi,
+                        # Reuse the same VAD chain call mode uses
+                        # (RMS → WebRTC → Silero) so the live
+                        # runner only sends meaningful audio to
+                        # Gemini — saves cost + bandwidth + privacy
+                        # vs the previous "stream 24/7" behaviour.
+                        is_speech_callback=self._make_live_vad_check(),
                     )
                     logger.info(
                         "VoiceService brain mode=live (provider=%s) — classic VAD bypassed",
@@ -460,6 +474,40 @@ class VoiceService:
         np = self._np
         samples = audio_data.flatten().astype(np.float32)
         return float(np.sqrt(np.mean(samples ** 2)))
+
+    def _make_live_vad_check(self) -> Callable[[object], bool]:
+        """Build a single closure that reproduces the call-mode VAD
+        chain (RMS → WebRTC → Silero) for the live runner.
+
+        Returns a function ``is_speech(data) -> bool`` where ``data``
+        is a numpy int16 frame at ``STT_RATE`` (live runner records
+        directly at 16 kHz, no resampling needed). Each gate short-
+        circuits — RMS first because it's the cheapest, WebRTC
+        second (C-based, ~0.1 ms), Silero last (ONNX, ~20 ms). The
+        chain matches ``_vad_loop`` so live and call see the same
+        "is this speech?" verdict for any given frame.
+        """
+        np = self._np
+        webrtcvad = self._webrtcvad
+        silero = self._silero
+        is_webrtc = self._webrtcvad_is_speech
+        is_silero = self._silero_is_speech
+        rms_threshold = RMS_THRESHOLD
+
+        def check(data) -> bool:
+            try:
+                rms = float(np.sqrt(np.mean(np.square(data.astype(np.float32)))))
+            except Exception:
+                return True  # numpy issue — pass-through to keep stream alive
+            if rms < rms_threshold:
+                return False
+            if webrtcvad is not None and not is_webrtc(data, STT_RATE):
+                return False
+            if silero is not None and not is_silero(data, STT_RATE):
+                return False
+            return True
+
+        return check
 
     def _webrtcvad_is_speech(self, data, device_rate: int) -> bool:
         """Run WebRTC VAD on audio frame. Returns True if any 30ms chunk contains speech.

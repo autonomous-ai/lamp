@@ -17,12 +17,13 @@ import asyncio
 import logging
 import os
 import threading
+import time
 from typing import Callable, Optional
 
 from lelamp.service.brain.live.base import Brain, BrainSession
 from lelamp.service.brain.context_loader import BrainContext, load_context
 from lelamp.service.brain.prompts import (
-    DECISION_RULES,
+    DECISION_RULES_LIVE,
     DELEGATE_TOOL_DESCRIPTION,
     DELEGATE_TOOL_NAME,
     language_hint,
@@ -32,17 +33,15 @@ logger = logging.getLogger("lelamp.brain.gemini")
 
 # Gemini Live model selection.
 #
-# Default: `gemini-3.1-flash-live-preview` (latest, AUDIO-only response
-# modality). We always route reply text through ElevenLabs so the audio
-# stream is wasted — `output_audio_transcription` gives us the text we
-# need. The older `gemini-2.0-flash-live-001` does support
-# response_modalities=[TEXT] but the routing quality is noticeably
-# weaker, so we pay the wasted-audio cost in exchange for a smarter
-# brain. Swap the default once a text-capable 3.x Live model ships on
-# the Developer tier.
+# Default: `gemini-2.5-flash-live-preview`. The newer 3.1 model exists
+# but restricts ``send_client_content`` to initial-seeding only — after
+# the first turn, callers can only push text via ``send_realtime_input``
+# which Gemini treats as a fresh user message. We rely on
+# ``send_client_content(turn_complete=False)`` mid-session so brain
+# (not Gemini) owns conversation history end-to-end (see live/README.md
+# §"Why brain owns history"). 2.5 keeps that flexibility.
 #
-# `LELAMP_GEMINI_LIVE_MODEL` overrides if you want to A/B test
-# 2.0-flash-live-001 (or any other model id).
+# Override via env if you want to A/B test 3.x or older 2.0-flash-live.
 DEFAULT_MODEL = os.environ.get(
     "LELAMP_GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview"
 )
@@ -109,7 +108,7 @@ class GeminiLiveBrain(Brain):
         voice: str = DEFAULT_VOICE,
         language: str = DEFAULT_LANGUAGE,
         context: Optional[BrainContext] = None,
-        decision_rules: str = DECISION_RULES,
+        decision_rules: str = DECISION_RULES_LIVE,
     ):
         self._api_key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
         self._model = model
@@ -165,6 +164,23 @@ class GeminiLiveBrain(Brain):
     def create_session(self) -> BrainSession:
         ctx = self._context or load_context()
         system_instruction = self._build_system_instruction(ctx)
+        # Visibility log — dumps the recent-history turns we just baked
+        # into the system instruction so the journal mirrors the
+        # call-mode ``brain.context`` dumps. Live mode loads history
+        # once per session (every ~10-15 min after Gemini GoAway), not
+        # per turn — Gemini's in-session memory carries everything
+        # spoken while the WS stays open.
+        turns = list(ctx.recent_turns) if ctx and ctx.recent_turns else []
+        logger.info(
+            "brain.context [live] system=%d chars history_turns=%d (loaded at session start, "
+            "Gemini keeps in-session memory after this)",
+            len(system_instruction), len(turns),
+        )
+        for i, t in enumerate(turns):
+            text = (t.text or "").strip()
+            if not text:
+                continue
+            logger.info("brain.context [live] #%02d %s: %s", i, t.role, text)
         return GeminiLiveSession(
             client=self._client,
             types=self._types,
@@ -286,6 +302,69 @@ class GeminiLiveSession(BrainSession):
                 pass
         self._audio_queue.put_nowait(chunk)
 
+    def send_context_turns(self, turns: list[dict]) -> None:
+        """Inject extra conversation history into the live session
+        without triggering a model response.
+
+        ``turns`` is a list of ``{"role": "user"|"model", "text": ...}``
+        dicts. The runner uses this to push OpenClaw turns (Telegram,
+        web, other voice sessions) that landed while this voice
+        session was open — keeps the live brain in sync with the
+        rest of the system without restarting the WS.
+
+        Requires the model to be ``gemini-2.5-flash-live-preview`` or
+        newer with mid-session ``send_client_content`` support. On
+        ``gemini-3.1-flash-live-preview`` the SDK will reject this
+        call after the first model turn — error is logged, the
+        runner falls back to "stale history until next reconnect".
+        Sets ``turn_complete=False`` so the model treats this purely
+        as context, not as a new user prompt.
+        """
+        if not turns:
+            return
+        if self._loop is None or self._session is None or self._closed:
+            return
+        types = self._types
+        try:
+            contents = [
+                types.Content(
+                    role="user" if t.get("role") == "user" else "model",
+                    parts=[types.Part(text=t.get("text", ""))],
+                )
+                for t in turns
+                if (t.get("text") or "").strip()
+            ]
+        except (AttributeError, TypeError) as e:
+            logger.warning(
+                "send_context_turns: SDK shape rejected the content (%s) — "
+                "skipping sync", e,
+            )
+            return
+        if not contents:
+            return
+
+        async def _push():
+            t0 = time.time()
+            try:
+                await self._session.send_client_content(
+                    turns=contents, turn_complete=False,
+                )
+                logger.info(
+                    "brain.history.sync [live] pushed %d turn(s) in %.2fs",
+                    len(contents), time.time() - t0,
+                )
+            except Exception as e:
+                logger.warning(
+                    "brain.history.sync [live] failed after %.2fs: %s",
+                    time.time() - t0, e,
+                )
+
+        try:
+            asyncio.run_coroutine_threadsafe(_push(), self._loop)
+        except RuntimeError:
+            # Loop closed mid-call — silent drop, will retry next turn.
+            pass
+
     def close(self) -> None:
         if self._closed:
             return
@@ -368,13 +447,22 @@ class GeminiLiveSession(BrainSession):
         self._close_event = asyncio.Event()
 
         config = self._build_config()
+        # t_connect captures WS handshake + Gemini setup time so the
+        # journal shows how long a session restart actually costs.
+        t_connect_start = time.time()
+        self._session_start_ts: Optional[float] = None
         try:
             async with self._client.aio.live.connect(
                 model=self._model, config=config
             ) as session:
                 self._session = session  # exposed for notify_activity_*
                 self._setup_done.set()
-                logger.info("Gemini Live session open (model=%s)", self._model)
+                connect_elapsed = time.time() - t_connect_start
+                self._session_start_ts = time.time()
+                logger.info(
+                    "Gemini Live session open (model=%s) — connect took %.2fs",
+                    self._model, connect_elapsed,
+                )
                 send_task = asyncio.create_task(self._send_loop(session), name="brain-send")
                 recv_task = asyncio.create_task(self._recv_loop(session), name="brain-recv")
                 close_task = asyncio.create_task(self._close_event.wait(), name="brain-close")
@@ -399,7 +487,14 @@ class GeminiLiveSession(BrainSession):
                             pass
         finally:
             self._session = None
-            logger.info("Gemini Live session closed")
+            lifetime = (
+                time.time() - self._session_start_ts
+                if self._session_start_ts is not None
+                else 0.0
+            )
+            logger.info(
+                "Gemini Live session closed (lifetime %.1fs)", lifetime,
+            )
 
     def _build_config(self):
         types = self._types
@@ -448,31 +543,83 @@ class GeminiLiveSession(BrainSession):
         )
 
     def _build_manual_activity_kwargs(self) -> dict:
-        """Server VAD path — let Gemini decide turn boundaries from the
-        audio stream. We used to set automatic_activity_detection.disabled
-        =True and drive start/end manually from the client, but the TTS
-        echo gate in voice_service handles self-feedback on its own, so
-        the manual signalling layer was redundant. Kept as a no-op
-        return so the call site doesn't need to change if we ever flip
-        back; the original code is preserved in git history.
+        """Server VAD path. Default behaviour: Gemini Live decides turn
+        boundaries from the audio stream with its built-in VAD.
+
+        Tunable via env vars (all optional — unset → SDK / server defaults):
+
+          LELAMP_LIVE_VAD_SILENCE_MS
+              ``silence_duration_ms`` for ``automatic_activity_detection``.
+              Default per docs is 100ms which the same docs flag as too
+              aggressive (fragments natural pauses). Recommend 500-800.
+
+          LELAMP_LIVE_VAD_START_SENSITIVITY     low | high
+          LELAMP_LIVE_VAD_END_SENSITIVITY       low | high
+              Maps to ``StartSensitivity`` / ``EndSensitivity`` enums.
+              ``low`` makes the detector less twitchy on background
+              noise / breath; ``high`` matches the SDK default.
+
+          LELAMP_LIVE_VAD_PREFIX_PADDING_MS
+              ``prefix_padding_ms`` — how much pre-trigger audio Gemini
+              keeps. Default 20ms.
+
+        We never set ``disabled=True`` — the manual-signal path was
+        retired (TTS echo gate is enough). Returns ``{}`` when no env
+        var is set so the connection keeps the SDK defaults verbatim.
         """
-        return {}
-        # --- legacy manual-VAD path (kept commented for reference) ---
-        # types = self._types
-        # try:
-        #     return {
-        #         "realtime_input_config": types.RealtimeInputConfig(
-        #             automatic_activity_detection=types.AutomaticActivityDetection(
-        #                 disabled=True,
-        #             ),
-        #         ),
-        #     }
-        # except (AttributeError, TypeError) as e:
-        #     logger.info(
-        #         "manual activity detection unsupported by this SDK (%s) — "
-        #         "falling back to server VAD", e,
-        #     )
-        #     return {}
+        types = self._types
+        silence_ms_raw = os.environ.get("LELAMP_LIVE_VAD_SILENCE_MS", "").strip()
+        start_sens = os.environ.get("LELAMP_LIVE_VAD_START_SENSITIVITY", "").strip().lower()
+        end_sens = os.environ.get("LELAMP_LIVE_VAD_END_SENSITIVITY", "").strip().lower()
+        prefix_ms_raw = os.environ.get("LELAMP_LIVE_VAD_PREFIX_PADDING_MS", "").strip()
+
+        # Bail early if nothing's configured.
+        if not (silence_ms_raw or start_sens or end_sens or prefix_ms_raw):
+            return {}
+
+        kwargs: dict = {}
+        if silence_ms_raw:
+            try:
+                kwargs["silence_duration_ms"] = int(silence_ms_raw)
+            except ValueError:
+                logger.warning("LELAMP_LIVE_VAD_SILENCE_MS=%r is not an int — ignored", silence_ms_raw)
+        if prefix_ms_raw:
+            try:
+                kwargs["prefix_padding_ms"] = int(prefix_ms_raw)
+            except ValueError:
+                logger.warning("LELAMP_LIVE_VAD_PREFIX_PADDING_MS=%r is not an int — ignored", prefix_ms_raw)
+        if start_sens:
+            try:
+                kwargs["start_of_speech_sensitivity"] = getattr(
+                    types.StartSensitivity,
+                    f"START_SENSITIVITY_{start_sens.upper()}",
+                )
+            except (AttributeError, TypeError) as e:
+                logger.warning("VAD start sensitivity %r rejected by SDK: %s", start_sens, e)
+        if end_sens:
+            try:
+                kwargs["end_of_speech_sensitivity"] = getattr(
+                    types.EndSensitivity,
+                    f"END_SENSITIVITY_{end_sens.upper()}",
+                )
+            except (AttributeError, TypeError) as e:
+                logger.warning("VAD end sensitivity %r rejected by SDK: %s", end_sens, e)
+
+        if not kwargs:
+            return {}
+
+        try:
+            return {
+                "realtime_input_config": types.RealtimeInputConfig(
+                    automatic_activity_detection=types.AutomaticActivityDetection(**kwargs),
+                ),
+            }
+        except (AttributeError, TypeError) as e:
+            logger.warning(
+                "automatic_activity_detection unsupported by this SDK (%s) — "
+                "falling back to server defaults", e,
+            )
+            return {}
 
     def _build_resumption_kwargs(self) -> dict:
         """Enable session resumption. Passing handle=None opts the
@@ -712,13 +859,16 @@ class GeminiLiveSession(BrainSession):
             # turn_complete fires once Gemini finished its reply — at
             # that point both transcripts (user input and brain reply)
             # are settled, so we surface a "final" event on each.
-            if self._on_text is not None:
-                try:
-                    self._on_text("", True)
-                except Exception:
-                    pass
+            # Fire the user-input final FIRST so callers log
+            # ``brain.input`` before ``brain.chitchat`` (user spoke,
+            # then brain replied — easier to read the journal that way).
             if self._on_user_input is not None:
                 try:
                     self._on_user_input("", True)
+                except Exception:
+                    pass
+            if self._on_text is not None:
+                try:
+                    self._on_text("", True)
                 except Exception:
                     pass
