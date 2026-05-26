@@ -64,11 +64,17 @@ def _load_image_b64(name: str = "person_drinking.jpg") -> str:
     return base64.b64encode(buf.tobytes()).decode()
 
 
+ERROR_TIMEOUT = "timeout"
+ERROR_CONNECTION = "connection"
+ERROR_SERVER = "server"
+
+
 @dataclass
 class WSResult:
     endpoint: str
     latency_ms: float
     error: str | None = None
+    error_type: str | None = None  # timeout | connection | server
 
 
 @dataclass
@@ -159,16 +165,32 @@ async def _ws_send_n_frames(
                 msg = ep.frame_msg_fn()
                 t0 = time.perf_counter()
                 await ws.send(json.dumps(msg))
-                raw = await asyncio.wait_for(ws.recv(), timeout=60)
+                raw = await asyncio.wait_for(ws.recv(), timeout=240)
                 latency = (time.perf_counter() - t0) * 1000
                 resp = json.loads(raw)
-                error = "error" if "error" in resp else None
-                results.append(WSResult(
-                    endpoint=ep.name, latency_ms=latency, error=error,
-                ))
+                if "error" in resp:
+                    results.append(WSResult(
+                        endpoint=ep.name, latency_ms=latency,
+                        error=resp.get("error", "unknown"), error_type=ERROR_SERVER,
+                    ))
+                else:
+                    results.append(WSResult(
+                        endpoint=ep.name, latency_ms=latency,
+                    ))
+    except asyncio.TimeoutError:
+        results.append(WSResult(
+            endpoint=ep.name, latency_ms=0,
+            error="TimeoutError", error_type=ERROR_TIMEOUT,
+        ))
+    except (ConnectionError, OSError) as exc:
+        results.append(WSResult(
+            endpoint=ep.name, latency_ms=0,
+            error=str(exc) or type(exc).__name__, error_type=ERROR_CONNECTION,
+        ))
     except Exception as exc:
         results.append(WSResult(
-            endpoint=ep.name, latency_ms=0, error=str(exc) or type(exc).__name__,
+            endpoint=ep.name, latency_ms=0,
+            error=str(exc) or type(exc).__name__, error_type=ERROR_SERVER,
         ))
     return results
 
