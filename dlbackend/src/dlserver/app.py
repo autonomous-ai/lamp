@@ -84,7 +84,7 @@ async def lifespan(app: FastAPI):
             set_action_model(action_model)
             logger.info("Action model ready")
         except Exception as e:
-            logger.warning("Failed to load action model: %s", e)
+            logger.error("Failed to load action model: %s", e)
 
     # -- Emotion model --
     if settings.fer.enabled:
@@ -95,7 +95,7 @@ async def lifespan(app: FastAPI):
             set_emotion_model(emotion_model)
             logger.info("Emotion model ready")
         except Exception as e:
-            logger.warning("Failed to load emotion model: %s", e)
+            logger.error("Failed to load emotion model: %s", e)
 
     # -- Audio embedder --
     if settings.audio_embedder.enabled:
@@ -106,7 +106,7 @@ async def lifespan(app: FastAPI):
             set_audio_embedder(audio_embedder)
             logger.info("Audio embedder ready")
         except Exception as e:
-            logger.warning("Failed to load audio embedder: %s", e)
+            logger.error("Failed to load audio embedder: %s", e)
 
     # -- Audio emotion model --
     if settings.ser.enabled:
@@ -117,7 +117,7 @@ async def lifespan(app: FastAPI):
             set_audio_emotion_model(audio_emotion_model)
             logger.info("Audio emotion model ready")
         except Exception as e:
-            logger.warning("Failed to load audio emotion model: %s", e)
+            logger.error("Failed to load audio emotion model: %s", e)
 
     # -- Pose estimator --
     if settings.pose.enabled:
@@ -128,7 +128,7 @@ async def lifespan(app: FastAPI):
             set_pose_model(pose_model)
             logger.info("Pose estimator ready")
         except Exception as e:
-            logger.warning("Failed to load pose estimator: %s", e)
+            logger.error("Failed to load pose estimator: %s", e)
 
     # -- Object detectors --
     logger.info("Loading object detectors...")
@@ -139,7 +139,7 @@ async def lifespan(app: FastAPI):
             logger.info("Object detector '%s' ready", name)
         set_object_models(object_models)
     except Exception as e:
-        logger.warning("Failed to load object detectors: %s", e)
+        logger.error("Failed to load object detectors: %s", e)
 
     yield
 
