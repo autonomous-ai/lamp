@@ -381,7 +381,23 @@ func (h *SensingHandler) PostEvent(c *gin.Context) {
 	// swallowed by bound-channel routing and the SSE stream times out.
 	isSlashCommand := isWebChat && strings.HasPrefix(msg, "/")
 	// motion.activity: snapshot saved for UI but NOT sent to agent (save tokens — action name is enough)
-	if req.Image != "" && req.Type != "motion.activity" {
+	hasImage := req.Image != "" && req.Type != "motion.activity"
+
+	slog.Info("Lumi → agent FORWARD",
+		"component", "sensing",
+		"backend", h.agentGateway.Name(),
+		"type", req.Type,
+		"runId", runID,
+		"reqId", reqID,
+		"hasImage", hasImage,
+		"imageBytes", len(req.Image),
+		"isSlash", isSlashCommand,
+		"isWebChat", isWebChat,
+		"isVoice", isVoice,
+		"msgLen", len(msg),
+		"message", msg)
+
+	if hasImage {
 		if isSlashCommand {
 			_, err = h.agentGateway.SendSlashCommandWithImageAndRun(msg, req.Image, reqID, runID)
 		} else {
