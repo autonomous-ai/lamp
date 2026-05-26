@@ -210,7 +210,87 @@ gpt-4.1* không hỗ trợ field này).
 - TTFA 2.5s vẫn cảm giác phản hồi tốt cho voice
 - Cost $0.25/1M ≈ giữa mini ($0.15) và 5.5 ($1.25)
 
-### 6.10 Known issues sau deploy
+### 6.10 Live mode (Gemini Live, gemini-3.1-flash-live-preview) — TTFA win
+
+Sau khi tách thành `brain/call/` + `brain/live/` + restore code Gemini
+Live + LiveBrainRunner + ElevenLabs route, đo trên Pi 172.168.20.106:
+
+**TTFA (Time-To-First-Audio) cho chit-chat:**
+
+| Turn | brain.input → brain.tts.start | brain.input → brain.chitchat |
+|---|---|---|
+| "Mình hỏi bạn dậy chưa?" | **1.0s** ⭐ | 7.0s (full reply) |
+| "Em biết làm thơ gì?" | ~1.5-2s | 11s |
+| "Làm một bài thơ có hai câu" | 0.6s | 8s |
+
+→ TTFA ~1-2s — **nhanh nhất trong các phương án đã test**:
+
+| Mode | Model | TTFA | Note |
+|---|---|---|---|
+| Call mode | gpt-5.5 | 3-4s | TTFB cao |
+| Call mode | gpt-4o-mini | 1.5-2s | Smart đủ |
+| Call mode | gpt-5-mini + reasoning=minimal | 2-3s | Sweet spot quality |
+| **Live mode** | **gemini-3.1-flash-live-preview** | **1-2s** ⭐ | Best TTFA |
+
+**Lý do TTFA live thấp:**
+- Server-side VAD của Gemini detect end-of-turn ~100-500ms (vs call mode `SILENCE_TIMEOUT=2.5s` local)
+- Audio → text → reply trong cùng 1 session, không pass STT round trip riêng
+- Streaming sentence vào ElevenLabs ngay khi câu đầu xong (same speak_queue pattern call mode)
+
+**Session lifecycle:**
+- Connect overhead: 0.7-1.0s (đôi khi 3s với mạng chậm)
+- Session lifetime: 1-5 phút, sau đó GoAway → reconnect
+- Auto-restart cũng xảy ra khi `[DELEGATE]` text marker detected (Gemini occasionally emits text instead of calling tool — sau khi đổi prompt sang `DECISION_RULES_LIVE` thì hiếm hơn)
+
+### 6.11 Live mode — known regressions vs call
+
+Quality KHÔNG bằng call mode dù TTFA nhanh hơn. Trade-offs:
+
+1. **Over-delegate** — Gemini đôi khi gọi `delegate_to_lumi` cho cả
+   greetings ("Hello", "Alo", "sách sách"). Mitigated bằng cách tighten
+   `DELEGATE_TOOL_DESCRIPTION`: thêm explicit "DO NOT call this for
+   greetings, smalltalk, mumbled input; when in doubt prefer chit-chat".
+2. **Mis-hear Vietnamese** — Gemini Live's input transcription đôi khi
+   sai từ đồng âm tiếng Việt rõ rệt hơn Deepgram nova-3. Mitigated một
+   phần bằng `speech_config.language_code=vi-VN`, nhưng Developer API
+   không support `language_codes` (input lock) → vẫn auto-detect.
+3. **Loss of in-session memory** giữa các turn — nếu force-close session
+   sau `[DELEGATE]` text marker, turn tiếp theo bắt đầu từ cold context;
+   replies hơi generic/feature-list.
+4. **No mid-session history sync** — `send_client_content` với
+   `turn_complete=False` không support trên 3.x Live tier (chỉ 2.5
+   native-audio support, mà model đó silent quá). OpenClaw turns
+   (Telegram, web chat) landed mid-session sẽ invisible cho đến
+   GoAway (~10-15 phút). Accept gap.
+5. **Speaker recog cần audio buffer** — runner giờ accumulate rolling
+   30s deque trên local mic (call mode style), pass vào
+   `_identify_and_decorate` khi delegate fires. Default fallback
+   `"Unknown Speaker: <transcript>"` đảm bảo OpenClaw nhận format
+   đúng dù speaker server fail.
+
+### 6.12 Live mode — knobs tunable
+
+```bash
+# Provider switch
+LELAMP_BRAIN_MODE=live                                    # call | live
+LELAMP_BRAIN_PROVIDER=gemini                              # gemini | openai
+
+# Model
+LELAMP_GEMINI_LIVE_MODEL=gemini-3.1-flash-live-preview    # default
+LELAMP_GEMINI_LIVE_VOICE=Aoede                            # used for in-session memory only
+LELAMP_GEMINI_LIVE_LANGUAGE=vi                            # → vi-VN
+
+# VAD (Gemini native — KHÔNG có RMS threshold)
+LELAMP_LIVE_VAD_SILENCE_MS=500                            # default 100, docs recommend 500-800
+LELAMP_LIVE_VAD_START_SENSITIVITY=low                     # low | high
+LELAMP_LIVE_VAD_END_SENSITIVITY=                          # low | high (unset = SDK default)
+LELAMP_LIVE_VAD_PREFIX_PADDING_MS=                        # int ms (default 20)
+
+# Echo gate
+LELAMP_LIVE_POST_TTS_HOLDOFF_S=0.6                        # drop mic frames N s sau TTS
+```
+
+### 6.13 Known issues sau deploy
 
 - **TTS proxy 400 cho voice `Huyen`** (id `foH7s9fX31wFFH2yqrFa`): nhiều câu reply không phát được audio do `campaign-api.autonomous.ai/.../elevenlabs/...` trả `400 Bad Request`. Streaming code không lỗi, lỗi ở proxy/voice config. Cần check voice ID hoặc switch về `Linh`.
 - **"Một bài đi" bị nhầm thành chitchat** (gpt-5.5 viết thơ thay vì delegate music) — routing miss của DECISION_RULES. Cần thêm ví dụ "một bài" / "bài hát" / "mở nhạc" vào rule A, hoặc kỳ vọng catalog SKILL.md mô tả rõ hơn về music skill.
