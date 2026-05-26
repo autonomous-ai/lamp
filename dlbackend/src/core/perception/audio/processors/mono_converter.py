@@ -13,7 +13,7 @@ class MonoConverter(AudioProcessorBase):
     def __init__(self) -> None:
         super().__init__()
 
-    def process(self, input: Audio) -> Audio:
+    def _process_impl(self, input: Audio) -> Audio:
         if input.waveform.ndim == 1:
             return input
         if input.waveform.ndim == 2:

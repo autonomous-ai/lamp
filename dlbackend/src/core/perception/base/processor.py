@@ -32,8 +32,13 @@ class InputProcessorBase(Generic[INPUT_T, OUTPUT_T], ABC):
         pass
 
     @abstractmethod
+    def _process_impl(self, input: INPUT_T) -> OUTPUT_T:
+        """Process a single input. Subclasses implement this."""
+
     def process(self, input: INPUT_T) -> OUTPUT_T:
-        """Process a single input and return the result."""
+        """Process a single input. Thread-safe via lock."""
+        with self._lock:
+            return self._process_impl(input)
 
     def start(self) -> None:
         with self._lock:

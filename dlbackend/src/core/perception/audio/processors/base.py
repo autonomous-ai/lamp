@@ -29,5 +29,5 @@ class AudioProcessorBase(InputProcessorBase[Audio, Audio]):
         return self._running
 
     @abstractmethod
-    def process(self, input: Audio) -> Audio:
+    def _process_impl(self, input: Audio) -> Audio:
         """Process audio, return processed audio."""

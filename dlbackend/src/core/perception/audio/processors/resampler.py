@@ -17,7 +17,7 @@ class Resampler(AudioProcessorBase):
         super().__init__()
         self._target_sample_rate: int = target_sample_rate
 
-    def process(self, input: Audio) -> Audio:
+    def _process_impl(self, input: Audio) -> Audio:
         if input.sample_rate == self._target_sample_rate:
             return input
 
