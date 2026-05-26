@@ -21,9 +21,41 @@ import (
 func ProvideGateway(cfg *config.Config, bus *monitor.Bus, sled *statusled.Service) domain.AgentGateway {
 	switch cfg.AgentRuntime {
 	case "hermes":
-		slog.Info("agent runtime: Hermes", "component", "agent", "base_url", cfg.GetHermesBaseURL())
+		logBackendBanner("HERMES", map[string]string{
+			"base_url":     cfg.GetHermesBaseURL(),
+			"conversation": cfg.GetHermesConversation(),
+			"model":        cfg.GetHermesModel(),
+			"api_key_set":  boolStr(cfg.HermesAPIKey != ""),
+		})
 		return hermes.ProvideService(cfg, bus, sled)
 	default:
+		effective := cfg.AgentRuntime
+		if effective == "" {
+			effective = "openclaw (default — agent_runtime unset)"
+		} else if effective != "openclaw" {
+			effective = "openclaw (FALLBACK — unknown agent_runtime=" + cfg.AgentRuntime + ")"
+		}
+		logBackendBanner("OPENCLAW", map[string]string{
+			"config_dir":      cfg.OpenclawConfigDir,
+			"effective_value": effective,
+		})
 		return openclaw.ProvideService(cfg, bus, sled)
 	}
+}
+
+func logBackendBanner(name string, fields map[string]string) {
+	args := []any{"component", "agent", "backend", name}
+	for k, v := range fields {
+		args = append(args, k, v)
+	}
+	slog.Info("══════════════════════════════════════════════════════", "component", "agent")
+	slog.Info("  AGENT BACKEND ACTIVE → "+name, args...)
+	slog.Info("══════════════════════════════════════════════════════", "component", "agent")
+}
+
+func boolStr(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
 }
