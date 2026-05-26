@@ -137,7 +137,20 @@ etc.). YOU are only the voice front-door, so:
 # Literal token the model must emit (and nothing else) to hand the turn
 # off to OpenClaw. Kept short so streaming clients can identify it
 # within the first SSE delta — usually 1-2 tokens with modern BPE.
+# Used by the chat-completion ("call" mode) brain in brain/call/.
 DELEGATE_PREFIX = "[DELEGATE]"
+
+# Realtime providers ("live" mode in brain/live/) cannot emit a text
+# marker — they stream audio + a separate tool_call channel — so they
+# fall back to the classic OpenAI function-calling protocol. Kept here
+# (not duplicated per-provider) so a model swap or a name tweak stays
+# in one place.
+DELEGATE_TOOL_NAME = "delegate_to_lumi"
+DELEGATE_TOOL_DESCRIPTION = (
+    "Delegate the user's request to the Lumi backend (OpenClaw). "
+    "Call this for any request that needs an action, tool, lookup, "
+    "schedule, or long-form answer. Do not speak when calling this."
+)
 
 
 # ---------------------------------------------------------------------------
