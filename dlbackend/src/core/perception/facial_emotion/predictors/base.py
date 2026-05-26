@@ -26,6 +26,7 @@ from core.perception.base import PredictorBase
 from core.perception.facial_emotion.constants import RESOURCES_DIR
 from core.utils.common import get_or_default
 from core.utils.compute import softmax
+from core.utils.files import ensure_downloaded
 from core.utils.runtime import prepare_ort_session
 
 
@@ -38,6 +39,7 @@ class EmotionRecognizer(PredictorBase[cv2t.MatLike, RawEmotionDetection]):
     """
 
     DEFAULT_MODEL_PATH: Path | None = None
+    DEFAULT_REMOTE_URL: str | None = None
     DEFAULT_CLASSES_PATH: Path = RESOURCES_DIR / "posterv2_classes.txt"
     DEFAULT_INPUT_SIZE: tuple[int, int] = (224, 224)
 
@@ -47,6 +49,7 @@ class EmotionRecognizer(PredictorBase[cv2t.MatLike, RawEmotionDetection]):
     def __init__(
         self,
         model_path: Path | None = None,
+        remote_url: str | None = None,
         classes_path: Path | None = None,
         input_size: tuple[int, int] | None = None,
     ) -> None:
@@ -57,6 +60,7 @@ class EmotionRecognizer(PredictorBase[cv2t.MatLike, RawEmotionDetection]):
             raise RuntimeError("model_path must not be None")
 
         self._model_path: Path = model_path
+        self._remote_url: str | None = get_or_default(remote_url, self.DEFAULT_REMOTE_URL)
         self._classes_path: Path = get_or_default(classes_path, self.DEFAULT_CLASSES_PATH)
         self._input_size: tuple[int, int] = get_or_default(input_size, self.DEFAULT_INPUT_SIZE)
 
@@ -78,6 +82,7 @@ class EmotionRecognizer(PredictorBase[cv2t.MatLike, RawEmotionDetection]):
             self._logger.info("Already running")
             return
 
+        self._model_path = ensure_downloaded(self._model_path, remote=self._remote_url)
         self._logger.info("Loading model from %s", self._model_path)
         self._session = prepare_ort_session(self._model_path)
         self._class_names = self._load_classes(self._classes_path)

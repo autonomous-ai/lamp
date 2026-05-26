@@ -14,17 +14,20 @@ class ActionRecognizerFactory(PredictorFactory[HumanActionRecognizer]):
         self,
         model_name: HumanActionRecognizerEnum,
         model_path: Path | None = None,
+        remote_url: str | None = None,
         max_frames: int | None = None,
         frame_size: tuple[int, int] | None = None,
     ) -> None:
-        self._model_name = model_name
-        self._model_path = model_path
-        self._max_frames = max_frames
-        self._frame_size = frame_size
+        self._model_name: HumanActionRecognizerEnum = model_name
+        self._model_path: Path | None = model_path
+        self._remote_url: str | None = remote_url
+        self._max_frames: int | None = max_frames
+        self._frame_size: tuple[int, int] | None = frame_size
 
     def create(self) -> HumanActionRecognizer:
         return create_recognizer(
             self._model_name, self._model_path,
+            remote_url=self._remote_url,
             max_frames=self._max_frames, frame_size=self._frame_size,
         )
 
@@ -32,6 +35,7 @@ class ActionRecognizerFactory(PredictorFactory[HumanActionRecognizer]):
 def create_recognizer(
     model_name: HumanActionRecognizerEnum,
     model_path: Path | None,
+    remote_url: str | None = None,
     max_frames: int | None = None,
     frame_size: tuple[int, int] | None = None,
 ) -> HumanActionRecognizer:
@@ -43,7 +47,6 @@ def create_recognizer(
     elif model_name == HumanActionRecognizerEnum.X3D:
         from core.perception.action.predictors.x3d import X3DModel as recognizer_cls
     else:
-        msg = f"Unknown action recognition model: {model_name}"
-        raise ValueError(msg)
+        raise ValueError(f"Unknown action recognition model: {model_name}")
 
-    return recognizer_cls(model_path, max_frames=max_frames, frame_size=frame_size)
+    return recognizer_cls(model_path, remote_url=remote_url, max_frames=max_frames, frame_size=frame_size)

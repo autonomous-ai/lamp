@@ -3,7 +3,6 @@
 from abc import ABC
 
 import cv2.typing as cv2t
-import numpy as np
 
 from core.models.face import FaceCrop, RawFaceDetection
 from core.perception.base import PredictorBase

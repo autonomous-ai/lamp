@@ -5,14 +5,17 @@ from pathlib import Path
 import numpy as np
 import numpy.typing as npt
 
+from core.enums.files import ModelEnum
 from core.perception.action.constants import RESOURCES_DIR
 from core.perception.action.predictors.base import HumanActionRecognizer
+from core.utils.files import get_default_cdn_url, get_default_model_path
 
 
 class VideoMAEModel(HumanActionRecognizer):
     """VideoMAE ONNX model for action recognition."""
 
-    DEFAULT_MODEL_PATH: Path | None = RESOURCES_DIR / "videomae_int8.onnx"
+    DEFAULT_MODEL_PATH: Path | None = get_default_model_path(ModelEnum.VIDEOMAE)
+    DEFAULT_REMOTE_URL: str | None = get_default_cdn_url(ModelEnum.VIDEOMAE)
     DEFAULT_CLASSES_PATH: Path = RESOURCES_DIR / "kinect_classes.txt"
     DEFAULT_WHITELIST_PATH: Path | None = RESOURCES_DIR / "white_list.txt"
 

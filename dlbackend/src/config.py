@@ -30,6 +30,7 @@ class ActionSetting(BaseModel):
     enabled: bool = True
     model: HumanActionRecognizerEnum = HumanActionRecognizerEnum.X3D
     ckpt_path: str | None = None
+    remote_url: str | None = None
     confidence_threshold: float | None = None
     max_frames: int | None = None
     frame_interval: float | None = None
@@ -41,6 +42,7 @@ class FERSetting(BaseModel):
     enabled: bool = True
     model: EmotionRecognizerEnum = EmotionRecognizerEnum.POSTERV2
     ckpt_path: str | None = None
+    remote_url: str | None = None
     confidence_threshold: float | None = None
     frame_interval: float | None = None
 
@@ -49,10 +51,12 @@ class PoseSetting(BaseModel):
     enabled: bool = True
     model: PoseEstimator2DEnum = PoseEstimator2DEnum.RTMPOSE
     ckpt_path: str | None = None
+    remote_url: str | None = None
     confidence_threshold_2d: float | None = None
     min_valid_keypoints: int | None = None
     lifter_3d: PoseLifter3DEnum | None = PoseLifter3DEnum.TCPFORMER
     lifter_3d_ckpt_path: str | None = None
+    lifter_3d_remote_url: str | None = None
     lifter_3d_frame_w: int | None = None
     lifter_3d_frame_h: int | None = None
     ergo_assessor: ErgoAssessorEnum | None = None
@@ -63,6 +67,7 @@ class SERSetting(BaseModel):
     enabled: bool = True
     model: SpeechEmotionRecognizerEnum = SpeechEmotionRecognizerEnum.EMOTION2VEC
     ckpt_path: str | None = None
+    remote_url: str | None = None
     labels_path: str | None = None
 
 
@@ -84,6 +89,7 @@ class AudioEmbedderSetting(BaseModel):
     enabled: bool = False
     model: AudioEmbedderEnum = AudioEmbedderEnum.RESNET34
     model_path: str | None = None
+    remote_url: str | None = None
     processor: AudioProcessorSetting = AudioProcessorSetting()
 
 
@@ -129,7 +135,9 @@ class Settings(BaseSettings):
             raise ValueError("DL_API_KEY must be set — server refuses to start without auth")
         return v
 
-    cache_dir: Path = Path.home() / ".dlbackend"
+    cache_dir: Path = Path.home() / ".cache" / "dlbackend"
+    model_cache_dir: Path = Path.home() / ".cache" / "dlbackend" / "models"  # default: cache_dir / "models"
+    cdn_base: str = "https://storage.googleapis.com/autonomous-models"
 
     action: ActionSetting = ActionSetting()
     fer: FERSetting = FERSetting()

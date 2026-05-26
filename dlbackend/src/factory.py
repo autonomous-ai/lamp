@@ -55,6 +55,7 @@ def build_action_perception() -> ActionPerception:
     action_factory = ActionRecognizerFactory(
         model_name=settings.action.model,
         model_path=action_ckpt,
+        remote_url=settings.action.remote_url,
         max_frames=settings.action.max_frames,
         frame_size=action_frame_size,
     )
@@ -90,6 +91,7 @@ def build_emotion_perception() -> EmotionPerception:
     emotion_factory = EmotionRecognizerFactory(
         model_name=settings.fer.model,
         model_path=emotion_ckpt,
+        remote_url=settings.fer.remote_url,
     )
 
     face_factory = FaceDetectorFactory(model_name=FaceDetectorEnum.YUNET)
@@ -118,6 +120,7 @@ def build_pose_perception() -> PosePerception:
     estimator_2d_factory = PoseEstimator2DFactory(
         model_name=settings.pose.model,
         model_path=pose_ckpt,
+        remote_url=settings.pose.remote_url,
     )
 
     lifter_3d_factory: PoseLifter3DFactory | None = None
@@ -137,6 +140,7 @@ def build_pose_perception() -> PosePerception:
         lifter_3d_factory = PoseLifter3DFactory(
             model_name=settings.pose.lifter_3d,
             model_path=lifter_3d_ckpt,
+            remote_url=settings.pose.lifter_3d_remote_url,
             input_size=lifter_3d_input_size,
         )
 
@@ -223,6 +227,7 @@ def build_audio_embedder() -> AudioEmbedder:
     return create_embedder(
         model_name=settings.audio_embedder.model,
         model_path=model_path,
+        remote_url=settings.audio_embedder.remote_url,
         processor_factory=processor_factory,
     )
 
@@ -236,6 +241,7 @@ def build_audio_emotion_perception() -> AudioEmotionPerception:
     factory = AudioEmotionRecognizerFactory(
         model_name=settings.ser.model,
         model_path=ckpt_path,
+        remote_url=settings.ser.remote_url,
     )
 
     return AudioEmotionPerception(

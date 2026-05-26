@@ -4,6 +4,7 @@ Extends PredictorBase. Input is MatLike (BGR image), output is RawObjectDetectio
 Classes to detect are passed via the `classes` kwarg on predict().
 """
 
+from abc import ABC
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,7 @@ from core.perception.object.constants import RESOURCES_DIR
 from core.utils.common import get_or_default
 
 
-class ObjectDetector(PredictorBase[cv2t.MatLike, RawObjectDetection]):
+class ObjectDetector(PredictorBase[cv2t.MatLike, RawObjectDetection], ABC):
     """Base interface for zero-shot object detectors.
 
     Subclasses implement _predict_impl with classes passed via kwargs.

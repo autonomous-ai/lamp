@@ -21,7 +21,7 @@ class YOLOEDetector(ObjectDetector):
     Classes are set per-request via model.set_classes().
     """
 
-    DEFAULT_MODEL_PATH: Path = Path("yoloe-26x-seg.pt")
+    DEFAULT_MODEL_PATH: Path | None = Path("yoloe-26x-seg.pt")
 
     def __init__(
         self,

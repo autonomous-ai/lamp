@@ -14,32 +14,34 @@ class EmotionRecognizerFactory(PredictorFactory[EmotionRecognizer]):
         self,
         model_name: EmotionRecognizerEnum,
         model_path: Path | None = None,
+        remote_url: str | None = None,
     ) -> None:
         self._model_name: EmotionRecognizerEnum = model_name
         self._model_path: Path | None = model_path
+        self._remote_url: str | None = remote_url
 
     @override
     def create(self) -> EmotionRecognizer:
-        return create_emotion_recognizer(self._model_name, self._model_path)
+        return create_emotion_recognizer(self._model_name, self._model_path, remote_url=self._remote_url)
 
 
 def create_emotion_recognizer(
     model_name: EmotionRecognizerEnum,
     model_path: Path | None = None,
+    remote_url: str | None = None,
 ) -> EmotionRecognizer:
     """Create the emotion recognizer for the given model type."""
     if model_name == EmotionRecognizerEnum.POSTERV2:
         from core.perception.facial_emotion.predictors.posterv2 import PosterV2Recognizer
 
-        return PosterV2Recognizer(model_path=model_path)
+        return PosterV2Recognizer(model_path=model_path, remote_url=remote_url)
     elif model_name == EmotionRecognizerEnum.EMONET_8:
         from core.perception.facial_emotion.predictors.emonet import EmoNetRecognizer
 
-        return EmoNetRecognizer(n_expression=8, model_path=model_path)
+        return EmoNetRecognizer(n_expression=8, model_path=model_path, remote_url=remote_url)
     elif model_name == EmotionRecognizerEnum.EMONET_5:
         from core.perception.facial_emotion.predictors.emonet import EmoNetRecognizer
 
-        return EmoNetRecognizer(n_expression=5, model_path=model_path)
+        return EmoNetRecognizer(n_expression=5, model_path=model_path, remote_url=remote_url)
     else:
-        msg = f"Unknown emotion recognition model: {model_name}"
-        raise ValueError(msg)
+        raise ValueError(f"Unknown emotion recognition model: {model_name}")

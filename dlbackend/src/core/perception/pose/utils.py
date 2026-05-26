@@ -16,12 +16,14 @@ class PoseEstimator2DFactory(PredictorFactory[PoseEstimator2D]):
         self,
         model_name: PoseEstimator2DEnum,
         model_path: Path | None = None,
+        remote_url: str | None = None,
     ) -> None:
-        self._model_name = model_name
-        self._model_path = model_path
+        self._model_name: PoseEstimator2DEnum = model_name
+        self._model_path: Path | None = model_path
+        self._remote_url: str | None = remote_url
 
     def create(self) -> PoseEstimator2D:
-        return create_estimator_2d(self._model_name, self._model_path)
+        return create_estimator_2d(self._model_name, self._model_path, remote_url=self._remote_url)
 
 
 class PoseLifter3DFactory(PredictorFactory[PoseEstimator3DLifting]):
@@ -31,17 +33,20 @@ class PoseLifter3DFactory(PredictorFactory[PoseEstimator3DLifting]):
         self,
         model_name: PoseLifter3DEnum,
         model_path: Path | None = None,
+        remote_url: str | None = None,
         input_size: tuple[int, int] | None = None,
         n_frames: int | None = None,
     ) -> None:
-        self._model_name = model_name
-        self._model_path = model_path
-        self._input_size = input_size
-        self._n_frames = n_frames
+        self._model_name: PoseLifter3DEnum = model_name
+        self._model_path: Path | None = model_path
+        self._remote_url: str | None = remote_url
+        self._input_size: tuple[int, int] | None = input_size
+        self._n_frames: int | None = n_frames
 
     def create(self) -> PoseEstimator3DLifting:
         return create_lifter_3d(
             self._model_name, self._model_path,
+            remote_url=self._remote_url,
             input_size=self._input_size, n_frames=self._n_frames,
         )
 
@@ -56,10 +61,10 @@ class ErgoAssessorFactory(PredictorFactory[ErgoAssessor]):
         muscle_use_score: int | None = None,
         force_load_score: int | None = None,
     ) -> None:
-        self._model_name = model_name
-        self._confidence_threshold = confidence_threshold
-        self._muscle_use_score = muscle_use_score
-        self._force_load_score = force_load_score
+        self._model_name: ErgoAssessorEnum = model_name
+        self._confidence_threshold: float | None = confidence_threshold
+        self._muscle_use_score: int | None = muscle_use_score
+        self._force_load_score: int | None = force_load_score
 
     def create(self) -> ErgoAssessor:
         return create_ergo_assessor(
@@ -73,6 +78,7 @@ class ErgoAssessorFactory(PredictorFactory[ErgoAssessor]):
 def create_estimator_2d(
     model_name: PoseEstimator2DEnum,
     model_path: Path | None = None,
+    remote_url: str | None = None,
 ) -> PoseEstimator2D:
     """Instantiate the correct 2D pose estimator."""
     if model_name == PoseEstimator2DEnum.RTMPOSE:
@@ -80,12 +86,13 @@ def create_estimator_2d(
     else:
         raise ValueError(f"Unknown 2D pose estimator: {model_name}")
 
-    return estimator_cls(model_path=model_path)
+    return estimator_cls(model_path=model_path, remote_url=remote_url)
 
 
 def create_lifter_3d(
     model_name: PoseLifter3DEnum,
     model_path: Path | None = None,
+    remote_url: str | None = None,
     input_size: tuple[int, int] | None = None,
     n_frames: int | None = None,
 ) -> PoseEstimator3DLifting:
@@ -95,7 +102,7 @@ def create_lifter_3d(
     else:
         raise ValueError(f"Unknown 3D pose lifter: {model_name}")
 
-    return lifter_cls(model_path=model_path, input_size=input_size, n_frames=n_frames)
+    return lifter_cls(model_path=model_path, remote_url=remote_url, input_size=input_size, n_frames=n_frames)
 
 
 def create_ergo_assessor(
