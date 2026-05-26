@@ -96,6 +96,11 @@ func (s *Service) transitionReady(now bool) {
 	if now {
 		s.connectedAt.Store(time.Now().Unix())
 		flow.Log("ws_ready", map[string]any{"backend": "hermes"})
+		slog.Info("Hermes ready",
+			"component", "hermes",
+			"base_url", s.config.GetHermesBaseURL(),
+			"conversation", s.config.GetHermesConversation(),
+			"model", s.config.GetHermesModel())
 		if s.statusLED != nil && s.config.SetUpCompleted {
 			s.statusLED.Clear(statusled.StateAgentDown)
 		}
@@ -113,6 +118,7 @@ func (s *Service) transitionReady(now bool) {
 	} else {
 		s.connectedAt.Store(0)
 		flow.Log("ws_down", map[string]any{"backend": "hermes"})
+		slog.Warn("Hermes unreachable", "component", "hermes", "base_url", s.config.GetHermesBaseURL())
 		if s.statusLED != nil && s.config.SetUpCompleted {
 			s.statusLED.Set(statusled.StateAgentDown)
 		}

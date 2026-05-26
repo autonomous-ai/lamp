@@ -80,7 +80,7 @@ func extractHWCalls(text string) ([]hwCall, string) {
 		}
 	}
 	if hasBuddy {
-		slog.Info("HW markers extracted", "component", "openclaw", "count", len(calls), "paths", paths)
+		slog.Info("HW markers extracted", "component", "agent-hw", "count", len(calls), "paths", paths)
 	}
 	return calls, strings.TrimSpace(hwMarkerRe.ReplaceAllString(text, ""))
 }
@@ -92,6 +92,7 @@ func (h *AgentHandler) fireHWCalls(calls []hwCall, flowRunID string) {
 	if len(calls) == 0 {
 		return
 	}
+	backend := h.agentGateway.Name()
 	go func() {
 		for _, c := range calls {
 			// /broadcast, /speak, /dm are internal control markers — not LeLamp endpoints.
@@ -116,18 +117,18 @@ func (h *AgentHandler) fireHWCalls(calls []hwCall, flowRunID string) {
 			}
 			isBuddy := strings.HasPrefix(c.path, "/buddy/")
 			if isBuddy {
-				slog.Info("HW marker → buddy POST", "component", "openclaw", "url", postURL, "body", c.body)
+				slog.Info("HW marker → buddy POST", "component", "agent-hw", "backend", backend, "url", postURL, "body", c.body)
 			}
 			resp, err := http.Post(postURL, "application/json", strings.NewReader(c.body))
 			if err != nil {
-				slog.Warn("HW marker call failed", "component", "openclaw", "path", c.path, "error", err)
+				slog.Warn("HW marker call failed", "component", "agent-hw", "backend", backend, "path", c.path, "error", err)
 				continue
 			}
 			hwOK := resp.StatusCode < 400
 			if !hwOK {
 				errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 				resp.Body.Close()
-				slog.Warn("HW marker error response", "component", "openclaw", "path", c.path, "status", resp.StatusCode, "body", string(errBody))
+				slog.Warn("HW marker error response", "component", "agent-hw", "backend", backend, "path", c.path, "status", resp.StatusCode, "body", string(errBody))
 
 				// /servo/track start has ~800ms latency (freeze + YOLO). By
 				// the time this goroutine sees the 400, the LLM's optimistic
@@ -138,17 +139,17 @@ func (h *AgentHandler) fireHWCalls(calls []hwCall, flowRunID string) {
 				if c.path == "/servo/track" {
 					target := parseTrackTarget(c.body)
 					if err := lelamp.Speak(trackFailMessage(target)); err != nil {
-						slog.Warn("track fallback TTS failed", "component", "openclaw", "error", err)
+						slog.Warn("track fallback TTS failed", "component", "agent-hw", "backend", backend, "error", err)
 					}
 				}
 			} else {
 				if isBuddy {
 					okBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 					resp.Body.Close()
-					slog.Info("HW marker → buddy OK", "component", "openclaw", "path", c.path, "response", string(okBody))
+					slog.Info("HW marker → buddy OK", "component", "agent-hw", "backend", backend, "path", c.path, "response", string(okBody))
 				} else {
 					resp.Body.Close()
-					slog.Info("HW marker fired", "component", "openclaw", "path", c.path)
+					slog.Info("HW marker fired", "component", "agent-hw", "backend", backend, "path", c.path)
 				}
 			}
 			switch {
