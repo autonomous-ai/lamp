@@ -405,6 +405,32 @@ class LiveBrainRunner:
             if trigger_frame is None:
                 return  # stop_event fired during idle wait
 
+            # ---- Speaker identification (parallel with session.start) -
+            # Run voiceprint match on the rolling audio buffer in a
+            # background thread so the cost (~50-200ms ONNX on Pi)
+            # overlaps the WS connect (~500-1000ms) — net-zero added
+            # latency. Result is read after session.start returns, so
+            # we never block on speaker ID and a stuck recognizer
+            # never blocks the session open. The recognizer needs at
+            # least SPEAKER_MIN_AUDIO_S (~1.5s) of audio; on a brand-
+            # new boot when the rolling buffer is shorter than that,
+            # it silently returns None and we fall back to no-label.
+            audio_snapshot = list(self._audio_buf)
+            speaker_result: dict = {}
+            speaker_thread: Optional[threading.Thread] = None
+            if self._decorate_callback is not None and audio_snapshot:
+                def _id_thread():
+                    try:
+                        decorated, name = self._decorate_callback("", audio_snapshot)
+                        speaker_result["decorated"] = decorated or ""
+                        speaker_result["name"] = (name or "").strip()
+                    except Exception as e:
+                        logger.debug("speaker ID thread raised: %s", e)
+                speaker_thread = threading.Thread(
+                    target=_id_thread, daemon=True, name="live-speaker-id",
+                )
+                speaker_thread.start()
+
             # ---- Phase 2: active (session open) -----------------------
             session = self._brain.create_session()
             ok = session.start(
@@ -443,6 +469,36 @@ class LiveBrainRunner:
             # sync only pushes truly NEW OpenClaw turns. Pulls the same
             # turns that load_context() just baked into the system prompt.
             self._last_synced_ts = self._latest_openclaw_ts()
+
+            # Collect the speaker-ID result that ran in parallel with
+            # session.start. Bounded join — never block more than 1s
+            # waiting for a stuck recognizer, just open the session
+            # without a speaker label in that worst case.
+            speaker_name = ""
+            if speaker_thread is not None:
+                speaker_thread.join(timeout=1.0)
+                speaker_name = speaker_result.get("name", "") or ""
+            if (
+                speaker_name
+                and speaker_name.lower() != "unknown"
+                and hasattr(session, "send_context_turns")
+            ):
+                # Push a single system-role item so the model knows
+                # who's currently in front of the mic and can address
+                # them by name without delegating just to look it up.
+                # No response.create — context-only, the next user
+                # turn will fire the actual reply.
+                try:
+                    session.send_context_turns([
+                        {"role": "system", "text": f"Current speaker: {speaker_name}"}
+                    ])
+                    logger.info("brain.speaker [live] identified as %r", speaker_name)
+                except Exception as e:
+                    logger.debug("speaker label inject failed: %s", e)
+            elif speaker_thread is not None:
+                logger.info(
+                    "brain.speaker [live] unknown (no enrolled match — enroll flow runs only on delegate path for now)"
+                )
 
             try:
                 # Ship the trigger frame first so the first word of the
@@ -610,18 +666,27 @@ class LiveBrainRunner:
             if text:
                 self._reply_buf += text
                 self._reply_log_buf += text
-                # NOTE: brain.input is now logged from _on_user_input
-                # on its is_final event (input audio buffer committed
-                # by the server). Logging on the first reply token
-                # was racy — for OpenAI Realtime the user-input
-                # deltas arrive in parallel with the response stream,
-                # so the buffered snapshot at "first reply token"
-                # often contained only the FIRST delta of the user's
-                # transcript ("làm" instead of "làm bài thơ"). The
-                # is_final event arrives once the server has the
-                # full transcript ready, well before the reply
-                # streams done — which gives the natural
-                # input → reply ordering we want anyway.
+                # Gemini Live fires _on_user_input("", True) only at
+                # turn_complete, which lands AFTER the model's reply
+                # has finished streaming — making brain.input log
+                # ~10-30s after the user actually finished speaking.
+                # OpenAI Realtime gives a proper transcription.done
+                # event before its response so its brain.input fires
+                # at the right moment.
+                # Bridge for Gemini: when the model starts emitting
+                # reply tokens, that IS the signal "Gemini decided
+                # the user is done". If we have an accumulated user
+                # input buffer that wasn't logged yet, flush it now
+                # so the journal shows input → tts.start in natural
+                # order. Safe for OpenAI too because its is_final
+                # path already sets _user_input_logged=True before
+                # the first reply token arrives.
+                if (
+                    not self._user_input_logged
+                    and self._user_input_buf.strip()
+                ):
+                    user_input_to_log = self._user_input_buf.strip()
+                    self._user_input_logged = True
 
             # Sticky prefix detection. Only check while we haven't
             # already decided this turn is a delegate.
@@ -670,7 +735,12 @@ class LiveBrainRunner:
                     )
 
         if user_input_to_log:
-            logger.info("brain.input  [live] %r", user_input_to_log)
+            # Logged as "transcript" not "input": the model in live
+            # mode listens to audio natively — this string is from
+            # the side-channel ASR (Whisper / Google ASR) and is
+            # debug-only, NOT what the model actually saw. See
+            # README §"Native multimodal vs side-channel ASR".
+            logger.info("brain.transcript [live] %r", user_input_to_log)
 
         if not is_final:
             return
@@ -807,16 +877,16 @@ class LiveBrainRunner:
                 self._user_input_buf = ""
                 if final_text:
                     self._last_user_input = final_text
-                # Always log every transcript final. The old _logged
-                # latch was meant to avoid double-logging back when
-                # _on_text also wrote brain.input on first reply
-                # token — that branch is gone. Worse: for a delegate
-                # turn _on_text never fires text-is_final, so the
-                # latch stuck True across turns and silently swallowed
-                # every subsequent brain.input. We instead log
-                # unconditionally and treat _user_input_logged as a
-                # legacy debug latch only.
-                fallback_log = bool(final_text)
+                # Log brain.input on transcript-final UNLESS the
+                # early-log path in _on_text already flushed it for
+                # this turn. The early-log path fires on the first
+                # reply token (Gemini bridge for natural ordering)
+                # and sets _user_input_logged=True so this is_final
+                # branch skips the duplicate. For OpenAI (no early
+                # log path needed since is_final fires before any
+                # reply), _user_input_logged is False here so the
+                # is_final log fires normally.
+                fallback_log = bool(final_text) and not self._user_input_logged
                 if fallback_log:
                     self._user_input_logged = True
                 # Snapshot speech-present flag and reset for the next
@@ -831,7 +901,9 @@ class LiveBrainRunner:
                 fallback_log = False
                 had_speech = False
         if fallback_log:
-            logger.info("brain.input  [live] %r", final_text)
+            # See note above: "transcript" not "input" — this is the
+            # ASR side-channel, not what the live model saw.
+            logger.info("brain.transcript [live] %r", final_text)
 
         # Gate response.create — only fires when:
         #   1. The session supports explicit response.create
@@ -955,32 +1027,23 @@ class LiveBrainRunner:
         """Brain decided this turn is a task for OpenClaw. Forward
         through VoiceService's send-to-Lumi pipeline so the message
         gets the same speaker prefix + echo filter + retry logic the
-        call-mode path uses. Without this OpenClaw sees a raw
-        transcript with no ``"<Name>: …"`` prefix and routes / logs
-        the turn wrong.
+        call-mode path uses.
 
-        IMPORTANT: we ignore the ``transcript`` arg the model
-        produced and use the last Whisper-transcribed user input
-        instead. The model has a habit of hallucinating the
-        ``transcript`` field from recent context (e.g. a prior
-        ``mấy giờ vậy`` turn in synced history bleeds into a
-        completely unrelated current user input). Whisper's actual
-        transcription of the CURRENT mic audio is the ground truth
-        — only fall back to the model-provided string when
-        ``_last_user_input`` is empty (rare: tool-only response
-        with no preceding transcript)."""
-        model_transcript = (transcript or "").strip()
-        whisper_transcript = (self._last_user_input or "").strip()
-        if whisper_transcript:
-            if model_transcript and model_transcript != whisper_transcript:
-                logger.info(
-                    "brain.delegate.override [live] model=%r → whisper=%r",
-                    model_transcript, whisper_transcript,
-                )
-            transcript = whisper_transcript
-        else:
-            transcript = model_transcript
+        The delegate tool takes no arguments — we pull the user's
+        actual transcript from the ASR side-channel (the same source
+        ``brain.input`` logs from). The ``transcript`` parameter is
+        kept on the signature only for legacy callers and is
+        ignored. Gemini fires the function_call before turn_complete,
+        so ``_last_user_input`` (only set at is_final) may be empty;
+        we fall back to the live delta accumulator in that case.
+        OpenAI's transcription.completed event fires before any tool
+        call, so ``_last_user_input`` is populated by then."""
+        transcript = (self._last_user_input or "").strip()
         if not transcript:
+            with self._reply_lock:
+                transcript = self._user_input_buf.strip()
+        if not transcript:
+            logger.info("delegate fired with no user transcript captured — dropping turn")
             return
 
         # Snapshot the rolling audio buffer for speaker recognition.

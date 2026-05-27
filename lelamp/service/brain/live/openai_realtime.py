@@ -597,15 +597,13 @@ class OpenAIRealtimeSession(BrainSession):
                     "type": "function",
                     "name": DELEGATE_TOOL_NAME,
                     "description": DELEGATE_TOOL_DESCRIPTION,
+                    # No parameters — runner uses the side-channel
+                    # ASR transcript automatically. Stops the model
+                    # from hallucinating delegate transcripts pulled
+                    # from recent history context.
                     "parameters": {
                         "type": "object",
-                        "properties": {
-                            "transcript": {
-                                "type": "string",
-                                "description": "Exact transcript of what the user just said.",
-                            },
-                        },
-                        "required": ["transcript"],
+                        "properties": {},
                     },
                 },
                 {
@@ -803,21 +801,15 @@ class OpenAIRealtimeSession(BrainSession):
         if name != DELEGATE_TOOL_NAME:
             logger.info("ignoring unknown tool call: %s", name)
             return
-        try:
-            args = json.loads(raw_args) if raw_args else {}
-        except json.JSONDecodeError:
-            logger.warning("delegate_to_lumi: bad JSON args: %r", raw_args)
-            args = {}
-        transcript = str(args.get("transcript", "")).strip()
-        if transcript:
-            logger.info("delegate_to_lumi → %r", transcript)
-            if self._on_delegate is not None:
-                try:
-                    self._on_delegate(transcript)
-                except Exception as e:
-                    logger.warning("on_delegate callback raised: %s", e)
-        else:
-            logger.info("delegate_to_lumi called with empty transcript — ignoring")
+        # Tool takes no arguments — the runner pulls the actual
+        # user transcript from the ASR side-channel. Fire on_delegate
+        # unconditionally so the runner can route this turn.
+        logger.info("delegate_to_lumi signal received")
+        if self._on_delegate is not None:
+            try:
+                self._on_delegate("")
+            except Exception as e:
+                logger.warning("on_delegate callback raised: %s", e)
         # ACK the tool call so the server doesn't stall the response. We
         # deliberately do NOT call response.create() afterwards: in the
         # delegate case the bigger Lumi will speak, so we want OpenAI to

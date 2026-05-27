@@ -512,18 +512,15 @@ class GeminiLiveSession(BrainSession):
 
     def _build_config(self):
         types = self._types
+        # No parameters — runner uses the side-channel ASR transcript
+        # automatically. Stops the model from hallucinating delegate
+        # transcripts pulled from recent history context.
         function_decl = types.FunctionDeclaration(
             name=DELEGATE_TOOL_NAME,
             description=DELEGATE_TOOL_DESCRIPTION,
             parameters=types.Schema(
                 type=types.Type.OBJECT,
-                properties={
-                    "transcript": types.Schema(
-                        type=types.Type.STRING,
-                        description="Exact transcript of what the user just said.",
-                    ),
-                },
-                required=["transcript"],
+                properties={},
             ),
         )
 
@@ -543,6 +540,27 @@ class GeminiLiveSession(BrainSession):
         if self._language:
             speech_kwargs["language_code"] = self._language
 
+        # Disable thinking output. Gemini 3.x flash-live defaults to
+        # emitting reasoning tokens as part of the response stream,
+        # which the runner buffers into ``brain.chitchat`` text and
+        # pipes into ElevenLabs — the user then HEARS Lumi say things
+        # like "The user's input 'vui lòng' is short and Vietnamese,
+        # roughly translating to please... So I'll reply..." before
+        # the actual answer. ``thinking_budget=0`` turns thinking off
+        # entirely (cheapest + lowest latency for chit-chat). Tunable
+        # via env if a deployment needs reasoning later.
+        thinking_budget = int(os.environ.get("LELAMP_GEMINI_LIVE_THINKING_BUDGET", "0"))
+        thinking_kwargs: dict = {}
+        try:
+            thinking_kwargs["thinking_config"] = types.ThinkingConfig(
+                thinking_budget=thinking_budget,
+                include_thoughts=False,
+            )
+        except (AttributeError, TypeError):
+            # Older SDK — thinking_config not supported; the model
+            # default will leak reasoning but the runner still works.
+            pass
+
         return types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
             system_instruction=types.Content(
@@ -552,6 +570,7 @@ class GeminiLiveSession(BrainSession):
             speech_config=types.SpeechConfig(**speech_kwargs),
             input_audio_transcription=self._build_input_transcription(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
+            **thinking_kwargs,
             **self._build_resumption_kwargs(),
             **self._build_manual_activity_kwargs(),
         )
@@ -840,16 +859,16 @@ class GeminiLiveSession(BrainSession):
             if fc.name != DELEGATE_TOOL_NAME:
                 logger.info("ignoring unknown tool call: %s", fc.name)
                 continue
-            transcript = (fc.args or {}).get("transcript", "").strip()
-            if transcript:
-                logger.info("delegate_to_lumi → %r", transcript)
-                if self._on_delegate is not None:
-                    try:
-                        self._on_delegate(transcript)
-                    except Exception as e:
-                        logger.warning("on_delegate callback raised: %s", e)
-            else:
-                logger.info("delegate_to_lumi called with empty transcript — ignoring")
+            # Tool takes no arguments — the runner pulls the actual
+            # user transcript from the ASR side-channel. Fire
+            # on_delegate unconditionally so the runner routes this
+            # turn.
+            logger.info("delegate_to_lumi signal received")
+            if self._on_delegate is not None:
+                try:
+                    self._on_delegate("")
+                except Exception as e:
+                    logger.warning("on_delegate callback raised: %s", e)
             function_responses.append(types.FunctionResponse(
                 name=fc.name,
                 id=fc.id,
