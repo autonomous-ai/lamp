@@ -116,6 +116,44 @@ with open(path, "w") as f:
 print("[patch] nginx /api/system/shell: WebSocket upgrade block added")
 PYEOF
 
+# 3a'. nginx /api/buddy/ws: add WebSocket upgrade block if missing.
+# Same shape as /api/system/shell — generic /api/ proxy doesn't forward Upgrade
+# headers, so the Lumi Buddy macOS companion's persistent WS handshake fails
+# without a dedicated location block. Must come BEFORE the generic /api/ block.
+python3 - "$NGINX_CONF" <<'PYEOF'
+import sys
+path = sys.argv[1]
+with open(path) as f:
+    content = f.read()
+
+if "location = /api/buddy/ws" in content:
+    print("[patch] nginx /api/buddy/ws: already present, skipping")
+    sys.exit(0)
+
+old = "  location /api/ {"
+new = """  # Lumi Buddy (macOS companion) persistent WebSocket — must come before generic /api/.
+  location = /api/buddy/ws {
+    proxy_pass http://backend;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_read_timeout 86400s;
+    proxy_send_timeout 86400s;
+  }
+
+  location /api/ {"""
+
+if old not in content:
+    print("[patch] nginx /api/buddy/ws: /api/ block not found, may need manual check")
+    sys.exit(0)
+
+content = content.replace(old, new, 1)
+with open(path, "w") as f:
+    f.write(content)
+print("[patch] nginx /api/buddy/ws: WebSocket upgrade block added")
+PYEOF
+
 # 3b'. nginx /openapi.json: add proxy block if missing (Swagger UI iframe spec)
 python3 - "$NGINX_CONF" <<'PYEOF'
 import sys

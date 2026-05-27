@@ -9,7 +9,7 @@ representing one temporal sequence. The output is RawPose3DDetection.
 """
 
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -20,6 +20,7 @@ from core.enums.pose import GraphEnum
 from core.models.pose import RawPose3DDetection
 from core.perception.base import PredictorBase
 from core.utils.common import get_or_default
+from core.utils.files import ensure_downloaded
 from core.utils.runtime import prepare_ort_session
 
 # Input type: (keypoints (T, K, 2), scores (T, K))
@@ -36,6 +37,7 @@ class PoseEstimator3DLifting(PredictorBase[Pose3DInput, RawPose3DDetection | Non
     GRAPH_TYPE: GraphEnum
 
     DEFAULT_MODEL_PATH: Path | None = None
+    DEFAULT_REMOTE_URL: str | None = None
     DEFAULT_N_FRAMES: int = 243
     DEFAULT_INPUT_SIZE: tuple[int, int] = (1920, 1080)
 
@@ -45,6 +47,7 @@ class PoseEstimator3DLifting(PredictorBase[Pose3DInput, RawPose3DDetection | Non
     def __init__(
         self,
         model_path: Path | None = None,
+        remote_url: str | None = None,
         input_size: tuple[int, int] | None = None,
         n_frames: int | None = None,
     ) -> None:
@@ -55,6 +58,7 @@ class PoseEstimator3DLifting(PredictorBase[Pose3DInput, RawPose3DDetection | Non
             raise RuntimeError("model_path must not be None")
 
         self._model_path: Path = model_path
+        self._remote_url: str | None = get_or_default(remote_url, self.DEFAULT_REMOTE_URL)
         self._input_size: tuple[int, int] = get_or_default(input_size, self.DEFAULT_INPUT_SIZE)
         self._n_frames: int = get_or_default(n_frames, self.DEFAULT_N_FRAMES)
 
@@ -70,22 +74,23 @@ class PoseEstimator3DLifting(PredictorBase[Pose3DInput, RawPose3DDetection | Non
         return self._input_size
 
     @override
-    def start(self) -> None:
+    def _start_impl(self) -> None:
         if self._running:
             self._logger.info("Already running")
             return
+        self._model_path = ensure_downloaded(self._model_path, remote=self._remote_url)
         self._logger.info("Loading model from %s", self._model_path)
         self._session = prepare_ort_session(self._model_path)
         self._running = True
         self._logger.info("Ready")
 
     @override
-    def stop(self) -> None:
+    def _stop_impl(self) -> None:
         self._session = None
         self._running = False
 
     @override
-    def is_ready(self) -> bool:
+    def _is_ready_impl(self) -> bool:
         return self._running and self._session is not None
 
     @override
@@ -124,20 +129,18 @@ class PoseEstimator3DLifting(PredictorBase[Pose3DInput, RawPose3DDetection | Non
         return results
 
     @override
-    def predict(
+    def _predict_impl(
         self,
         input: list[Pose3DInput],
         *,
         preprocess: bool = True,
+        **kwargs: Any,
     ) -> list[RawPose3DDetection | None]:
         """Lift 2D keypoint sequences to 3D.
 
         Each input is (keypoints (T, K, 2), scores (T, K)).
         Returns None for sequences with fewer than n_frames // 2 frames.
         """
-        if self._session is None:
-            raise RuntimeError("Lifter not started")
-
         results: list[RawPose3DDetection | None] = []
         preprocessed: list[npt.NDArray[np.float32]] = []
 

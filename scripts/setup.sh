@@ -524,7 +524,7 @@ EOF
 # ----------------------------------------------------------
 stage_openclaw() {
   echo "[stage] Install OpenClaw"
-  OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.05.7}"
+  OPENCLAW_VERSION="${OPENCLAW_VERSION:-2026.5.7}"
   retry "npm install -g openclaw@${OPENCLAW_VERSION}" 5
   openclaw --version || true
 
@@ -712,6 +712,19 @@ server {
   # /api/ block so the more-specific match wins. Needs HTTP/1.1 + Upgrade
   # forwarding and a long read timeout (sessions stay open while idle).
   location = /api/system/shell {
+    proxy_pass http://backend;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host \$host;
+    proxy_read_timeout 86400s;
+    proxy_send_timeout 86400s;
+  }
+
+  # Lumi Buddy (macOS companion) persistent WebSocket. Same Upgrade + long-
+  # timeout requirements as /api/system/shell. Must come BEFORE the generic
+  # /api/ block so the exact match wins.
+  location = /api/buddy/ws {
     proxy_pass http://backend;
     proxy_http_version 1.1;
     proxy_set_header Upgrade \$http_upgrade;

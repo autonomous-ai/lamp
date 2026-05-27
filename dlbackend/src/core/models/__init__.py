@@ -1,18 +1,25 @@
-from .emotion import (
+from .facial_emotion import (
     Emotion,
     EmotionDetection,
     EmotionPerceptionSessionConfig,
     RawEmotionDetection,
 )
-from .object import DetectionRequest, DetectionResult
+from .object import (
+    ObjectDetection,
+    ObjectDetectionItem,
+    ObjectPerceptionSessionConfig,
+    RawObjectDetection,
+)
 from .person import PersonDetection
 
 __all__ = [
-    "DetectionRequest",
-    "DetectionResult",
     "Emotion",
     "EmotionDetection",
     "EmotionPerceptionSessionConfig",
+    "ObjectDetection",
+    "ObjectDetectionItem",
+    "ObjectPerceptionSessionConfig",
     "PersonDetection",
     "RawEmotionDetection",
+    "RawObjectDetection",
 ]

@@ -1,6 +1,7 @@
 package openclaw
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -60,7 +61,7 @@ func (s *Service) SetupAgent(data domain.SetupRequest) error {
 	llmBaseURL := data.LLMBaseURL
 	llmModel := data.LLMModel
 	if llmModel == "" {
-		llmModel = defaultModelKey
+		llmModel = s.config.LLMModel
 	}
 	channel := data.EffectiveChannel()
 
@@ -113,7 +114,7 @@ func (s *Service) SetupAgent(data domain.SetupRequest) error {
 		modelsEntries = append(modelsEntries, openclawModelToProviderEntry(m))
 	}
 	providersMap[customProviderName] = map[string]any{
-		"baseUrl": llmBaseURL,
+		"baseUrl": withOpenAIV1(llmBaseURL),
 		"api":     defaultModel.OpenClawAPIType(),
 		"apiKey":  llmAPIKey,
 		"models":  modelsEntries,
@@ -296,8 +297,15 @@ func (s *Service) SetupAgent(data domain.SetupRequest) error {
 	if err := os.MkdirAll(s.config.OpenclawConfigDir, 0755); err != nil {
 		return fmt.Errorf("create openclaw config dir: %w", err)
 	}
-	if err := os.WriteFile(configPath, written, 0600); err != nil {
-		return fmt.Errorf("write openclaw config: %w", err)
+	// Serialise flag+file write under primarySyncMu so this cannot interleave
+	// with the watcher (syncPrimaryFromFile) or other openclaw.json writers.
+	expectedPrimary := customProviderName + "/" + defaultModel.Key
+	s.primarySyncMu.Lock()
+	setLumiWriteFlag(s.config.OpenclawConfigDir, expectedPrimary)
+	writeErr := os.WriteFile(configPath, written, 0600)
+	s.primarySyncMu.Unlock()
+	if writeErr != nil {
+		return fmt.Errorf("write openclaw config: %w", writeErr)
 	}
 	if err := chownRuntimeUserIfRoot(configPath, openclawRuntimeUser); err != nil {
 		return fmt.Errorf("set openclaw config ownership: %w", err)
@@ -313,8 +321,21 @@ func (s *Service) SetupAgent(data domain.SetupRequest) error {
 }
 
 // AddChannel adds a messaging channel to openclaw.json (multi-channel) and restarts the gateway.
-func (s *Service) AddChannel(data domain.AddChannelRequest) error {
+//
+// For non-whatsapp channels this is a pure on-disk overlay + gateway restart.
+// For whatsapp the canonical block is bootstrapped via the openclaw CLI
+// (`channels add --channel whatsapp`) so defaults from upstream (accounts.default,
+// mediaMaxMb) ride through unchanged; the plugin is also enabled/installed.
+// ctx flows through to all subprocess calls so the MQTT 10-minute cap bounds
+// the whole flow.
+func (s *Service) AddChannel(ctx context.Context, data domain.AddChannelRequest) error {
 	channel := data.EffectiveChannel()
+
+	// Hold primarySyncMu for the full read-modify-write cycle so this cannot
+	// interleave with SyncModelsFromAPI or RefreshModelsConfig writing a newer
+	// version of openclaw.json between our ReadFile and our WriteFile.
+	s.primarySyncMu.Lock()
+	defer s.primarySyncMu.Unlock()
 
 	configPath := filepath.Join(s.config.OpenclawConfigDir, "openclaw.json")
 	var configData map[string]interface{}
@@ -331,8 +352,8 @@ func (s *Service) AddChannel(data domain.AddChannelRequest) error {
 	entriesMap := ensureMap(pluginsMap, "entries")
 
 	switch channel {
-	case "slack":
-		slackMap := ensureMap(channelsMap, "slack")
+	case domain.ChannelSlack:
+		slackMap := ensureMap(channelsMap, domain.ChannelSlack)
 		slackMap["enabled"] = true
 		slackMap["mode"] = "socket"
 		slackMap["botToken"] = data.SlackBotToken
@@ -344,11 +365,11 @@ func (s *Service) AddChannel(data domain.AddChannelRequest) error {
 			slackMap["dmPolicy"] = "open"
 			slackMap["allowFrom"] = mergeStringList(slackMap["allowFrom"], "*")
 		}
-		channelsMap["slack"] = slackMap
-		slackEntryMap := ensureMap(entriesMap, "slack")
+		channelsMap[domain.ChannelSlack] = slackMap
+		slackEntryMap := ensureMap(entriesMap, domain.ChannelSlack)
 		slackEntryMap["enabled"] = true
-	case "discord":
-		discordMap := ensureMap(channelsMap, "discord")
+	case domain.ChannelDiscord:
+		discordMap := ensureMap(channelsMap, domain.ChannelDiscord)
 		discordMap["enabled"] = true
 		discordMap["dmPolicy"] = "allowlist"
 		discordMap["token"] = data.DiscordBotToken
@@ -364,11 +385,46 @@ func (s *Service) AddChannel(data domain.AddChannelRequest) error {
 				},
 			}
 		}
-		channelsMap["discord"] = discordMap
-		discordEntryMap := ensureMap(entriesMap, "discord")
+		channelsMap[domain.ChannelDiscord] = discordMap
+		discordEntryMap := ensureMap(entriesMap, domain.ChannelDiscord)
 		discordEntryMap["enabled"] = true
+	case domain.ChannelWhatsapp:
+		// Bootstrap the canonical channels.whatsapp block via the CLI; it sets
+		// defaults (accounts.default, mediaMaxMb, etc.) we'd otherwise have to
+		// mirror by hand.
+		if err := runOpenclawCLI(ctx, "channels", "add", "--channel", domain.ChannelWhatsapp); err != nil {
+			return fmt.Errorf("openclaw channels add whatsapp: %w", err)
+		}
+		// channels add mutated openclaw.json on disk — reload before overlay.
+		raw, err := os.ReadFile(configPath)
+		if err != nil {
+			return fmt.Errorf("re-read openclaw config after channels add: %w", err)
+		}
+		if err := json.Unmarshal(raw, &configData); err != nil {
+			return fmt.Errorf("re-parse openclaw config after channels add: %w", err)
+		}
+		channelsMap = ensureMap(configData, "channels")
+		pluginsMap = ensureMap(configData, "plugins")
+		entriesMap = ensureMap(pluginsMap, "entries")
+
+		whatsappMap := ensureMap(channelsMap, domain.ChannelWhatsapp)
+		applyWhatsappChannelConfig(whatsappMap, data.WhatsappUserID)
+		channelsMap[domain.ChannelWhatsapp] = whatsappMap
+		// Try enable first (works on bundled releases). If that fails, install
+		// + enable (externalized plugin model).
+		if err := runOpenclawCLI(ctx, "plugins", "enable", domain.ChannelWhatsapp); err != nil {
+			slog.Warn("plugins enable whatsapp failed, attempting install", "component", "openclaw", "error", err)
+			if installErr := runOpenclawCLI(ctx, "plugins", "install", whatsappPluginPackage); installErr != nil {
+				return fmt.Errorf("plugins install %s: %w", whatsappPluginPackage, installErr)
+			}
+			if err := runOpenclawCLI(ctx, "plugins", "enable", domain.ChannelWhatsapp); err != nil {
+				return fmt.Errorf("plugins enable whatsapp after install: %w", err)
+			}
+		}
+		whatsappEntryMap := ensureMap(entriesMap, domain.ChannelWhatsapp)
+		whatsappEntryMap["enabled"] = true
 	default:
-		telegramMap := ensureMap(channelsMap, "telegram")
+		telegramMap := ensureMap(channelsMap, domain.ChannelTelegram)
 		telegramMap["enabled"] = true
 		telegramMap["botToken"] = data.TelegramBotToken
 		if data.TelegramUserID != "" {
@@ -378,8 +434,8 @@ func (s *Service) AddChannel(data domain.AddChannelRequest) error {
 			telegramMap["dmPolicy"] = "open"
 			telegramMap["allowFrom"] = mergeStringList(telegramMap["allowFrom"], "*")
 		}
-		channelsMap["telegram"] = telegramMap
-		telegramEntryMap := ensureMap(entriesMap, "telegram")
+		channelsMap[domain.ChannelTelegram] = telegramMap
+		telegramEntryMap := ensureMap(entriesMap, domain.ChannelTelegram)
 		telegramEntryMap["enabled"] = true
 	}
 	configData["channels"] = channelsMap
@@ -396,6 +452,13 @@ func (s *Service) AddChannel(data domain.AddChannelRequest) error {
 	written, err := json.MarshalIndent(configData, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal openclaw config: %w", err)
+	}
+	// AddChannel does not change the primary model — write the existing primary
+	// into the flag so the watcher correctly identifies this as a Lumi write.
+	// primarySyncMu is already held for the full RMW cycle (acquired at entry).
+	existingPrimary := extractPrimaryModel(configData)
+	if existingPrimary != "" {
+		setLumiWriteFlag(s.config.OpenclawConfigDir, existingPrimary)
 	}
 	if err := os.WriteFile(configPath, written, 0600); err != nil {
 		return fmt.Errorf("write openclaw config: %w", err)
@@ -444,7 +507,12 @@ func (s *Service) ResetAgent() error {
 
 // RefreshModelsConfig patches the models reasoning fields in openclaw.json
 // based on current config and restarts the agent. Safe to call after UpdateConfig.
+// Holds primarySyncMu for the entire read-modify-write cycle so it cannot
+// interleave with other openclaw.json writers (watcher, model-sync, setup).
 func (s *Service) RefreshModelsConfig() error {
+	s.primarySyncMu.Lock()
+	defer s.primarySyncMu.Unlock()
+
 	configPath := filepath.Join(s.config.OpenclawConfigDir, "openclaw.json")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -456,6 +524,10 @@ func (s *Service) RefreshModelsConfig() error {
 	}
 
 	disableThinking := s.config.LLMThinkingDisabled()
+	// Read LLMModel under config.mu so it cannot race with a concurrent
+	// WithLockSave call. Lock order: primarySyncMu (held) → config.mu (acquired
+	// here briefly) — consistent with syncPrimaryFromFile's order.
+	currentModel := s.config.LLMModelKey()
 
 	// Patch models.providers.autonomous.models[*].reasoning
 	if modelsMap, ok := configData["models"].(map[string]any); ok {
@@ -476,14 +548,44 @@ func (s *Service) RefreshModelsConfig() error {
 		}
 	}
 
+	// Conditionally sync agents.defaults.model.primary. Only overwrite it when
+	// the current provider is autonomous — if the user switched OpenClaw to a
+	// non-autonomous provider (e.g. openai/gpt-4) externally, we must not
+	// silently reset it back to the Lumi-managed model.
+	currentPrimary := extractPrimaryModel(configData)
+	prov, _, _ := splitProviderModel(currentPrimary)
+	var flagPrimary string // value written into the Lumi-write flag
+	if currentPrimary == "" || prov == customProviderName {
+		// No primary set yet, or it belongs to us — safe to update.
+		newPrimary := customProviderName + "/" + currentModel
+		agents := ensureMap(configData, "agents")
+		defaults := ensureMap(agents, "defaults")
+		modelMap := ensureMap(defaults, "model")
+		modelMap["primary"] = newPrimary
+		defaults["model"] = modelMap
+		agents["defaults"] = defaults
+		configData["agents"] = agents
+		flagPrimary = newPrimary
+		slog.Info("refreshed models config in openclaw.json", "component", "openclaw", "disableThinking", disableThinking, "primary", newPrimary)
+	} else {
+		// Non-autonomous provider is active; preserve it and log state drift so
+		// operators know why the Lumi-side model and OpenClaw diverge.
+		flagPrimary = currentPrimary
+		slog.Warn("[refresh] non-autonomous provider active, skipping primary patch (state drift)",
+			"current", currentPrimary, "lumi_model", s.config.LLMModel)
+	}
+
 	written, err := json.MarshalIndent(configData, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal openclaw config: %w", err)
 	}
+	// Write the flag BEFORE the file so the watcher can match by content and
+	// correctly skip this Lumi-initiated write regardless of the provider.
+	setLumiWriteFlag(s.config.OpenclawConfigDir, flagPrimary)
 	if err := os.WriteFile(configPath, written, 0600); err != nil {
 		return fmt.Errorf("write openclaw config: %w", err)
 	}
-	slog.Info("refreshed models config in openclaw.json", "component", "openclaw", "disableThinking", disableThinking)
+	slog.Debug("wrote openclaw.json after models config refresh", "component", "openclaw", "disableThinking", disableThinking)
 
 	if err := restartOpenclawGateway(); err != nil {
 		return err
@@ -500,6 +602,17 @@ func (s *Service) RestartAgent() error {
 	}
 	slog.Info("restart completed", "component", "openclaw")
 	return nil
+}
+
+// withOpenAIV1 appends /v1 to autonomous API base URLs that are missing it.
+// Only applies to autonomous.ai URLs ending with /ai (e.g. …/api/v1/ai).
+// External providers are left untouched.
+func withOpenAIV1(base string) string {
+	base = strings.TrimSuffix(strings.TrimSpace(base), "/")
+	if strings.Contains(base, "campaign-api.autonomous.ai") && strings.HasSuffix(base, "/ai") {
+		return base + "/v1"
+	}
+	return base
 }
 
 func findModelByLLMModel(models []domain.LLMModel, llmModel string) (domain.LLMModel, error) {

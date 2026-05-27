@@ -96,8 +96,24 @@ type AgentGateway interface {
 	// SetupAgent configures and starts the agent runtime from setup data.
 	SetupAgent(data SetupRequest) error
 
-	// AddChannel adds a messaging channel to the agent runtime.
-	AddChannel(data AddChannelRequest) error
+	// AddChannel adds a messaging channel to the agent runtime. ctx caps the
+	// underlying CLI subprocess + restart so callers (MQTT 10-min budget) can
+	// bound the whole flow. WhatsApp pairing is a separate streaming call —
+	// PairWhatsapp; this method only writes the channel config + enables the
+	// plugin.
+	AddChannel(ctx context.Context, data AddChannelRequest) error
+
+	// HasWhatsappSession reports whether a Baileys session already exists on
+	// disk for the given account ("default" when empty). When true, AddChannel
+	// callers can emit a single PairingStatusSuccess event and skip the
+	// interactive QR pairing flow.
+	HasWhatsappSession(account string) bool
+
+	// PairWhatsapp runs `openclaw channels login --channel whatsapp` and emits
+	// PairingEvents on the returned channel. Callers MUST drain. Only one
+	// pairing flow may be active per device; concurrent calls produce a
+	// one-event channel containing PairingStatusFailure.
+	PairWhatsapp(ctx context.Context) <-chan PairingEvent
 
 	// ResetAgent factory-resets the agent runtime configuration.
 	ResetAgent() error
@@ -233,6 +249,17 @@ type AgentGateway interface {
 	// into openclaw.json. Fail-soft: a failed fetch logs and continues. Restarts
 	// the gateway only when the file actually changed.
 	StartModelSync(ctx context.Context)
+
+	// UpdatePrimaryModel patches agents.defaults.model.primary in openclaw.json
+	// to "autonomous/{modelKey}" and restarts the gateway. No-op when modelKey
+	// is empty or when openclaw.json does not exist yet.
+	UpdatePrimaryModel(modelKey string) error
+
+	// StartPrimaryModelWatch watches the openclaw config directory for external
+	// changes to openclaw.json. When a change is detected without a Lumi write
+	// flag, it reads the new primary model and syncs it to config.LLMModel
+	// (only when provider == "autonomous"; others are silently ignored).
+	StartPrimaryModelWatch(ctx context.Context)
 
 	// GetConfiguredChannel returns the primary messaging channel type configured
 	// in the agent runtime (e.g. "telegram", "discord", "slack").

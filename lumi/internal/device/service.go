@@ -193,21 +193,31 @@ func (s *Service) Setup(data domain.SetupRequest) error {
 }
 
 // AddChannel adds a messaging channel to the agent without re-running full setup.
-func (s *Service) AddChannel(data domain.AddChannelRequest) error {
-	if err := s.agentGateway.AddChannel(data); err != nil {
-		return fmt.Errorf("add channel in agent: %w", err)
+//
+// For non-whatsapp channels the call is synchronous and the returned channel is
+// nil — callers should publish a single success/failure response after this
+// returns. For whatsapp the call returns a streaming event channel
+// (pairing_starting → pairing_qr* → success | timeout | failure); the channel
+// is closed when the flow terminates. Callers MUST drain. `success` is emitted
+// both for first-time pairing and for resumed sessions (creds already on
+// disk).
+func (s *Service) AddChannel(ctx context.Context, data domain.AddChannelRequest) (<-chan domain.PairingEvent, error) {
+	if err := s.agentGateway.AddChannel(ctx, data); err != nil {
+		return nil, fmt.Errorf("add channel in agent: %w", err)
 	}
 
 	channel := data.EffectiveChannel()
 	s.config.Channel = channel
 	switch channel {
-	case "slack":
+	case domain.ChannelSlack:
 		s.config.SlackBotToken = data.SlackBotToken
 		s.config.SlackAppToken = data.SlackAppToken
 		s.config.SlackUserID = data.SlackUserID
-	case "discord":
+	case domain.ChannelDiscord:
 		s.config.DiscordBotToken = data.DiscordBotToken
 		s.config.DiscordUserID = data.DiscordUserID
+	case domain.ChannelWhatsapp:
+		s.config.WhatsappUserID = data.WhatsappUserID
 	default:
 		s.config.TelegramBotToken = data.TelegramBotToken
 		s.config.TelegramUserID = data.TelegramUserID
@@ -216,7 +226,28 @@ func (s *Service) AddChannel(data domain.AddChannelRequest) error {
 		slog.Error("save config failed", "component", "device", "error", err)
 	}
 	slog.Info("added channel", "component", "device", "channel", channel)
-	return nil
+
+	if channel != domain.ChannelWhatsapp {
+		return nil, nil
+	}
+	// Existing Baileys creds on disk → no QR needed; emit a single success
+	// event so the caller's drain loop sees the same terminal status it would
+	// for a first-time pair.
+	if s.agentGateway.HasWhatsappSession("default") {
+		slog.Info("existing whatsapp session detected, skipping pairing", "component", "device")
+		ch := make(chan domain.PairingEvent, 1)
+		ch <- domain.PairingEvent{Status: domain.PairingStatusSuccess}
+		close(ch)
+		return ch, nil
+	}
+	return s.agentGateway.PairWhatsapp(ctx), nil
+}
+
+// PairWhatsapp re-runs the WhatsApp Linked Devices pairing flow without
+// re-bootstrapping the channel config. Used by the whatsapp_pair MQTT command
+// for re-pair after session loss.
+func (s *Service) PairWhatsapp(ctx context.Context) <-chan domain.PairingEvent {
+	return s.agentGateway.PairWhatsapp(ctx)
 }
 
 // StartStatusReporter periodically pings the autonomous backend.
@@ -287,6 +318,7 @@ func (s *Service) GetPublicConfig() domain.ConfigPublicResponse {
 		SlackUserID:        s.config.SlackUserID,
 		DiscordGuildID:     s.config.DiscordGuildID,
 		DiscordUserID:      s.config.DiscordUserID,
+		WhatsappUserID:     s.config.WhatsappUserID,
 		LLMModel:           s.config.LLMModel,
 		LLMBaseURL:         s.config.LLMBaseURL,
 		LLMDisableThinking: disableThinking,
@@ -331,139 +363,212 @@ func (s *Service) VerifyAdminPassword(password string) error {
 }
 
 // UpdateConfig saves updated config fields. All fields are optional; empty strings are skipped.
-// WiFi SSID/password are saved to config only (no reconnect). Restart Lumi for all changes to take full effect.
+// Side effects per field cluster: wifi → connect-wifi (wpa_supplicant reload),
+// llm_model/thinking → openclaw, stt_language → openclaw NewSession + lelamp,
+// voice-pipeline fields → lelamp. Other fields persist only; restart Lumi for full effect.
 func (s *Service) UpdateConfig(data domain.UpdateConfigRequest) error {
-	if data.LLMAPIKey != "" {
-		s.config.LLMAPIKey = data.LLMAPIKey
-	}
-	if data.LLMBaseURL != "" {
-		s.config.LLMBaseURL = data.LLMBaseURL
-	}
-	if data.LLMModel != "" {
-		s.config.LLMModel = data.LLMModel
-	}
-	thinkingChanged := data.LLMDisableThinking != nil
-	if thinkingChanged {
-		s.config.LLMDisableThinking = data.LLMDisableThinking
-	}
-	// PATCH semantics: empty = leave existing value alone. Stops the Settings
-	// page (which ships its full form body even when the operator only edited
-	// one tab) from wiping STT/TTS/Deepgram fields it never showed.
-	if data.DeepgramAPIKey != "" {
-		s.config.DeepgramAPIKey = data.DeepgramAPIKey
-	}
-	if data.STTAPIKey != "" {
-		s.config.STTAPIKey = data.STTAPIKey
-	}
-	if data.TTSAPIKey != "" {
-		s.config.TTSAPIKey = data.TTSAPIKey
-	}
-	if data.STTBaseURL != "" {
-		s.config.STTBaseURL = data.STTBaseURL
-	}
-	if data.TTSBaseURL != "" {
-		s.config.TTSBaseURL = data.TTSBaseURL
-	}
-	// Operators pick a language; the matching Deepgram SKU is auto-derived
-	// because end users don't know which model handles which language.
-	prevLang := s.config.STTLanguage
-	if data.STTLanguage != "" {
-		s.config.STTLanguage = data.STTLanguage
-		s.config.STTModel = sttModelForLanguage(data.STTLanguage)
-	}
-	langChanged := prevLang != s.config.STTLanguage
-	if data.TTSProvider != "" {
-		s.config.TTSProvider = data.TTSProvider
-	}
-	if data.TTSVoice != "" {
-		s.config.TTSVoice = data.TTSVoice
-	}
-	if data.DeviceID != "" {
-		s.config.DeviceID = data.DeviceID
-	}
-	wifiChanged := data.SSID != "" && data.SSID != s.config.NetworkSSID
-	if data.SSID != "" {
-		s.config.NetworkSSID = data.SSID
-	}
-	if data.Password != "" {
-		s.config.NetworkPassword = data.Password
-	}
-	if data.Channel != "" {
-		s.config.Channel = data.Channel
-	}
-	switch s.config.Channel {
-	case "slack":
-		if data.SlackBotToken != "" {
-			s.config.SlackBotToken = data.SlackBotToken
-		}
-		if data.SlackAppToken != "" {
-			s.config.SlackAppToken = data.SlackAppToken
-		}
-		if data.SlackUserID != "" {
-			s.config.SlackUserID = data.SlackUserID
-		}
-	case "discord":
-		if data.DiscordBotToken != "" {
-			s.config.DiscordBotToken = data.DiscordBotToken
-		}
-		if data.DiscordGuildID != "" {
-			s.config.DiscordGuildID = data.DiscordGuildID
-		}
-		if data.DiscordUserID != "" {
-			s.config.DiscordUserID = data.DiscordUserID
-		}
-	default:
-		if data.TelegramBotToken != "" {
-			s.config.TelegramBotToken = data.TelegramBotToken
-		}
-		if data.TelegramUserID != "" {
-			s.config.TelegramUserID = data.TelegramUserID
-		}
-	}
-	if data.MQTTEndpoint != "" {
-		s.config.MQTTEndpoint = data.MQTTEndpoint
-	}
-	if data.MQTTUsername != "" {
-		s.config.MQTTUsername = data.MQTTUsername
-	}
-	if data.MQTTPassword != "" {
-		s.config.MQTTPassword = data.MQTTPassword
-	}
-	if data.MQTTPort != 0 {
-		s.config.MQTTPort = data.MQTTPort
-	}
-	if data.FAChannel != "" {
-		s.config.FAChannel = data.FAChannel
-	}
-	if data.FDChannel != "" {
-		s.config.FDChannel = data.FDChannel
-	}
-	// Admin password rotation. Empty = keep existing hash; non-empty = bcrypt
-	// + replace. Existing sessions stay valid (signed by SessionSecret), so
-	// rotating the password alone won't lock the active operator out — they
-	// just need to use the new password the next time the cookie expires.
+	// bcrypt is CPU-intensive; compute before acquiring the config lock.
+	var adminHash string
 	if data.AdminPassword != "" {
-		hash, hashErr := bcrypt.GenerateFromPassword([]byte(data.AdminPassword), bcrypt.DefaultCost)
-		if hashErr != nil {
-			return fmt.Errorf("hash admin password: %w", hashErr)
+		hash, err := bcrypt.GenerateFromPassword([]byte(data.AdminPassword), bcrypt.DefaultCost)
+		if err != nil {
+			return fmt.Errorf("hash admin password: %w", err)
 		}
-		s.config.AdminPasswordHash = string(hash)
+		adminHash = string(hash)
 	}
-	if err := s.config.Save(); err != nil {
+
+	// All field mutations happen inside WithLockSave so they are marshalled
+	// atomically — the watcher goroutine's SetLLMModel cannot interleave with
+	// a partial config snapshot. Side-effect flags are captured inside the
+	// closure so callers outside always see the post-save values.
+	var (
+		modelChanged    bool
+		thinkingChanged bool
+		wifiChanged     bool
+		langChanged     bool
+		voiceChanged    bool
+		newModel        string
+		newSSID         string
+		newPassword     string
+		prevLang        string
+		newLang         string
+	)
+	if err := s.config.WithLockSave(func(c *config.Config) {
+		prevModel := c.LLMModel
+		prevLang = c.STTLanguage
+		// Snapshot voice-pipeline fields lelamp reads at boot (lelamp/server.py
+		// :317-388 + lelamp/config.py:103-104). Used to gate lumi-lelamp restart
+		// so wifi/channel/MQTT/admin-only saves don't bounce TTS.
+		prevLLMAPIKey := c.LLMAPIKey
+		prevLLMBaseURL := c.LLMBaseURL
+		prevDeepgramAPIKey := c.DeepgramAPIKey
+		prevSTTAPIKey := c.STTAPIKey
+		prevTTSAPIKey := c.TTSAPIKey
+		prevSTTBaseURL := c.STTBaseURL
+		prevTTSBaseURL := c.TTSBaseURL
+		prevTTSProvider := c.TTSProvider
+		prevTTSVoice := c.TTSVoice
+
+		if data.LLMAPIKey != "" {
+			c.LLMAPIKey = data.LLMAPIKey
+		}
+		if data.LLMBaseURL != "" {
+			c.LLMBaseURL = data.LLMBaseURL
+		}
+		if data.LLMModel != "" {
+			c.LLMModel = data.LLMModel
+		}
+		modelChanged = data.LLMModel != "" && data.LLMModel != prevModel
+		newModel = c.LLMModel
+
+		thinkingChanged = data.LLMDisableThinking != nil
+		if thinkingChanged {
+			c.LLMDisableThinking = data.LLMDisableThinking
+		}
+
+		// PATCH semantics: empty = leave existing value alone. Stops the
+		// Settings page (which ships its full form body even when the operator
+		// only edited one tab) from wiping STT/TTS/Deepgram fields it never showed.
+		if data.DeepgramAPIKey != "" {
+			c.DeepgramAPIKey = data.DeepgramAPIKey
+		}
+		if data.STTAPIKey != "" {
+			c.STTAPIKey = data.STTAPIKey
+		}
+		if data.TTSAPIKey != "" {
+			c.TTSAPIKey = data.TTSAPIKey
+		}
+		if data.STTBaseURL != "" {
+			c.STTBaseURL = data.STTBaseURL
+		}
+		if data.TTSBaseURL != "" {
+			c.TTSBaseURL = data.TTSBaseURL
+		}
+		// Operators pick a language; the matching Deepgram SKU is auto-derived
+		// because end users don't know which model handles which language.
+		if data.STTLanguage != "" {
+			c.STTLanguage = data.STTLanguage
+			c.STTModel = sttModelForLanguage(data.STTLanguage)
+		}
+		newLang = c.STTLanguage
+		langChanged = prevLang != newLang
+
+		if data.TTSProvider != "" {
+			c.TTSProvider = data.TTSProvider
+		}
+		if data.TTSVoice != "" {
+			c.TTSVoice = data.TTSVoice
+		}
+		if data.DeviceID != "" {
+			c.DeviceID = data.DeviceID
+		}
+		wifiChanged = data.SSID != "" && data.SSID != c.NetworkSSID
+		if data.SSID != "" {
+			c.NetworkSSID = data.SSID
+		}
+		if data.Password != "" {
+			c.NetworkPassword = data.Password
+		}
+		// Capture for the WiFi goroutine (avoid reading config after lock release).
+		newSSID = c.NetworkSSID
+		newPassword = c.NetworkPassword
+
+		if data.Channel != "" {
+			c.Channel = data.Channel
+		}
+		switch c.Channel {
+		case domain.ChannelSlack:
+			if data.SlackBotToken != "" {
+				c.SlackBotToken = data.SlackBotToken
+			}
+			if data.SlackAppToken != "" {
+				c.SlackAppToken = data.SlackAppToken
+			}
+			if data.SlackUserID != "" {
+				c.SlackUserID = data.SlackUserID
+			}
+		case domain.ChannelDiscord:
+			if data.DiscordBotToken != "" {
+				c.DiscordBotToken = data.DiscordBotToken
+			}
+			if data.DiscordGuildID != "" {
+				c.DiscordGuildID = data.DiscordGuildID
+			}
+			if data.DiscordUserID != "" {
+				c.DiscordUserID = data.DiscordUserID
+			}
+		case domain.ChannelWhatsapp:
+			if data.WhatsappUserID != "" {
+				c.WhatsappUserID = data.WhatsappUserID
+			}
+		default:
+			if data.TelegramBotToken != "" {
+				c.TelegramBotToken = data.TelegramBotToken
+			}
+			if data.TelegramUserID != "" {
+				c.TelegramUserID = data.TelegramUserID
+			}
+		}
+		if data.MQTTEndpoint != "" {
+			c.MQTTEndpoint = data.MQTTEndpoint
+		}
+		if data.MQTTUsername != "" {
+			c.MQTTUsername = data.MQTTUsername
+		}
+		if data.MQTTPassword != "" {
+			c.MQTTPassword = data.MQTTPassword
+		}
+		if data.MQTTPort != 0 {
+			c.MQTTPort = data.MQTTPort
+		}
+		if data.FAChannel != "" {
+			c.FAChannel = data.FAChannel
+		}
+		if data.FDChannel != "" {
+			c.FDChannel = data.FDChannel
+		}
+		// Admin password rotation. Empty = keep existing hash; non-empty = bcrypt
+		// + replace. Existing sessions stay valid (signed by SessionSecret), so
+		// rotating the password alone won't lock the active operator out.
+		if adminHash != "" {
+			c.AdminPasswordHash = adminHash
+		}
+
+		voiceChanged = c.LLMAPIKey != prevLLMAPIKey ||
+			c.LLMBaseURL != prevLLMBaseURL ||
+			c.DeepgramAPIKey != prevDeepgramAPIKey ||
+			c.STTAPIKey != prevSTTAPIKey ||
+			c.TTSAPIKey != prevTTSAPIKey ||
+			c.STTBaseURL != prevSTTBaseURL ||
+			c.TTSBaseURL != prevTTSBaseURL ||
+			c.TTSProvider != prevTTSProvider ||
+			c.TTSVoice != prevTTSVoice
+	}); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
 	slog.Info("config updated", "component", "device")
 	if wifiChanged {
-		ssid := s.config.NetworkSSID
-		password := s.config.NetworkPassword
 		go func() {
-			slog.Info("reconnecting to new WiFi", "component", "device", "ssid", ssid)
-			if _, err := s.networkService.SetupNetwork(ssid, password); err != nil {
+			slog.Info("reconnecting to new WiFi", "component", "device", "ssid", newSSID)
+			if _, err := s.networkService.SetupNetwork(newSSID, newPassword); err != nil {
 				slog.Error("WiFi reconnect failed", "component", "device", "error", err)
 			}
 		}()
 	}
+	// Sync primary model into openclaw.json (Lumi → OpenClaw direction).
+	// config.mu is released by WithLockSave above; openclaw calls now acquire
+	// primarySyncMu without risk of deadlock (consistent lock order).
+	// When thinking also changed, RefreshModelsConfig handles primary update +
+	// reasoning patch in a single write + restart — skip UpdatePrimaryModel to
+	// avoid a redundant gateway restart.
+	if modelChanged && !thinkingChanged && s.agentGateway != nil {
+		if err := s.agentGateway.UpdatePrimaryModel(newModel); err != nil {
+			slog.Warn("update openclaw primary model failed", "component", "device", "error", err)
+		}
+	}
 	if thinkingChanged && s.agentGateway != nil {
+		// RefreshModelsConfig also syncs agents.defaults.model.primary from
+		// s.config.LLMModel, so one restart covers both model and thinking changes.
 		if err := s.agentGateway.RefreshModelsConfig(); err != nil {
 			slog.Error("refresh models config failed", "component", "device", "error", err)
 		}
@@ -479,13 +584,17 @@ func (s *Service) UpdateConfig(data domain.UpdateConfigRequest) error {
 				if err := s.agentGateway.NewSession(key); err != nil {
 					slog.Warn("openclaw NewSession on stt_language change failed", "component", "device", "error", err)
 				} else {
-					slog.Info("openclaw session reset for stt_language change", "component", "device", "from", prevLang, "to", s.config.STTLanguage)
+					slog.Info("openclaw session reset for stt_language change", "component", "device", "from", prevLang, "to", newLang)
 				}
 			}()
 		}
 	}
-	// Re-push voice config to LeLamp on any config change
-	s.RePushVoiceConfig()
+	// Restart lumi-lelamp only when a field it reads at boot actually changed.
+	// stt_language is covered by langChanged (lelamp reads it via stt_language /
+	// derived stt_model). Wifi/channel/MQTT/admin saves skip the restart.
+	if voiceChanged || langChanged {
+		s.RePushVoiceConfig()
+	}
 	return nil
 }
 

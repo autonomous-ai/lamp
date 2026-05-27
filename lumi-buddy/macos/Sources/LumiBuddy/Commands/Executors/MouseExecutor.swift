@@ -170,18 +170,24 @@ struct CursorPosExecutor: Executor {
     let action = "cursor_pos"
 
     func execute(params: [String: Any]) async throws -> [String: Any] {
-        // NSEvent.mouseLocation: origin bottom-left of menu-bar screen, in POINTS.
-        // CGEvent coords: origin top-left, in POINTS. Same x, flipped y.
-        let pt = NSEvent.mouseLocation
-        let screenH = NSScreen.main?.frame.height ?? 0
-        let scale = NSScreen.main?.backingScaleFactor ?? 1.0
-        let cgY = screenH - pt.y
-        return [
-            "x": Int(pt.x.rounded()),
-            "y": Int(cgY.rounded()),
-            "screen_height": Int(screenH),
-            "backing_scale": Double(scale),
-        ]
+        // NSEvent.mouseLocation: origin bottom-left of the MENU-BAR (primary) screen, in POINTS.
+        // CGEvent coords: origin top-left of the same primary screen. Same x, flipped y.
+        // Y-flip pivot MUST be the primary screen's height — NOT NSScreen.main (which is the
+        // "key window" screen and changes when focus moves between displays).
+        return await MainActor.run {
+            let pt = NSEvent.mouseLocation
+            let screens = NSScreen.screens
+            let primary = screens.first(where: { $0.frame.origin == .zero }) ?? screens.first
+            let screenH = primary?.frame.size.height ?? 0
+            let scale = primary?.backingScaleFactor ?? 1.0
+            let cgY = screenH - pt.y
+            return [
+                "x": Int(pt.x.rounded()),
+                "y": Int(cgY.rounded()),
+                "screen_height": Int(screenH),
+                "backing_scale": Double(scale),
+            ]
+        }
     }
 }
 

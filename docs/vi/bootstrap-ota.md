@@ -482,6 +482,22 @@ echo "LeLamp $NEW_VERSION published."
 | `scripts/upload-setup-ap.sh` | Script setup AP | Upload lên GCS |
 | `scripts/upload-skills.sh` | OpenClaw skill files | Upload lên GCS |
 | `scripts/install.sh` | CDN install shortcut | `curl ... \| sudo bash` trên Pi |
+| `scripts/tag-release.sh` | Git release tag kèm OTA metadata snapshot | Fetch metadata.json → annotated tag → `git push origin <tag>` |
+
+### `scripts/tag-release.sh` — Truy nguồn theo GPL v3 §6
+
+Sau khi các upload component xong (`make upload-lumi upload-lelamp upload-web ...`), script này neo OTA metadata snapshot vào một git tag duy nhất:
+
+```bash
+make tag-release v0.0.8
+# → curl https://cdn.autonomous.ai/lumi/ota/metadata.json
+# → git tag -a v0.0.8 -F - (annotation = JSON metadata đẹp)
+# → git push origin v0.0.8
+```
+
+Người mua chạy `lumi-server --version` trên thiết bị — giá trị lấy từ `git describe --tags --always --dirty` lúc build (`Makefile:VERSION`), nên resolve về tag gần nhất. Họ mở repo public (`github.com/autonomous-ai/ai-lamp-lumi`), tìm tag đúng, đọc annotation để xem chính xác version `lumi`/`lelamp`/`web`/`bootstrap` đã bake vào release đó, rồi checkout commit tương ứng để có source.
+
+Guards trong script: từ chối nếu tag đã tồn tại local hoặc trên remote, từ chối nếu fetch metadata fail hoặc JSON invalid (`set -euo pipefail` + `jq .`). Override qua env: `OTA_METADATA_URL` (mặc định: `https://cdn.autonomous.ai/lumi/ota/metadata.json`), `TAG_REMOTE` (mặc định: `origin`).
 
 ---
 

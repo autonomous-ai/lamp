@@ -8,32 +8,46 @@ struct ListDisplaysExecutor: Executor {
     let action = "list_displays"
 
     func execute(params: [String: Any]) async throws -> [String: Any] {
-        var count: UInt32 = 0
-        CGGetActiveDisplayList(0, nil, &count)
-        var ids = Array<CGDirectDisplayID>(repeating: 0, count: Int(count))
-        CGGetActiveDisplayList(count, &ids, &count)
+        // Use NSScreen rather than CGDisplayBounds. CGDisplayBounds reports each display's
+        // top-left in the "global display coordinate space", but for bottom-aligned multi-display
+        // setups it doesn't reflect the actual arrangement that CGEvent dispatches against.
+        // NSScreen.frame DOES carry arrangement (in bottom-left-origin space), and we y-flip
+        // ourselves using the primary (menu-bar / origin==.zero) screen as pivot.
+        return try await MainActor.run {
+            let screens = NSScreen.screens
+            guard !screens.isEmpty else {
+                throw ExecutorError.actionFailed("no screens available")
+            }
+            // Primary = the screen whose NSScreen origin is (0,0). That's the menu-bar screen
+            // which defines CGEvent's global y origin (top-left of it = CGEvent (0,0)).
+            let primary = screens.first(where: { $0.frame.origin == .zero }) ?? screens[0]
+            let primaryTopY = primary.frame.origin.y + primary.frame.size.height
+            let mainID = CGMainDisplayID()
 
-        let main = CGMainDisplayID()
-        var list: [[String: Any]] = []
-        for id in ids {
-            let bounds = CGDisplayBounds(id)
-            let mode = CGDisplayCopyDisplayMode(id)
-            let pixelW = mode?.pixelWidth ?? Int(bounds.width)
-            let pointW = mode?.width ?? Int(bounds.width)
-            let scale = pointW > 0 ? Double(pixelW) / Double(pointW) : 1.0
-            list.append([
-                "id": Int(id),
-                "is_main": id == main,
-                "x": Int(bounds.origin.x),
-                "y": Int(bounds.origin.y),
-                "width": Int(bounds.width),
-                "height": Int(bounds.height),
-                "pixel_width": pixelW,
-                "pixel_height": mode?.pixelHeight ?? Int(bounds.height),
-                "scale": scale,
-            ])
+            var list: [[String: Any]] = []
+            for screen in screens {
+                guard let n = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? UInt32 else {
+                    continue
+                }
+                let id = CGDirectDisplayID(n)
+                let scale = screen.backingScaleFactor
+                let cgTopY = primaryTopY - (screen.frame.origin.y + screen.frame.size.height)
+                let pointW = screen.frame.size.width
+                let pointH = screen.frame.size.height
+                list.append([
+                    "id": Int(id),
+                    "is_main": id == mainID,
+                    "x": Int(screen.frame.origin.x),
+                    "y": Int(cgTopY),
+                    "width": Int(pointW),
+                    "height": Int(pointH),
+                    "pixel_width": Int(pointW * scale),
+                    "pixel_height": Int(pointH * scale),
+                    "scale": Double(scale),
+                ])
+            }
+            return ["displays": list, "count": list.count]
         }
-        return ["displays": list, "count": list.count]
     }
 }
 
@@ -79,16 +93,19 @@ struct ScreenshotExecutor: Executor {
             image = rawImage
         }
 
-        let pngData = NSMutableData()
-        guard let dest = CGImageDestinationCreateWithData(pngData, UTType.png.identifier as CFString, 1, nil) else {
-            throw ExecutorError.actionFailed("could not create PNG destination")
+        // JPEG q=0.8 gives ~5-10× smaller payload than PNG for typical desktop
+        // screenshots, with negligible perceptual loss for vision LLM input.
+        let jpegData = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(jpegData, UTType.jpeg.identifier as CFString, 1, nil) else {
+            throw ExecutorError.actionFailed("could not create JPEG destination")
         }
-        CGImageDestinationAddImage(dest, image, nil)
+        let jpegOptions: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: 0.8]
+        CGImageDestinationAddImage(dest, image, jpegOptions as CFDictionary)
         if !CGImageDestinationFinalize(dest) {
-            throw ExecutorError.actionFailed("could not encode PNG")
+            throw ExecutorError.actionFailed("could not encode JPEG")
         }
 
-        let saveURL = try saveDefaultPath(data: pngData as Data)
+        let saveURL = try saveDefaultPath(data: jpegData as Data)
 
         // Retina point↔pixel scale of the source display.
         let mode = CGDisplayCopyDisplayMode(displayID)
@@ -102,10 +119,11 @@ struct ScreenshotExecutor: Executor {
             "height": image.height,
             "display_id": Int(displayID),
             "display_scale": displayScale,
-            "bytes": pngData.length,
+            "bytes": jpegData.length,
+            "mime": "image/jpeg",
         ]
         if returnFormat == "base64" || returnFormat == "both" {
-            result["image_b64"] = (pngData as Data).base64EncodedString()
+            result["image_b64"] = (jpegData as Data).base64EncodedString()
         }
         return result
     }
@@ -116,7 +134,7 @@ struct ScreenshotExecutor: Executor {
             .appendingPathComponent("LumiBuddy", isDirectory: true)
             .appendingPathComponent("screenshots", isDirectory: true)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        let url = dir.appendingPathComponent("latest.png")
+        let url = dir.appendingPathComponent("latest.jpg")
         try data.write(to: url, options: .atomic)
         return url
     }

@@ -47,6 +47,7 @@ import (
 	_healthHttpDeliver "go-lamp.autonomous.ai/server/health/delivery/http"
 	_networkHttpDeliver "go-lamp.autonomous.ai/server/network/delivery/http"
 	_agentHttpDeliver "go-lamp.autonomous.ai/server/agent/delivery/http"
+	_buddyHttpDeliver "go-lamp.autonomous.ai/server/buddy/delivery/http"
 	_sensingHttpDeliver "go-lamp.autonomous.ai/server/sensing/delivery/http"
 	"go-lamp.autonomous.ai/server/serializers"
 	"go-lamp.autonomous.ai/server/session"
@@ -65,6 +66,7 @@ type Server struct {
 	deviceGPIOHandler _deviceGPIODeliver.DeviceGPIOHandler
 	agentHandler   _agentHttpDeliver.AgentHandler
 	sensingHandler    _sensingHttpDeliver.SensingHandler
+	buddyHandler      _buddyHttpDeliver.BuddyHandler
 
 	agentGateway   domain.AgentGateway
 	networkService *network.Service
@@ -120,6 +122,7 @@ func ProvideServer(
 	dgph _deviceGPIODeliver.DeviceGPIOHandler,
 	agentH _agentHttpDeliver.AgentHandler,
 	sensingH _sensingHttpDeliver.SensingHandler,
+	buddyH _buddyHttpDeliver.BuddyHandler,
 	ds *device.Service,
 	agentGW domain.AgentGateway,
 	ns *network.Service,
@@ -138,6 +141,7 @@ func ProvideServer(
 		deviceGPIOHandler: dgph,
 		agentHandler:   agentH,
 		sensingHandler:    sensingH,
+		buddyHandler:      buddyH,
 		agentGateway:      agentGW,
 		networkService:    ns,
 		deviceService:     ds,
@@ -595,6 +599,27 @@ func (s *Server) Serve(closeFn func()) error {
 	monitor := api.Group("monitor")
 	monitor.POST("event", sameOriginOrLAN(), s.sensingHandler.PostMonitorEvent)
 
+	// Lumi Buddy (macOS companion app for remote computer use):
+	//   - /pair/start, /status, /command, DELETE admin-gated
+	//   - /pair/confirm anonymous (code-based)
+	//   - /ws bearer-token gated (validated in handler against buddies.json)
+	//   - /command localhost-only (OpenClaw skill is the caller)
+	buddy := api.Group("buddy")
+	buddy.POST("pair/start", adminAuthMiddleware(s.config), s.buddyHandler.PairStart)
+	buddy.POST("pair/confirm", s.buddyHandler.PairConfirm)
+	buddy.GET("status", adminAuthMiddleware(s.config), s.buddyHandler.Status)
+	buddy.DELETE("", adminAuthMiddleware(s.config), s.buddyHandler.Revoke)
+	// /self auth via Bearer token (the buddy app's own token), used when the
+	// user unpairs from inside the buddy app — symmetric counterpart to the
+	// admin DELETE above. Keeps lamp + buddy state in sync without manual web
+	// UI clicks.
+	buddy.DELETE("self", s.buddyHandler.RevokeSelf)
+	buddy.GET("ws", s.buddyHandler.WS)
+	buddy.POST("command", localOnlyMiddleware(), s.buddyHandler.Command)
+	// /exec/:action is the marker-friendly variant used by OpenClaw skills via
+	// [HW:/buddy/exec/<action>:{...}]. Localhost-only (loopback from agent handler's hwMarker dispatcher).
+	buddy.POST("exec/:action", localOnlyMiddleware(), s.buddyHandler.Exec)
+
 	agent := api.Group("agent")
 	// Everything under /api/openclaw/ is admin-gated: status carries device
 	// state, events / flow-stream / recent / flow-events / flow-logs /
@@ -828,6 +853,11 @@ func (s *Server) handleSetUpCompleteChange(setupCompleted bool) {
 		slog.Info("setup completed, starting status reporter", "component", "config")
 		safego.Go("status-reporter", func() { s.deviceService.StartStatusReporter(s.monitorCtx) })
 
+		// Keep Google (Workspace) access tokens fresh: they expire after 1 hour
+		// and the device holds only the refresh_token, so the actual exchange
+		// runs on the backend. Loop refreshes them before they lapse.
+		safego.Go("oauth-refresh", func() { s.deviceMQTTHandler.StartOAuthRefreshLoop(s.monitorCtx) })
+
 		s.restartMQTT()
 
 		safego.Go("startup-sequence", func() {
@@ -841,6 +871,7 @@ func (s *Server) handleSetUpCompleteChange(setupCompleted bool) {
 			// sync via atomic tmp+rename); running them concurrently would
 			// race and could clobber sync's writes.
 			safego.Go("model-sync", func() { s.agentGateway.StartModelSync(s.monitorCtx) })
+			safego.Go("primary-model-watch", func() { s.agentGateway.StartPrimaryModelWatch(s.monitorCtx) })
 
 			if ok := s.deviceService.WaitForAgentReady(120 * time.Second); ok {
 				slog.Info("agent gateway ready", "component", "server")

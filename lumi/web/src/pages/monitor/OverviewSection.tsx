@@ -34,6 +34,7 @@ function useEmotionPresets() {
 }
 import type { SystemInfo, NetworkInfo, HWHealth, OCStatus, PresenceInfo, VoiceStatus, ServoState, DisplayState, AudioVolume, LEDColor, SceneInfo } from "./types";
 import { StatusDot, HWBadge, SignalBars, formatUptime, SoftwareUpdateButton } from "./components";
+import { BuddyCard } from "./BuddyCard";
 
 export function OverviewSection({
   sys,
@@ -93,7 +94,7 @@ export function OverviewSection({
 
   const commitVolume = useCallback((vol: number) => {
     draggingVolume.current = false;
-    fetch("/hw/audio/volume", {
+    fetch(`${HW}/audio/volume`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ volume: vol }),
@@ -239,7 +240,7 @@ export function OverviewSection({
                     <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 4, background: "var(--lm-amber-dim)", color: "var(--lm-amber)" }}>LIVE</span>
                   ) : null}
                 </div>
-                <button onClick={() => fetch(`/hw/voice/${voice.mic_muted ? "unmute" : "mute"}`, { method: "POST" }).catch(() => {})} style={{
+                <button onClick={() => fetch(`${HW}/voice/${voice.mic_muted ? "unmute" : "mute"}`, { method: "POST" }).catch(() => {})} style={{
                   fontSize: 11, padding: "5px 14px", borderRadius: 6, fontWeight: 600, cursor: "pointer",
                   background: voice.mic_muted ? "rgba(52,211,153,0.1)" : "rgba(239,68,68,0.08)",
                   border: `1px solid ${voice.mic_muted ? "rgba(52,211,153,0.3)" : "rgba(239,68,68,0.25)"}`,
@@ -278,7 +279,7 @@ export function OverviewSection({
                     <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 4, background: "rgba(239,68,68,0.12)", color: "#f87171" }}>MUTED</span>
                   )}
                 </div>
-                <button onClick={() => fetch(`/hw/speaker/${speakerMuted ? "unmute" : "mute"}`, { method: "POST" }).catch(() => {})} style={{
+                <button onClick={() => fetch(`${HW}/speaker/${speakerMuted ? "unmute" : "mute"}`, { method: "POST" }).catch(() => {})} style={{
                   fontSize: 11, padding: "5px 14px", borderRadius: 6, fontWeight: 600, cursor: "pointer",
                   background: speakerMuted ? "rgba(52,211,153,0.1)" : "rgba(239,68,68,0.08)",
                   border: `1px solid ${speakerMuted ? "rgba(52,211,153,0.3)" : "rgba(239,68,68,0.25)"}`,
@@ -517,7 +518,7 @@ export function OverviewSection({
         ) : <span style={{ color: "var(--lm-text-muted)" }}>Loading…</span>}
       </div>
 
-      {/* Versions & per-target software-update buttons.
+      {/* Versions + Lumi Buddy pairing.
           OS uptime sits in the host row; detailed CPU/RAM/Disk live in System tab. */}
       <div className="lm-grid-4">
         <div style={S.card}>
@@ -530,6 +531,7 @@ export function OverviewSection({
             <VersionRow name="Agent"  color="var(--lm-purple)" version={oc?.version ?? null}     uptime={oc?.connected ? (oc?.agentUptime ?? null) : null}      updateTarget={null} />
           </div>
         </div>
+        <BuddyCard />
       </div>
 
     </div>

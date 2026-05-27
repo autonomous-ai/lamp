@@ -13,6 +13,7 @@ from core.enums import (
     PoseEstimator2DEnum,
     SpeechEmotionRecognizerEnum,
 )
+from core.enums.audio import AudioEmbedderEnum
 from core.enums.pose import ErgoAssessorEnum, PoseLifter3DEnum
 
 
@@ -29,7 +30,7 @@ class ActionSetting(BaseModel):
     enabled: bool = True
     model: HumanActionRecognizerEnum = HumanActionRecognizerEnum.X3D
     ckpt_path: str | None = None
-    # Optional overrides — None means use model-specific class defaults
+    remote_url: str | None = None
     confidence_threshold: float | None = None
     max_frames: int | None = None
     frame_interval: float | None = None
@@ -37,11 +38,11 @@ class ActionSetting(BaseModel):
     h: int | None = None
 
 
-class EmotionSetting(BaseModel):
+class FERSetting(BaseModel):
     enabled: bool = True
     model: EmotionRecognizerEnum = EmotionRecognizerEnum.POSTERV2
     ckpt_path: str | None = None
-    # Optional overrides — None means use model-specific class defaults
+    remote_url: str | None = None
     confidence_threshold: float | None = None
     frame_interval: float | None = None
 
@@ -50,30 +51,46 @@ class PoseSetting(BaseModel):
     enabled: bool = True
     model: PoseEstimator2DEnum = PoseEstimator2DEnum.RTMPOSE
     ckpt_path: str | None = None
-    # Optional overrides — None means use class defaults from PosePerceptionSessionConfig
+    remote_url: str | None = None
     confidence_threshold_2d: float | None = None
     min_valid_keypoints: int | None = None
     lifter_3d: PoseLifter3DEnum | None = PoseLifter3DEnum.TCPFORMER
     lifter_3d_ckpt_path: str | None = None
+    lifter_3d_remote_url: str | None = None
     lifter_3d_frame_w: int | None = None
     lifter_3d_frame_h: int | None = None
     ergo_assessor: ErgoAssessorEnum | None = None
     ergo_confidence_threshold: float | None = None
 
 
-class SpeechEmotionRecognizerSetting(BaseModel):
-    """Service-level knobs for the SER engine.
+class SERSetting(BaseModel):
+    enabled: bool = True
+    model: SpeechEmotionRecognizerEnum = SpeechEmotionRecognizerEnum.EMOTION2VEC
+    ckpt_path: str | None = None
+    remote_url: str | None = None
+    labels_path: str | None = None
 
-    Engine selection and model-file path live at top level
-    (``ser_recognition_model`` / ``ser_recognition_ckpt_path``) to mirror
-    the action / emotion configs. The settings here are runtime tunables
-    forwarded to the engine constructor.
-    """
 
-    sample_rate: int = 16000
-    intra_op_threads: int = 4
-    # ONNX Runtime execution providers, comma-separated. Leave empty for
-    providers: str = ""
+class AudioProcessorSetting(BaseModel):
+    target_sample_rate: int = 16000
+    enable_resample: bool = True
+    enable_high_pass: bool = True
+    high_pass_cutoff_hz: float = 80.0
+    enable_noise_reduce: bool = True
+    noise_reduce_stationary: bool = False
+    enable_vad: bool = True
+    vad_min_duration_sec: float = 0.5
+    vad_min_voice_ratio: float = 0.4
+    enable_rms_normalize: bool = True
+    rms_target: float = 0.1
+
+
+class AudioEmbedderSetting(BaseModel):
+    enabled: bool = False
+    model: AudioEmbedderEnum = AudioEmbedderEnum.RESNET34
+    model_path: str | None = None
+    remote_url: str | None = None
+    processor: AudioProcessorSetting = AudioProcessorSetting()
 
 
 class CryptoSetting(BaseModel):
@@ -83,11 +100,25 @@ class CryptoSetting(BaseModel):
     require_encryption: bool = False  # reject plain payloads if True
 
 
+class SingleObjectDetectorSetting(BaseModel):
+    enabled: bool = False
+    model_path: str | None = None
+    classes_path: str | None = None
+    threshold: float | None = None
+
+
+class ObjectDetectorSetting(BaseModel):
+    yolo_world: SingleObjectDetectorSetting = SingleObjectDetectorSetting()
+    yoloe: SingleObjectDetectorSetting = SingleObjectDetectorSetting()
+    owlv2: SingleObjectDetectorSetting = SingleObjectDetectorSetting()
+    grounding_dino: SingleObjectDetectorSetting = SingleObjectDetectorSetting()
+
+
 class LBSetting(BaseModel):
     backends: str = ""  # comma-separated backend URLs, e.g. "http://127.0.0.1:8888"
     host: str = "0.0.0.0"
     port: int = 7999
-    internal_prefix: str = "/_internal"
+    internal_prefix: str = ""
 
 
 class Settings(BaseSettings):
@@ -104,19 +135,17 @@ class Settings(BaseSettings):
             raise ValueError("DL_API_KEY must be set — server refuses to start without auth")
         return v
 
-    cache_dir: Path = Path.home() / ".dlbackend"
-
-    ser_recognition_model: SpeechEmotionRecognizerEnum = (
-        SpeechEmotionRecognizerEnum.EMOTION2VEC_PLUS_LARGE
-    )
-    ser_recognition_ckpt_path: str | None = None
-    ser_recognition_labels_path: str | None = None
-    ser: SpeechEmotionRecognizerSetting = SpeechEmotionRecognizerSetting()
+    cache_dir: Path = Path.home() / ".cache" / "dlbackend"
+    model_cache_dir: Path = Path.home() / ".cache" / "dlbackend" / "models"  # default: cache_dir / "models"
+    cdn_base: str = "https://storage.googleapis.com/autonomous-models"
 
     action: ActionSetting = ActionSetting()
-    emotion: EmotionSetting = EmotionSetting()
+    fer: FERSetting = FERSetting()
+    ser: SERSetting = SERSetting()
     pose: PoseSetting = PoseSetting()
     person_detector: PersonDetectorSetting = PersonDetectorSetting()
+    object_detector: ObjectDetectorSetting = ObjectDetectorSetting()
+    audio_embedder: AudioEmbedderSetting = AudioEmbedderSetting()
 
     crypto: CryptoSetting = CryptoSetting()
     lb: LBSetting = LBSetting()

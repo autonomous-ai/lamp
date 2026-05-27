@@ -1,21 +1,36 @@
 .PHONY: install install-cpu install-gpu install-lb install-dev \
        start start-dlserver start-lbserver \
-       start-runpod-master start-runpod-slave start-nginx start-runpod-dlserver start-runpod-lbserver stop-runpod-dlserver stop-runpod-lbserver start-jupyter \
+       start-runpod-master start-runpod-master-ssl start-runpod-slave start-runpod-slave-ssl \
+       start-nginx start-nginx-ssl gen-ssl-cert \
+       start-runpod-dlserver start-runpod-lbserver stop-runpod-dlserver stop-runpod-lbserver start-jupyter \
        info \
-       test test-api test-local test-action test-action-api test-action-local test-emotion test-emotion-api test-emotion-local test-pose test-pose-api test-pose-local lint
+       test test-api test-local \
+       test-action test-action-api test-action-local \
+       test-fer test-fer-api test-fer-local \
+       test-ser test-ser-api test-ser-local \
+       test-pose test-pose-api test-pose-local \
+       test-object test-object-api test-object-local \
+       test-audio test-audio-api test-audio-local \
+       test-crypto test-crypto-api test-crypto-local \
+       test-lb test-lb-local \
+       test-benchmark test-benchmark-http test-benchmark-ws \
+       lint
 
 # ---------------------------------------------------------------------------
 # Variables
 # ---------------------------------------------------------------------------
 
 NGINX_CONF ?= /workspace/ai-lamp-lumi/dlbackend/nginx.conf
+NGINX_SSL_CONF ?= /workspace/ai-lamp-lumi/dlbackend/nginx-ssl.conf
+SSL_DIR ?= /workspace/ssl
+SSL_CERT ?= $(SSL_DIR)/cert.pem
+SSL_KEY ?= $(SSL_DIR)/key.pem
 HOST ?= 0.0.0.0
 
 # Port layout:
-#   8888 — nginx (external)
-#   7999 — lbserver (round-robin, prepends /_internal)
-#   8000 — old DL server (nginx /_internal/ → here)
-#   8001 — DL server (nginx /_internal/lelamp/ → here)
+#   8899 — nginx (external, HTTP or SSL)
+#   7999 — lbserver (master) or dlserver (slave)
+#   8001 — dlserver (master only, behind LB)
 #   8890 — jupyter
 LBSERVER_PORT ?= 7999
 DLSERVER_PORT ?= 8001
@@ -68,7 +83,26 @@ start-lbserver: install-lb
 
 start-runpod-master: start-nginx start-runpod-dlserver start-runpod-lbserver
 
-start-runpod-slave: start-nginx start-runpod-dlserver
+start-runpod-master-ssl: start-nginx-ssl start-runpod-dlserver start-runpod-lbserver
+
+start-runpod-slave: start-nginx stop-runpod-dlserver install
+	@nohup python -m dlserver --host 127.0.0.1 --port $(LBSERVER_PORT) --log-dir /workspace/logs/dlbackend --pid-file $(DLSERVER_PID) </dev/null >/dev/null 2>&1 &
+	@echo "dlserver started on port $(LBSERVER_PORT) (slave, no LB)"
+
+start-runpod-slave-ssl: start-nginx-ssl stop-runpod-dlserver install
+	@nohup python -m dlserver --host 127.0.0.1 --port $(LBSERVER_PORT) --log-dir /workspace/logs/dlbackend --pid-file $(DLSERVER_PID) </dev/null >/dev/null 2>&1 &
+	@echo "dlserver started on port $(LBSERVER_PORT) (slave-ssl, no LB)"
+
+gen-ssl-cert:
+	@if [ ! -f $(SSL_CERT) ] || [ ! -f $(SSL_KEY) ]; then \
+		mkdir -p $(SSL_DIR); \
+		openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+			-keyout $(SSL_KEY) -out $(SSL_CERT) \
+			-subj "/CN=dlbackend/O=autonomous/C=US"; \
+		echo "Self-signed SSL cert generated at $(SSL_DIR)"; \
+	else \
+		echo "SSL cert already exists at $(SSL_DIR)"; \
+	fi
 
 start-nginx:
 	@if ! command -v nginx > /dev/null 2>&1; then \
@@ -77,6 +111,14 @@ start-nginx:
 	nginx -s stop 2>/dev/null || true
 	pkill nginx 2>/dev/null || true
 	nginx -c $(NGINX_CONF)
+
+start-nginx-ssl: gen-ssl-cert
+	@if ! command -v nginx > /dev/null 2>&1; then \
+		apt-get update && apt-get install -y nginx; \
+	fi
+	nginx -s stop 2>/dev/null || true
+	pkill nginx 2>/dev/null || true
+	nginx -c $(NGINX_SSL_CONF)
 
 start-runpod-dlserver: install stop-runpod-dlserver
 	@nohup python -m dlserver --host 127.0.0.1 --port $(DLSERVER_PORT) --log-dir /workspace/logs/dlbackend --pid-file $(DLSERVER_PID) </dev/null >/dev/null 2>&1 &
@@ -153,12 +195,11 @@ info:
 # Test
 # ---------------------------------------------------------------------------
 
-test:
-	python -m pytest tests/ -v
+test: test-api test-local
 
-test-api: test-action-api test-emotion-api test-pose-api
+test-api: test-action-api test-fer-api test-ser-api test-pose-api test-object-api test-audio-api test-crypto-api
 
-test-local: test-action-local test-emotion-local test-pose-local
+test-local: test-action-local test-fer-local test-ser-local test-pose-local test-object-local test-audio-local test-crypto-local test-lb-local
 
 test-action: test-action-api test-action-local
 
@@ -168,13 +209,21 @@ test-action-api:
 test-action-local:
 	python -m pytest tests/action_local/ -v
 
-test-emotion: test-emotion-api test-emotion-local
+test-fer: test-fer-api test-fer-local
 
-test-emotion-api:
+test-fer-api:
 	python -m pytest tests/emotion_api/ -v
 
-test-emotion-local:
+test-fer-local:
 	python -m pytest tests/emotion_local/ -v
+
+test-ser: test-ser-api test-ser-local
+
+test-ser-api:
+	python -m pytest tests/audio_emotion_api/ -v
+
+test-ser-local:
+	python -m pytest tests/audio_emotion_local/ -v
 
 test-pose: test-pose-api test-pose-local
 
@@ -183,6 +232,43 @@ test-pose-api:
 
 test-pose-local:
 	python -m pytest tests/pose_local/ -v
+
+test-object: test-object-api test-object-local
+
+test-object-api:
+	python -m pytest tests/object_api/ -v
+
+test-object-local:
+	python -m pytest tests/object_local/ -v
+
+test-audio: test-audio-api test-audio-local
+
+test-audio-api:
+	python -m pytest tests/audio_api/ -v
+
+test-audio-local:
+	python -m pytest tests/audio_local/ -v
+
+test-crypto: test-crypto-api test-crypto-local
+
+test-crypto-api:
+	python -m pytest tests/crypto_api/ -v
+
+test-crypto-local:
+	python -m pytest tests/crypto/ -v
+
+test-lb: test-lb-local
+
+test-lb-local:
+	python -m pytest tests/lb_local/ -v
+
+test-benchmark: test-benchmark-http test-benchmark-ws
+
+test-benchmark-http:
+	python -m pytest tests/benchmark_api/test_benchmark_api.py -v -s
+
+test-benchmark-ws:
+	python -m pytest tests/benchmark_api/test_benchmark_ws.py -v -s
 
 lint:
 	ruff check src/ tests/

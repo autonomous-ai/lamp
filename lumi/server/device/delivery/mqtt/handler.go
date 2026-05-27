@@ -54,9 +54,13 @@ func (h *DeviceMQTTHandler) handleData(cmd domain.MQTTMessage) error {
 	switch cmd.Kind {
 	case domain.KindTTSSet:
 		return h.handleTTSSet(cmd)
+	case domain.KindOAuthSet:
+		return h.handleOAuthSet(cmd)
+	case domain.KindOAuthRemove:
+		return h.handleOAuthRemove(cmd)
 	default:
 		slog.Warn("unknown data kind", "component", "mqtt", "kind", cmd.Kind)
-		return nil
+		return h.publishDataResult(cmd.Kind, "failure", "unknown kind: "+cmd.Kind, nil)
 	}
 }
 
@@ -75,6 +79,8 @@ func (h *DeviceMQTTHandler) HandleMessage(topic string, payload []byte) error {
 		return h.handleInfo(cmd)
 	case domain.CommandAddChannel:
 		return h.handleAddChannel(cmd)
+	case domain.CommandWhatsappPair:
+		return h.handleWhatsappPair(cmd)
 	case domain.CommandData:
 		return h.handleData(cmd)
 	default:

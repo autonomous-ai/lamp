@@ -7,6 +7,7 @@ final class MenuBarController: NSObject {
     private let onPair: (String?) -> Void
     private let onUnpair: () -> Void
     private let onTogglePause: (Bool) -> Void
+    private let onShowActivity: () -> Void
     private let onAbout: () -> Void
     private let onQuit: () -> Void
 
@@ -14,6 +15,7 @@ final class MenuBarController: NSObject {
         onPair: @escaping (String?) -> Void,
         onUnpair: @escaping () -> Void,
         onTogglePause: @escaping (Bool) -> Void,
+        onShowActivity: @escaping () -> Void,
         onAbout: @escaping () -> Void,
         onQuit: @escaping () -> Void
     ) {
@@ -21,6 +23,7 @@ final class MenuBarController: NSObject {
         self.onPair = onPair
         self.onUnpair = onUnpair
         self.onTogglePause = onTogglePause
+        self.onShowActivity = onShowActivity
         self.onAbout = onAbout
         self.onQuit = onQuit
         super.init()
@@ -34,7 +37,8 @@ final class MenuBarController: NSObject {
         let state = AppState.shared
 
         if let button = statusItem.button {
-            button.title = iconTitle(for: state)
+            button.image = iconSymbol(for: state)
+            button.title = ""
             button.toolTip = headerText(for: state)
         }
 
@@ -65,17 +69,44 @@ final class MenuBarController: NSObject {
 
     // MARK: - header text + icon
 
-    private func iconTitle(for state: AppState) -> String {
+    private func iconSymbol(for state: AppState) -> NSImage? {
+        // `lit` = lamp visibly "on": paired, healthy WS, not paused. In that
+        // state we drop template mode and paint the bulb in system yellow so
+        // it actually looks lit against the menu bar — `isTemplate=true` would
+        // flatten lightbulb.fill into the same monochrome silhouette as the
+        // outline, making "paired+connected" indistinguishable from "not paired".
+        let name: String
+        var lit = false
         switch state.pairing {
-        case .notPaired: return "💡"
+        case .notPaired:
+            name = "lightbulb"
         case .paired:
             switch state.connection {
-            case .connected: return state.paused ? "💡⏸" : "💡✅"
-            case .connecting: return "💡⏳"
-            case .error: return "💡⚠️"
-            case .disconnected: return "💡⚪️"
+            case .connected:
+                if state.paused {
+                    name = "pause.fill"
+                } else {
+                    name = "lightbulb.fill"
+                    lit = true
+                }
+            case .connecting:
+                name = "lightbulb"
+            case .error:
+                name = "exclamationmark.triangle.fill"
+            case .disconnected:
+                name = "lightbulb.slash"
             }
         }
+        let base = NSImage(systemSymbolName: name, accessibilityDescription: headerText(for: state))
+        guard let base else { return nil }
+        if lit {
+            let config = NSImage.SymbolConfiguration(paletteColors: [NSColor.systemYellow])
+            let coloured = base.withSymbolConfiguration(config) ?? base
+            coloured.isTemplate = false
+            return coloured
+        }
+        base.isTemplate = true
+        return base
     }
 
     private func headerText(for state: AppState) -> String {
@@ -125,18 +156,25 @@ final class MenuBarController: NSObject {
         pause.target = self
         menu.addItem(pause)
 
-        if let record = AppState.shared.lastCommand {
-            let symbol = record.ok ? "✓" : "✗"
-            let line = "Last command: \(record.action) \(symbol)"
-            let last = NSMenuItem(title: line, action: nil, keyEquivalent: "")
-            last.isEnabled = false
-            menu.addItem(last)
-        }
+        addActivitySubmenu()
 
         menu.addItem(.separator())
         let unpair = NSMenuItem(title: "Revoke pairing…", action: #selector(unpairAction), keyEquivalent: "")
         unpair.target = self
         menu.addItem(unpair)
+    }
+
+    private func addActivitySubmenu() {
+        let recent = AppState.shared.recentCommands
+        if let last = recent.first {
+            let symbol = last.ok ? "✓" : "✗"
+            let summary = NSMenuItem(title: "Last: \(last.action) \(symbol)", action: nil, keyEquivalent: "")
+            summary.isEnabled = false
+            menu.addItem(summary)
+        }
+        let activity = NSMenuItem(title: "Show Activity…", action: #selector(showActivityAction), keyEquivalent: "a")
+        activity.target = self
+        menu.addItem(activity)
     }
 
     // MARK: - actions
@@ -168,6 +206,10 @@ final class MenuBarController: NSObject {
 
     @objc private func aboutAction() {
         onAbout()
+    }
+
+    @objc private func showActivityAction() {
+        onShowActivity()
     }
 
     @objc private func quitAction() {

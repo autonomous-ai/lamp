@@ -5,7 +5,7 @@ Session management, person detection, and config live in ActionAnalysis.
 """
 
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import cv2
 import cv2.typing as cv2t
@@ -20,6 +20,7 @@ from core.perception.action.constants import RESOURCES_DIR
 from core.perception.base import PredictorBase
 from core.utils.common import get_or_default
 from core.utils.compute import softmax
+from core.utils.files import ensure_downloaded
 from core.utils.runtime import prepare_ort_session
 
 
@@ -27,6 +28,7 @@ class HumanActionRecognizer(PredictorBase[Video, RawHumanActionDetection]):
     """Base interface for all action recognition ONNX models."""
 
     DEFAULT_MODEL_PATH: Path | None = None
+    DEFAULT_REMOTE_URL: str | None = None
     DEFAULT_CLASSES_PATH: Path = RESOURCES_DIR / "kinect_classes.txt"
     DEFAULT_WHITELIST_PATH: Path | None = RESOURCES_DIR / "white_list.txt"
 
@@ -39,6 +41,7 @@ class HumanActionRecognizer(PredictorBase[Video, RawHumanActionDetection]):
     def __init__(
         self,
         model_path: Path | None = None,
+        remote_url: str | None = None,
         classes_path: Path | None = None,
         whitelist_path: Path | None = None,
         max_frames: int | None = None,
@@ -51,6 +54,7 @@ class HumanActionRecognizer(PredictorBase[Video, RawHumanActionDetection]):
             raise RuntimeError("model_path are not allowed to be None")
 
         self._model_path: Path = model_path
+        self._remote_url: str | None = get_or_default(remote_url, self.DEFAULT_REMOTE_URL)
         self._classes_path: Path = get_or_default(classes_path, self.DEFAULT_CLASSES_PATH)
         self._whitelist_path: Path | None = get_or_default(
             whitelist_path, self.DEFAULT_WHITELIST_PATH
@@ -83,11 +87,23 @@ class HumanActionRecognizer(PredictorBase[Video, RawHumanActionDetection]):
         return self._frame_size
 
     @override
-    def start(self) -> None:
+    def predict(
+        self,
+        input: list[Video],
+        *,
+        preprocess: bool = True,
+        class_mask: npt.NDArray[np.bool_] | None = None,
+        **kwargs: Any,
+    ) -> list[RawHumanActionDetection]:
+        return super().predict(input, preprocess=preprocess, class_mask=class_mask)
+
+    @override
+    def _start_impl(self) -> None:
         if self._running:
             self._logger.info("Already running")
             return
 
+        self._model_path = ensure_downloaded(self._model_path, remote=self._remote_url)
         self._logger.info("Loading model from %s", self._model_path)
         self._session = prepare_ort_session(self._model_path)
         self._class_names, self._default_class_mask = self._load_classes(
@@ -103,26 +119,28 @@ class HumanActionRecognizer(PredictorBase[Video, RawHumanActionDetection]):
         )
 
     @override
-    def stop(self) -> None:
+    def _stop_impl(self) -> None:
         self._session = None
         self._running = False
         self._logger.info("Predictor stopped")
 
     @override
-    def is_ready(self) -> bool:
+    def _is_ready_impl(self) -> bool:
         return self._running and self._session is not None
 
     @override
-    def predict(
+    def _predict_impl(
         self,
         input: list[Video],
         *,
         preprocess: bool = True,
         class_mask: npt.NDArray[np.bool_] | None = None,
+        **kwargs: Any,
     ) -> list[RawHumanActionDetection]:
         """Run inference on buffered frames, return raw prediction (numpy arrays)."""
-        if not self.is_ready() or self._session is None:
-            raise RuntimeError("Predictor is not ready")
+        if self._session is None:
+            msg = f"{self.__class__.__name__} session cannot be None"
+            raise RuntimeError(msg)
 
         if preprocess:
             input = self.preprocess(input)
@@ -170,9 +188,7 @@ class HumanActionRecognizer(PredictorBase[Video, RawHumanActionDetection]):
         resized: cv2t.MatLike = cv2.resize(frame_rgb, None, fx=r, fy=r)
         nh, nw = resized.shape[:2]
         half_h, half_w = target_h // 2, target_w // 2
-        return resized[
-            nh // 2 - half_h : nh // 2 + half_h, nw // 2 - half_w : nw // 2 + half_w
-        ]
+        return resized[nh // 2 - half_h : nh // 2 + half_h, nw // 2 - half_w : nw // 2 + half_w]
 
     @override
     def preprocess(

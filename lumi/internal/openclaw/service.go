@@ -23,7 +23,6 @@ const (
 	defaultGatewayBind  = "loopback"
 	defaultGatewayPort  = 18789
 	openclawRuntimeUser = "root"
-	defaultModelKey     = "claude-haiku-4-5"
 )
 
 // Compile-time check: *Service implements domain.AgentGateway.
@@ -122,6 +121,11 @@ type Service struct {
 	// the Telegram DM without the agent needing to know file paths.
 	poseBucketRunsMu sync.Mutex
 	poseBucketRuns   map[string]poseBucketInfo
+
+	// primarySyncMu serialises syncPrimaryFromFile() invocations so concurrent
+	// debounce-timer firings and UpdatePrimaryModel calls don't race on
+	// s.config.LLMModel + config.Save().
+	primarySyncMu sync.Mutex
 
 	// pendingChat tracks outbound chat.sends not yet paired with a lifecycle.
 	// Each entry stores the idempotencyKey, the exact message text, and send
