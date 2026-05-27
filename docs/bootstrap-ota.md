@@ -484,6 +484,22 @@ echo "LeLamp $NEW_VERSION published."
 | `scripts/upload-setup-ap.sh` | AP setup script | Upload to GCS |
 | `scripts/upload-skills.sh` | OpenClaw skill files | Upload to GCS |
 | `scripts/install.sh` | CDN install shortcut | `curl ... \| sudo bash` on Pi |
+| `scripts/tag-release.sh` | Git release tag with OTA metadata snapshot | Fetch metadata.json → annotated tag → `git push origin <tag>` |
+
+### `scripts/tag-release.sh` — GPL v3 §6 traceability
+
+After component uploads succeed (`make upload-lumi upload-lelamp upload-web ...`), this script anchors the resulting OTA metadata snapshot to a single git tag:
+
+```bash
+make tag-release v0.0.8
+# → curl https://cdn.autonomous.ai/lumi/ota/metadata.json
+# → git tag -a v0.0.8 -F - (annotation = pretty-printed metadata JSON)
+# → git push origin v0.0.8
+```
+
+Buyers run `lumi-server --version` on the device — value comes from `git describe --tags --always --dirty` at build time (`Makefile:VERSION`), so it resolves to the closest tag. They then open the public repo (`github.com/autonomous-ai/ai-lamp-lumi`), find the matching tag, read the annotation for the exact `lumi`/`lelamp`/`web`/`bootstrap` versions baked at release time, and checkout that commit for corresponding source.
+
+Guards in the script: refuses if tag already exists locally or on remote, refuses if metadata fetch fails or JSON is invalid (`set -euo pipefail` + `jq .`). Overrides via env vars: `OTA_METADATA_URL` (default: `https://cdn.autonomous.ai/lumi/ota/metadata.json`), `TAG_REMOTE` (default: `origin`).
 
 ---
 
