@@ -645,12 +645,12 @@ class LiveBrainRunner:
                     # accumulator is already empty. Read the snapshot
                     # written by _on_user_input instead.
                     delegate_transcript = self._last_user_input.strip()
-                # Re-arm per-turn latches. Without this, the second
-                # turn of a long-lived session would silently skip
-                # the brain.input + brain.tts.start logs because the
-                # flags carry over from the previous turn.
-                self._user_input_logged = False
-                self._tts_start_logged = False
+                # Per-turn latches (_user_input_logged / _tts_start_logged)
+                # used to reset HERE — moved to after the tail flush
+                # below. Resetting too early made the is_final tail
+                # _speak_sentence log a SECOND brain.tts.start (with
+                # the last sentence, not the first), since the flag
+                # was already False by the time tail flush ran.
                 # Reset all per-turn buffers + the sticky flag.
                 self._reply_buf = ""
                 self._reply_log_buf = ""
@@ -712,6 +712,12 @@ class LiveBrainRunner:
 
         if tail:
             self._speak_sentence(tail)
+        # Now that the last sentence of this turn has been handed to
+        # TTS, re-arm the per-turn latches for the NEXT turn. Without
+        # this the next turn would silently skip its brain.input +
+        # brain.tts.start logs because the flags carry over.
+        self._user_input_logged = False
+        self._tts_start_logged = False
         if full_reply:
             logger.info("brain.chitchat [live] %r", full_reply)
             # Keep one turn back so the next turn's echo check (in
@@ -951,8 +957,29 @@ class LiveBrainRunner:
         gets the same speaker prefix + echo filter + retry logic the
         call-mode path uses. Without this OpenClaw sees a raw
         transcript with no ``"<Name>: …"`` prefix and routes / logs
-        the turn wrong."""
-        transcript = (transcript or "").strip()
+        the turn wrong.
+
+        IMPORTANT: we ignore the ``transcript`` arg the model
+        produced and use the last Whisper-transcribed user input
+        instead. The model has a habit of hallucinating the
+        ``transcript`` field from recent context (e.g. a prior
+        ``mấy giờ vậy`` turn in synced history bleeds into a
+        completely unrelated current user input). Whisper's actual
+        transcription of the CURRENT mic audio is the ground truth
+        — only fall back to the model-provided string when
+        ``_last_user_input`` is empty (rare: tool-only response
+        with no preceding transcript)."""
+        model_transcript = (transcript or "").strip()
+        whisper_transcript = (self._last_user_input or "").strip()
+        if whisper_transcript:
+            if model_transcript and model_transcript != whisper_transcript:
+                logger.info(
+                    "brain.delegate.override [live] model=%r → whisper=%r",
+                    model_transcript, whisper_transcript,
+                )
+            transcript = whisper_transcript
+        else:
+            transcript = model_transcript
         if not transcript:
             return
 
@@ -1097,6 +1124,23 @@ class LiveBrainRunner:
         turns = self._load_openclaw_turns()
         return max((t["ts"] for t in turns), default=0.0)
 
+    # OpenClaw's sensing endpoint decorates every voice transcript with
+    # a speaker label prefix: ``Unknown Speaker:`` /
+    # ``Unknown Speaker[voice:abc123]:`` / ``Speaker - Bob:``. Useful
+    # for OpenClaw's per-speaker routing, but when those turns get
+    # synced back into the brain session as ``role=user`` content, the
+    # model treats the prefix as literal user speech and starts copying
+    # ``Unknown Speaker:`` into delegate transcripts. We strip the
+    # prefix before injection — the role marker on the conversation
+    # item already tells the model who spoke.
+    _SPEAKER_PREFIX_RE = re.compile(
+        r"^(?:Unknown Speaker(?:\[voice:[^\]]*\])?|Speaker\s*-\s*[^:]+):\s*"
+    )
+
+    @classmethod
+    def _strip_speaker_prefix(cls, text: str) -> str:
+        return cls._SPEAKER_PREFIX_RE.sub("", text, count=1).strip()
+
     # Prefixes that mark a turn as "not real user conversation" — sensing
     # events, vision frame descriptions, untrusted metadata wrappers,
     # operator instructions. Injecting these mid-session derails the
@@ -1178,9 +1222,40 @@ class LiveBrainRunner:
             logger.info(
                 "brain.history.sync [live] +%s %r", t["role"], preview,
             )
+        # Build the sync payload:
+        #   1. Strip ``Unknown Speaker: …`` / ``Speaker - <name>: …``
+        #      prefix from user turns. OpenClaw's sensing endpoint
+        #      decorates every voice transcript with that prefix for
+        #      its own routing; replaying the decoration back into
+        #      the brain session makes the model think the user
+        #      literally said the words "Unknown Speaker:" and then
+        #      copy them verbatim into delegate transcripts. The
+        #      role=user marker on the conversation.item already
+        #      tells the model who spoke.
+        #   2. Prefix the cleaned text with ``[HH:MM]`` so the model
+        #      can reason about how long ago each OpenClaw turn
+        #      happened ("anh hỏi nãy giờ", "vừa xong em nói gì").
+        #      OpenAI Realtime has no message-level timestamp field
+        #      (verified against the SDK schema 2026-05-27), so
+        #      embedding in text is the only path. Matches the format
+        #      context_loader.to_system_prompt_block uses for the
+        #      initial RECENT CONVERSATION block.
+        from datetime import datetime as _dt
+        payload: list[dict] = []
+        for t in new_turns:
+            text = t["text"]
+            if t["role"] == "user":
+                text = self._strip_speaker_prefix(text)
+            try:
+                clock = _dt.fromtimestamp(t["ts"]).strftime("%H:%M")
+                text = f"[{clock}] {text}"
+            except (OverflowError, ValueError, KeyError):
+                pass
+            payload.append({"role": t["role"], "text": text})
+
         try:
             session.send_context_turns(
-                [{"role": t["role"], "text": t["text"]} for t in new_turns],
+                payload,
                 then_request_response=then_request_response,
             )
         except TypeError:
@@ -1188,9 +1263,7 @@ class LiveBrainRunner:
             # to the unchained send. Caller will need to fire
             # request_response separately.
             try:
-                session.send_context_turns(
-                    [{"role": t["role"], "text": t["text"]} for t in new_turns]
-                )
+                session.send_context_turns(payload)
             except Exception as e:
                 logger.warning("OpenClaw history sync raised: %s", e)
                 return False

@@ -168,11 +168,29 @@ class BrainContext:
         if self.soul.strip():
             parts.append("=== PERSONA (SOUL.md) ===\n" + self.soul.strip())
         if self.recent_turns:
-            convo = "\n".join(
-                f"{t.role}: {t.text}" for t in self.recent_turns if t.text.strip()
-            )
+            # Prefix each turn with [HH:MM] so the model can answer
+            # "what did I say 5 minutes ago" / "anh nói gì nãy" with
+            # actual temporal grounding. OpenAI Realtime has no
+            # message-level timestamp field (verified against their
+            # SDK schema 2026-05-27), so embedding in text is the
+            # only path. We also emit a CURRENT TIME line right
+            # before the conversation so the model has the reference
+            # clock to compute deltas against.
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+            convo_lines: list[str] = []
+            for t in self.recent_turns:
+                if not t.text.strip():
+                    continue
+                clock = _fmt_clock(t.time)
+                prefix = f"[{clock}] " if clock else ""
+                convo_lines.append(f"{prefix}{t.role}: {t.text}")
+            convo = "\n".join(convo_lines)
             if convo:
-                parts.append("=== RECENT CONVERSATION ===\n" + convo)
+                parts.append(
+                    f"=== CURRENT TIME ===\n{now_str} (server clock — use to "
+                    f"compute how long ago each [HH:MM] turn happened)\n\n"
+                    f"=== RECENT CONVERSATION ===\n{convo}"
+                )
         return "\n\n".join(parts)
 
 
@@ -578,6 +596,22 @@ def _turn_epoch(time_field: Any) -> float:
         return v / 1000.0 if v > 1e11 else v
     except (ValueError, TypeError):
         return 0.0
+
+
+def _fmt_clock(time_field: Any) -> str:
+    """Format a Turn-style timestamp as ``HH:MM`` in the server's local
+    timezone. Returns ``""`` when the field is unparseable so callers
+    can decide to either skip the prefix or fall back to a relative
+    label like ``[?]``. Pairs with the CURRENT TIME block in
+    ``BrainContext.to_system_prompt_block`` — same clock on both sides
+    so the model can compute deltas without timezone math."""
+    epoch = _turn_epoch(time_field)
+    if not epoch:
+        return ""
+    try:
+        return datetime.fromtimestamp(epoch).strftime("%H:%M")
+    except (OverflowError, ValueError):
+        return ""
 
 
 def _load_extra_session_turns(
