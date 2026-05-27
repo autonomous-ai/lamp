@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
 import itertools
 import json
 import os
@@ -30,7 +31,7 @@ import pytest
 import websockets
 from dotenv import load_dotenv
 
-_ = load_dotenv()
+_ = load_dotenv(override=True)
 
 DL_BACKEND_URL = os.getenv("DL_BACKEND_URL", "").rstrip("/")
 DL_API_KEY = os.getenv("DL_API_KEY", "")
@@ -47,12 +48,14 @@ def _ws_url(path: str) -> str:
     return DL_BACKEND_URL.replace("http://", "ws://").replace("https://", "wss://") + path
 
 
+@functools.cache
 def _make_frame_b64(width: int = 320, height: int = 240) -> str:
     frame = np.random.randint(0, 255, (height, width, 3), dtype=np.uint8)
     _, buf = cv2.imencode(".jpg", frame)
     return base64.b64encode(buf.tobytes()).decode()
 
 
+@functools.cache
 def _load_image_b64(name: str = "person_drinking.jpg") -> str:
     path = IMAGE_FIXTURES / name
     if not path.exists():
