@@ -19,7 +19,7 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 import requests
 
@@ -272,86 +272,26 @@ class VoiceService:
         else:
             logger.info("Silero VAD disabled via LELAMP_SILERO_ENABLED=false")
 
-        # Brain mode picker — env LELAMP_BRAIN_MODE = call (default) | live.
-        #   call: half-cascade text brain. Classic STT pipeline (RMS +
-        #         Silero + Deepgram) does the audio→text work; the brain
-        #         only picks chit-chat vs delegate after STT.
-        #         See lelamp/service/brain/call/text_router.py.
-        #   live: realtime brain (Gemini Live / OpenAI Realtime). Mic
-        #         frames stream straight to the provider, which does
-        #         server-side VAD + STT + decision. The reply text is
-        #         routed through ElevenLabs via LiveBrainRunner so the
-        #         user keeps one voice across both modes.
-        # In live mode the local VAD pipeline is bypassed entirely —
-        # the runner owns the mic and the only shared state it touches
-        # is TTSService (for the echo gate + speak_queue dispatch).
-        self._brain_mode = os.environ.get("LELAMP_BRAIN_MODE", "call").strip().lower()
-        self._text_brain = None
-        self._live_runner = None
-        if self._brain_mode == "live":
-            try:
-                from lelamp.service.brain.live.factory import make_brain
-                from lelamp.service.brain.live.runner import LiveBrainRunner
-                from lelamp.service.brain.workspace import BrainWorkspace
-                provider = os.environ.get("LELAMP_BRAIN_PROVIDER", "gemini").strip().lower()
-                # Per-provider workspace — see workspace.py docstring
-                # for layout-A rationale. Each live provider gets its
-                # own session/bench/MEMORY.md under <root>/live-<provider>/
-                # so chit-chat history doesn't cross-contaminate when
-                # A/B testing. The brain reads it via load_context's
-                # extra_session_dir; the runner writes turn pairs into
-                # it on every chit-chat reply.
-                live_workspace = BrainWorkspace(subdir=f"live-{provider}")
-                live_brain = make_brain(provider, workspace=live_workspace)
-                if live_brain is not None and live_brain.available:
-                    self._live_runner = LiveBrainRunner(
-                        brain=live_brain,
-                        tts_service=self._tts,
-                        alsa_device=self._alsa_device,
-                        input_device=self._input_device,
-                        # Hook back into VoiceService so delegate
-                        # turns from live mode go through the same
-                        # speaker-prefix + echo-filter + retry
-                        # pipeline as call mode (otherwise OpenClaw
-                        # sees a raw transcript without the
-                        # ``"<Name>: …"`` prefix).
-                        decorate_callback=self._identify_and_decorate,
-                        send_to_lumi_callback=self._send_to_lumi,
-                        # Reuse the same VAD chain call mode uses
-                        # (RMS → WebRTC → Silero) so the live
-                        # runner only sends meaningful audio to
-                        # Gemini — saves cost + bandwidth + privacy
-                        # vs the previous "stream 24/7" behaviour.
-                        is_speech_callback=self._make_live_vad_check(),
-                        # Same workspace handle the brain reads from —
-                        # the runner appends {user, assistant} turn
-                        # pairs after each chit-chat reply so the next
-                        # session sees them via load_context's
-                        # extra_session_dir merge.
-                        workspace=live_workspace,
-                    )
-                    logger.info(
-                        "VoiceService brain mode=live (provider=%s) — classic VAD bypassed",
-                        provider,
-                    )
-                else:
-                    logger.warning(
-                        "Live brain init failed (provider=%s) — falling back to classic STT",
-                        provider,
-                    )
-            except Exception as e:
-                logger.warning("Live brain init exception, keeping classic STT path: %s", e)
-        else:
-            try:
-                from lelamp.service.brain import build_text_brain_from_env
-                self._text_brain = build_text_brain_from_env()
-                if self._text_brain is not None:
-                    logger.info(
-                        "VoiceService brain mode=call (text router — provider=%s, model=%s)",
-                        self._text_brain.provider, self._text_brain.model,
-                    )
-            except Exception as e:
-                logger.warning("Text brain init failed, keeping classic STT path: %s", e)
+        # Brain integration — all mode-pick / wiring / lifecycle /
+        # VAD-closure-build / call-mode decision logic lives in
+        # ``lelamp.service.brain.orchestrator``. VoiceService just
+        # constructs it with explicit deps and defers via four hooks
+        # (in_live_mode property, start, stop, handle_stt_final).
+        from lelamp.service.brain.orchestrator import BrainOrchestrator
+        self._brain = BrainOrchestrator(
+            tts_service=self._tts,
+            alsa_device=self._alsa_device,
+            input_device=self._input_device,
+            decorate_callback=self._identify_and_decorate,
+            send_to_lumi_callback=self._send_to_lumi,
+            np_module=self._np,
+            webrtcvad_instance=self._webrtcvad,
+            silero_instance=self._silero,
+            webrtcvad_check=self._webrtcvad_is_speech,
+            silero_check=self._silero_is_speech,
+            rms_threshold=RMS_THRESHOLD,
+            stt_rate=STT_RATE,
+        )
 
     def set_music_service(self, music_service) -> None:
         self._music = music_service
@@ -380,12 +320,9 @@ class VoiceService:
         # Live mode short-circuits the entire classic pipeline — the
         # runner owns the mic + provider + sentence dispatch to TTS.
         # We don't even need the local STT provider to be available.
-        if self._live_runner is not None:
+        if self._brain.in_live_mode:
             self._running = True
-            self._live_runner.start()
-            logger.info(
-                "VoiceService started in LIVE mode — classic VAD/STT loop not running"
-            )
+            self._brain.start()
             return
         if not self.available:
             logger.warning(
@@ -402,8 +339,7 @@ class VoiceService:
 
     def stop(self):
         self._running = False
-        if self._live_runner is not None:
-            self._live_runner.stop()
+        self._brain.stop()
         if self._thread:
             self._thread.join(timeout=5)
             self._thread = None
@@ -489,40 +425,6 @@ class VoiceService:
         np = self._np
         samples = audio_data.flatten().astype(np.float32)
         return float(np.sqrt(np.mean(samples ** 2)))
-
-    def _make_live_vad_check(self) -> Callable[[object], bool]:
-        """Build a single closure that reproduces the call-mode VAD
-        chain (RMS → WebRTC → Silero) for the live runner.
-
-        Returns a function ``is_speech(data) -> bool`` where ``data``
-        is a numpy int16 frame at ``STT_RATE`` (live runner records
-        directly at 16 kHz, no resampling needed). Each gate short-
-        circuits — RMS first because it's the cheapest, WebRTC
-        second (C-based, ~0.1 ms), Silero last (ONNX, ~20 ms). The
-        chain matches ``_vad_loop`` so live and call see the same
-        "is this speech?" verdict for any given frame.
-        """
-        np = self._np
-        webrtcvad = self._webrtcvad
-        silero = self._silero
-        is_webrtc = self._webrtcvad_is_speech
-        is_silero = self._silero_is_speech
-        rms_threshold = RMS_THRESHOLD
-
-        def check(data) -> bool:
-            try:
-                rms = float(np.sqrt(np.mean(np.square(data.astype(np.float32)))))
-            except Exception:
-                return True  # numpy issue — pass-through to keep stream alive
-            if rms < rms_threshold:
-                return False
-            if webrtcvad is not None and not is_webrtc(data, STT_RATE):
-                return False
-            if silero is not None and not is_silero(data, STT_RATE):
-                return False
-            return True
-
-        return check
 
     def _webrtcvad_is_speech(self, data, device_rate: int) -> bool:
         """Run WebRTC VAD on audio frame. Returns True if any 30ms chunk contains speech.
@@ -611,42 +513,6 @@ class VoiceService:
         """Check if TTS is currently using the audio device — used by
         the mic gate to prevent echo loopback."""
         return self._tts is not None and self._tts.speaking
-
-    def _track_chitchat_e2e(self, user, t_voice_final, decision) -> None:
-        """Spawn a daemon thread that waits for the queued chit-chat
-        reply to finish playing through TTS, then emits one
-        ``brain.chitchat.e2e`` log line with the full STT-final →
-        speech-end wall-clock.
-
-        Approach: poll ``tts.speaking`` (cheap bool flag). 60s safety
-        cap covers long replies on slow synth. We *don't* try to break
-        the latency into ttfa vs synth vs playback — the ``speaking``
-        flag flips to True the moment ``speak_queue`` accepts (not
-        when the first audio frame leaves the speaker), so any "first
-        audio out" timing measured from this flag is wrong by the
-        ElevenLabs synth TTFB. One honest end-to-end number beats two
-        misleading sub-numbers."""
-        if self._tts is None:
-            return
-
-        def _run():
-            poll = 0.05
-            end_deadline = time.time() + 60.0
-            # Wait until the queued playback finishes. Skip the
-            # "start" wait — `tts.last_spoken_time` is authoritative
-            # for end-of-playback regardless of when it began.
-            while time.time() < end_deadline and self._tts.speaking:
-                time.sleep(poll)
-            t_play_end = self._tts.last_spoken_time or time.time()
-            total = t_play_end - t_voice_final
-            logger.info(
-                "brain.chitchat.e2e [%s] total=%.2fs (decide=%.2fs) reply=%r",
-                user, total, decision.latency_s, decision.reply[:80],
-            )
-
-        threading.Thread(
-            target=_run, daemon=True, name="brain-chitchat-e2e",
-        ).start()
 
     def _music_is_playing(self) -> bool:
         """Check if music is currently playing."""
@@ -1255,79 +1121,12 @@ class VoiceService:
                 user = se_user if se_user else UNKNOWN_USER_LABEL
                 logger.info("Final message → Lumi (%s): %r", event_type, final_msg)
 
-                # Half-cascade brain — when active, the model decides
-                # chit-chat vs delegate from `final_text` (the STT
-                # transcript without speaker prefix). Only consult on
-                # the plain "voice" event type — wake-word events have
-                # their own routing.
-                routed_to_brain = False
-                if (
-                    self._text_brain is not None
-                    and self._text_brain.available
-                    and event_type == "voice"
-                    and final_text.strip()
-                ):
-                    logger.info(
-                        "brain.input  [%s] %r", user, final_text,
-                    )
-                    # t0 for end-to-end timing: the moment the STT
-                    # transcript is in hand and we hand it to the brain.
-                    # That's also the moment the user has stopped
-                    # speaking from the listener's perspective.
-                    t_voice_final = time.time()
-                    # Stream each completed sentence straight into the
-                    # TTS queue so playback starts on the first
-                    # sentence while the model is still generating the
-                    # rest of the reply. Skips delegate replies — the
-                    # brain only fires this callback once it has
-                    # confirmed the reply is chit-chat (not the
-                    # `[DELEGATE]` marker).
-                    on_sentence = None
-                    if self._tts is not None and hasattr(self._tts, "speak_queue"):
-                        on_sentence = self._tts.speak_queue
-                    decision = self._text_brain.decide(
-                        final_text, speaker=user, on_sentence=on_sentence,
-                    )
-                    logger.info(
-                        "brain.decide [%s] decision=%s latency=%.2fs tokens=%d (prompt=%d response=%d)",
-                        user, decision.decision, decision.latency_s,
-                        decision.total_tokens, decision.prompt_tokens, decision.response_tokens,
-                    )
-                    if decision.decision == "chitchat" and decision.reply:
-                        logger.info("brain.chitchat [%s] %r", user, decision.reply)
-                        try:
-                            # If we couldn't stream sentence-by-sentence
-                            # (no speak_queue available), fall back to
-                            # the original single-shot dispatch so the
-                            # reply still gets spoken.
-                            if on_sentence is None and self._tts is not None:
-                                self._tts.speak(decision.reply)
-                            # Spawn an off-loop tracker that waits for
-                            # TTS playback to finish, then logs the
-                            # full STT-final → speech-end latency.
-                            # Daemon thread; never blocks the voice
-                            # loop. Only meaningful for chit-chat
-                            # (delegate path's "end" is OpenClaw's own
-                            # response).
-                            self._track_chitchat_e2e(
-                                user, t_voice_final, decision,
-                            )
-                        except Exception as e:
-                            logger.warning("brain chitchat speak failed: %s", e)
-                        routed_to_brain = True
-                    elif decision.decision == "delegate":
-                        logger.info("brain.delegate [%s] → Lumi", user)
-                        # Fall through to _send_to_lumi below.
-                    else:
-                        # decision == "error" — log and let it fall
-                        # through to Lumi (safe default; never silently
-                        # drop user input).
-                        logger.warning(
-                            "brain.error [%s] %s — falling through to Lumi",
-                            user, decision.error or "(no detail)",
-                        )
-
-                if not routed_to_brain:
+                # Half-cascade brain — when active, the orchestrator
+                # decides chit-chat vs delegate from `final_text` (the
+                # STT transcript without speaker prefix) and speaks the
+                # chit-chat reply via TTS itself. Returns True when it
+                # handled the turn so we skip the Lumi forward.
+                if not self._brain.handle_stt_final(final_text, user, event_type):
                     self._send_to_lumi(final_msg, event_type=event_type)
 
             # 2. Submit SER — uses the UNTRIMMED snapshot so laughter / sighs
