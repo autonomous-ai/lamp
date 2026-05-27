@@ -1,6 +1,8 @@
 .PHONY: install install-cpu install-gpu install-lb install-dev \
        start start-dlserver start-lbserver \
-       start-runpod-master start-runpod-slave start-nginx start-runpod-dlserver start-runpod-lbserver stop-runpod-dlserver stop-runpod-lbserver start-jupyter \
+       start-runpod-master start-runpod-master-ssl start-runpod-slave start-runpod-slave-ssl \
+       start-nginx start-nginx-ssl gen-ssl-cert \
+       start-runpod-dlserver start-runpod-lbserver stop-runpod-dlserver stop-runpod-lbserver start-jupyter \
        info \
        test test-api test-local \
        test-action test-action-api test-action-local \
@@ -19,6 +21,10 @@
 # ---------------------------------------------------------------------------
 
 NGINX_CONF ?= /workspace/ai-lamp-lumi/dlbackend/nginx.conf
+NGINX_SSL_CONF ?= /workspace/ai-lamp-lumi/dlbackend/nginx-ssl.conf
+SSL_DIR ?= /workspace/ssl
+SSL_CERT ?= $(SSL_DIR)/cert.pem
+SSL_KEY ?= $(SSL_DIR)/key.pem
 HOST ?= 0.0.0.0
 
 # Port layout:
@@ -78,7 +84,22 @@ start-lbserver: install-lb
 
 start-runpod-master: start-nginx start-runpod-dlserver start-runpod-lbserver
 
+start-runpod-master-ssl: start-nginx-ssl start-runpod-dlserver start-runpod-lbserver
+
 start-runpod-slave: start-nginx start-runpod-dlserver
+
+start-runpod-slave-ssl: start-nginx-ssl start-runpod-dlserver
+
+gen-ssl-cert:
+	@if [ ! -f $(SSL_CERT) ] || [ ! -f $(SSL_KEY) ]; then \
+		mkdir -p $(SSL_DIR); \
+		openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+			-keyout $(SSL_KEY) -out $(SSL_CERT) \
+			-subj "/CN=dlbackend/O=autonomous/C=US"; \
+		echo "Self-signed SSL cert generated at $(SSL_DIR)"; \
+	else \
+		echo "SSL cert already exists at $(SSL_DIR)"; \
+	fi
 
 start-nginx:
 	@if ! command -v nginx > /dev/null 2>&1; then \
@@ -87,6 +108,14 @@ start-nginx:
 	nginx -s stop 2>/dev/null || true
 	pkill nginx 2>/dev/null || true
 	nginx -c $(NGINX_CONF)
+
+start-nginx-ssl: gen-ssl-cert
+	@if ! command -v nginx > /dev/null 2>&1; then \
+		apt-get update && apt-get install -y nginx; \
+	fi
+	nginx -s stop 2>/dev/null || true
+	pkill nginx 2>/dev/null || true
+	nginx -c $(NGINX_SSL_CONF)
 
 start-runpod-dlserver: install stop-runpod-dlserver
 	@nohup python -m dlserver --host 127.0.0.1 --port $(DLSERVER_PORT) --log-dir /workspace/logs/dlbackend --pid-file $(DLSERVER_PID) </dev/null >/dev/null 2>&1 &
