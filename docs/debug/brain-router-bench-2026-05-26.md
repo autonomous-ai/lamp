@@ -290,7 +290,74 @@ LELAMP_LIVE_VAD_PREFIX_PADDING_MS=                        # int ms (default 20)
 LELAMP_LIVE_POST_TTS_HOLDOFF_S=0.6                        # drop mic frames N s sau TTS
 ```
 
-### 6.13 Known issues sau deploy
+### 6.13 OpenAI Realtime (gpt-realtime-2) — match call quality, beat Gemini latency
+
+Sau khi xác minh OpenAI Realtime hỗ trợ mid-session
+``conversation.item.create`` (Gemini 3.1 Live không), switch live
+provider sang OpenAI. Setup verified trên Pi 172.168.20.106:
+
+```
+LELAMP_BRAIN_MODE=live
+LELAMP_BRAIN_PROVIDER=openai
+LELAMP_OPENAI_REALTIME_MODEL=gpt-realtime-2
+LELAMP_OPENAI_REALTIME_REASONING_EFFORT=minimal
+LELAMP_OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
+```
+
+**Tại sao 4 knob này:**
+
+| Knob | Value | Lý do |
+|---|---|---|
+| `gpt-realtime-2` | reasoning model | Instruction following + tool use mạnh hơn 1.5 |
+| `reasoning.effort=minimal` | minimal | Giảm TTFB — reasoning model default `low` vẫn add thinking tokens |
+| `gpt-4o-mini-transcribe` | thay `whisper-1` | `whisper-1` hay hallucinate câu "Hẹn gặp lại các bạn trong những video tiếp theo" từ silence; mini-transcribe stable hơn rõ |
+| `mid-session sync` | `conversation.item.create` | Brain push OpenClaw turns mới mà không trigger reply (set không gọi `response.create`) |
+
+**Đo thực tế (5 turn liên tiếp):**
+
+| Turn | Input | Decision | brain.input → brain.tts.start (TTFA) | input → reply done |
+|---|---|---|---|---|
+| "Bằng làm được gì?" | chitchat | – | – | 2s |
+| "tôi hỏi bạn làm được gì?" | chitchat | – | – | 3s |
+| "làm một bài thơ đi" | chitchat | – | – | 3s |
+| "Bạn đã làm được gì?" | chitchat | – | – | 3s |
+| "Bật đèn vàng đi" (mis-heard "mật liền vàng đi") | delegate | – | – | 5s (delegate fire) |
+| "Bật nhạc đi" / "Bật nhạc lên" | delegate | – | – | ~4s |
+
+→ **Chitchat full reply ~2-3s** vs Gemini Live ~7s = **2-3× nhanh hơn** Gemini cho cùng tác vụ.
+→ Delegate **~3-5s** — Realtime function tool fire qua tool_call event.
+
+**Quality vs Gemini Live:**
+
+| Metric | Gemini Live | OpenAI Realtime |
+|---|---|---|
+| Chitchat reply naturalness | OK, hơi feature-list khi cold | Smooth conversational |
+| Delegate routing accuracy | Over-delegate "Hello" / "Alo" | Đúng "Bật đèn/nhạc", giữ "Hello" chitchat |
+| Vietnamese transcription | Auto-detect, đôi khi nhầm | `gpt-4o-mini-transcribe` + `language=vi` lock — chính xác hơn rõ |
+| Mid-session history sync | KHÔNG (3.1 reject) | ✅ Native support |
+| Cost | Audio token rate Gemini | Audio token Realtime + reasoning |
+| Self-talk loop (Whisper hallucination) | Không (Gemini không hallucinate outro) | Fixed bằng switch `whisper-1` → `gpt-4o-mini-transcribe` |
+
+→ **OpenAI Realtime gpt-realtime-2 + reasoning=minimal + gpt-4o-mini-transcribe** là sweet spot cho live mode hiện tại.
+
+### 6.14 Sentence-streamed TTS hoạt động giống call mode
+
+Cả 2 provider live đều fire `on_text(delta, False)` per chunk + `on_text("", True)` final. Runner xử lý:
+- Accumulate text → split sentence boundary
+- Push từng câu vào `tts.speak_queue`
+- ElevenLabs pre-synth queue depth 1-4 → gapless playback
+- `brain.tts.start` log ở câu đầu để đo TTFA
+
+Pattern: trên reply 3-câu, sẽ thấy:
+```
+brain.input  [live] '...'
+brain.tts.start [live] '<câu 1>'
+TTS queued for pre-synth (busy, queue depth=1): <câu 2>
+TTS queued for pre-synth (busy, queue depth=2): <câu 3>
+brain.chitchat [live] '<full reply>'
+```
+
+### 6.15 Known issues sau deploy
 
 - **TTS proxy 400 cho voice `Huyen`** (id `foH7s9fX31wFFH2yqrFa`): nhiều câu reply không phát được audio do `campaign-api.autonomous.ai/.../elevenlabs/...` trả `400 Bad Request`. Streaming code không lỗi, lỗi ở proxy/voice config. Cần check voice ID hoặc switch về `Linh`.
 - **"Một bài đi" bị nhầm thành chitchat** (gpt-5.5 viết thơ thay vì delegate music) — routing miss của DECISION_RULES. Cần thêm ví dụ "một bài" / "bài hát" / "mở nhạc" vào rule A, hoặc kỳ vọng catalog SKILL.md mô tả rõ hơn về music skill.
