@@ -157,6 +157,27 @@ upload-openclaw:
 upload-all: upload-lumi upload-bootstrap upload-lelamp upload-claude-desktop-buddy upload-web upload-skills upload-hooks
 
 # ============================================================================
+# Release tagging — GPL v3 §6 compliance
+# ============================================================================
+# Annotated git tag with current OTA metadata.json embedded as message, then
+# pushed. Lets buyers map "lumi-server --version" on the board back to a
+# specific commit + component version set in the public repo.
+#
+# Usage: make tag-release v0.0.8       # after all upload-* targets succeed
+
+ifeq (tag-release,$(firstword $(MAKECMDGOALS)))
+  TAG_VERSION_ARG := $(word 2,$(MAKECMDGOALS))
+  ifneq ($(TAG_VERSION_ARG),)
+    $(eval $(TAG_VERSION_ARG):;@:)
+  endif
+endif
+
+.PHONY: tag-release
+
+tag-release:
+	bash scripts/tag-release.sh "$(TAG_VERSION_ARG)"
+
+# ============================================================================
 # Clean
 # ============================================================================
 
