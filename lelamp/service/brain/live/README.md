@@ -232,10 +232,6 @@ brain/live/
                         + transcription handling, session resumption.
   openai_realtime.py  — OpenAIRealtimeBrain + OpenAIRealtimeSession.
                         Same shape as gemini, different wire protocol.
-  audio_sink.py       — legacy PCM sink (used when reply was played as
-                        provider audio). Kept for reference; the live
-                        runner routes everything through ElevenLabs
-                        now, so this module is unused at runtime.
   runner.py           — LiveBrainRunner: owns the mic, drives one
                         session at a time, splits reply transcript
                         into sentences, pushes each into
@@ -332,8 +328,6 @@ raw provider audio (none currently does).
 - **TTS proxy 400** for voice IDs that the campaign-api ElevenLabs
   proxy doesn't recognise is a separate config bug, not a live-mode
   bug. Same failure in call mode.
-- **`audio_sink.py`** is dead code. Delete once we're sure live mode
-  never wants to play raw provider audio.
 - **OpenAI Realtime** path is restored but not tested in this iteration.
   GA shape might have drifted; touch up before flipping
   `LELAMP_BRAIN_PROVIDER=openai`.

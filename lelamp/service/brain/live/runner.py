@@ -36,7 +36,7 @@ import subprocess
 import threading
 import time
 from collections import deque
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 import requests
 

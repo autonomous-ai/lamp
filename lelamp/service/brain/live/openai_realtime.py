@@ -17,8 +17,9 @@ Audio plumbing
 * OpenAI Realtime expects: 24 kHz PCM int16 mono. We resample 16 → 24
   with ``scipy.signal.resample_poly(up=3, down=2)`` before base64-encoding
   each chunk. Polyphase resampling is mono-frame-rate cheap on the Pi.
-* Audio out: 24 kHz PCM int16 mono — matches :class:`PCMAudioSink` default
-  rate, so no further resampling on the playback side.
+* Audio out: 24 kHz PCM int16 mono — dropped (we use ElevenLabs via
+  the runner's text path). The native audio stream is silenced via
+  ``output_modalities=["text"]`` whenever supported.
 
 Provider switch
 ---------------
@@ -87,7 +88,7 @@ DEFAULT_TRANSCRIBE_MODEL = os.environ.get(
 
 # OpenAI Realtime uses 24 kHz mono PCM16 on both directions. VoiceService
 # captures 16 kHz so we polyphase-resample 16 → 24 (up=3, down=2) before
-# sending. Output already matches PCMAudioSink's default rate.
+# sending.
 INPUT_RATE_HZ = 24_000
 MIC_RATE_HZ = 16_000
 
