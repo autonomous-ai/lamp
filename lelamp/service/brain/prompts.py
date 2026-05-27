@@ -178,27 +178,53 @@ Voice-style markers inside chit-chat replies (`[chuckle]`, `[sigh]`,
 operator markup — no `[HW:/...]`, no `/emotion ...`, no JSON blobs.""",
     """# Output format — STRICT
 
-For each user utterance pick ONE:
+For each user utterance pick exactly ONE of three actions:
 
   (a) **Chit-chat reply** — speak your response in the user's
       language. Plain prose only.
 
   (b) **Delegate** — call the function `delegate_to_lumi` with the
-      user's original transcript. Do NOT speak. The function call
-      itself routes the request — no text is needed.
+      user's original transcript and produce NO other output. NO
+      acknowledgement audio, NO "let me check", NO "one moment",
+      NO "I'll forward this". The Lumi agent will speak; you stay
+      silent until the next user turn.
+
+  (c) **Wait** — call the function `wait_for_user` (no arguments)
+      when the audio doesn't warrant a response: silence, background
+      noise, music, your own echo bleeding back, ASR hallucinations
+      (the YouTube outro phrase "Hẹn gặp lại các bạn..." is a
+      classic), or anything you cannot confidently understand. DO
+      NOT speak. DO NOT delegate. Wait silently for the next clean
+      user utterance.
 
 Examples:
-  user: "hello"             →  Hi! [chuckle] How can I help?
-  user: "what time is it?"  →  call delegate_to_lumi(transcript=...)
-  user: "turn on the lamp"  →  call delegate_to_lumi(transcript=...)
-  user: "tell me a joke"    →  Why did the lamp cross the road? …
+  user: "hello"               →  Hi! [chuckle] How can I help?
+  user: "what time is it?"    →  call delegate_to_lumi(transcript=...)  ← silent
+  user: "turn on the lamp"    →  call delegate_to_lumi(transcript=...)  ← silent
+  user: "tell me a joke"      →  Why did the lamp cross the road? …
+  audio: <silence>            →  call wait_for_user()                   ← silent
+  audio: <music outro echo>   →  call wait_for_user()                   ← silent
+  audio: <indistinct mumble>  →  call wait_for_user()                   ← silent
 
 NEVER emit the literal text "[DELEGATE]" — that's a different mode's
 protocol. You have a function tool for this; use it.
 
+NEVER speak alongside a delegate call. Calling the tool AND speaking
+in the same response is a mistake — the user would hear you say
+something like "let me check" and then hear Lumi answer separately,
+which sounds like two voices arguing. Pick one path per turn.
+
 Voice-style markers inside chit-chat replies (`[chuckle]`, `[sigh]`,
 `[laughs softly]`) are fine and do NOT trigger delegation. Never emit
-operator markup — no `[HW:/...]`, no `/emotion ...`, no JSON blobs.""",
+operator markup — no `[HW:/...]`, no `/emotion ...`, no JSON blobs.
+
+# Unclear audio
+
+If the audio is unclear (silence, music, background noise, your
+own ElevenLabs reply leaking back through the mic, ASR
+hallucinations, indistinct mumble), do NOT reason about what the
+user *might* have meant. Do not guess. Call `wait_for_user()` and
+stay quiet. Silence is always a valid response.""",
 ).replace(
     """  - BUT you cannot trigger any of them yourself. To actually do them,
     emit `[DELEGATE]`.""",
@@ -220,16 +246,42 @@ DELEGATE_PREFIX = "[DELEGATE]"
 # in one place.
 DELEGATE_TOOL_NAME = "delegate_to_lumi"
 DELEGATE_TOOL_DESCRIPTION = (
-    "Hand the user's turn off to the Lumi agent. ONLY call this when "
-    "the user clearly wants one of the device skills listed in the "
-    "OPENCLAW SKILLS block (device control, music, scheduling, "
+    "PROACTIVE: hand the user's turn off to the Lumi agent. ONLY call "
+    "this when the user clearly wants one of the device skills listed "
+    "in the OPENCLAW SKILLS block (device control, music, scheduling, "
     "wellbeing, vision, etc.), needs a real-time external fact "
     "(weather, prices, current time), or asks about something not in "
     "the chat history above (older sessions, MEMORY entries). DO NOT "
     "call this for greetings, smalltalk, mumbled / garbled input, "
     "short reactions, or questions you can answer from your own "
     "knowledge — those are chit-chat, just reply directly. When in "
-    "doubt, prefer chit-chat over delegating."
+    "doubt, prefer chit-chat over delegating. "
+    "Do not output a preamble. Do not ask for confirmation. Do not "
+    "respond conversationally after calling this tool. Produce ZERO "
+    "audio and ZERO text output around the call — the Lumi agent "
+    "speaks to the user; you stay silent until the next turn."
+)
+
+
+# No-op tool the model can call when the latest audio doesn't warrant
+# a spoken response — silence, background noise, music, the model's
+# own ElevenLabs reply leaking back through the mic, Whisper
+# hallucinating ("Hẹn gặp lại các bạn trong những video tiếp theo"
+# from a music tail), etc. Following OpenAI's recommended pattern in
+# the realtime-models-prompting guide: give the model a valid
+# non-speaking action so it stops defaulting to "say something" when
+# unsure. The runner ignores this call entirely — no log line, no
+# side effect.
+WAIT_FOR_USER_TOOL_NAME = "wait_for_user"
+WAIT_FOR_USER_TOOL_DESCRIPTION = (
+    "Call this when the latest audio does not need a spoken response: "
+    "silence, background noise, hold music, your own echo bleeding "
+    "back through the mic, ASR hallucinations (e.g. random YouTube "
+    "outro phrases from a quiet room), or any input you cannot "
+    "confidently understand. DO NOT speak; DO NOT call "
+    "delegate_to_lumi. Just call this and wait for the next clean "
+    "user utterance. When in doubt between speaking and calling this, "
+    "call this — silence is always safe."
 )
 
 
