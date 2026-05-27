@@ -40,6 +40,9 @@ class PoseEstimator3DLifting(PredictorBase[Pose3DInput, RawPose3DDetection | Non
     DEFAULT_REMOTE_URL: str | None = None
     DEFAULT_N_FRAMES: int = 243
     DEFAULT_INPUT_SIZE: tuple[int, int] = (1920, 1080)
+    ONNX_INPUT_NAME: str = "input"
+    ONNX_OUTPUT_NAME: str = "output"
+    ONNX_NUM_JOINTS: int = 17
 
     # H36M joint index for neck (used as center for normalization)
     NECK_JOINT_IDX: int = 9
@@ -81,7 +84,10 @@ class PoseEstimator3DLifting(PredictorBase[Pose3DInput, RawPose3DDetection | Non
             return
         self._model_path = ensure_downloaded(self._model_path, remote=self._remote_url)
         self._logger.info("Loading model from %s", self._model_path)
-        self._session = prepare_ort_session(self._model_path)
+        warmup = {self.ONNX_INPUT_NAME: np.zeros(
+            (self._batch_size, self._n_frames, self.ONNX_NUM_JOINTS, 3), dtype=np.float32,
+        )}
+        self._session = prepare_ort_session(self._model_path, warmup_inputs=warmup)
         self._running = True
         self._logger.info("Ready")
 
@@ -155,7 +161,7 @@ class PoseEstimator3DLifting(PredictorBase[Pose3DInput, RawPose3DDetection | Non
         # Stack valid inputs: (B, n_frames, K, 3)
         batch: npt.NDArray[np.float32] = np.stack(preprocessed, axis=0).astype(np.float32)
 
-        (output,) = self._session.run(["output"], {"input": batch})
+        (output,) = self._session.run([self.ONNX_OUTPUT_NAME], {self.ONNX_INPUT_NAME: batch})
         output = cast(npt.NDArray[np.float32], output)  # (B, n_frames, K, 3)
 
         # Map results back — trim padded frames to original T
