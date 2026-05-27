@@ -56,8 +56,9 @@ class AudioEmotionRecognizer(PredictorBase[Audio, RawAudioEmotionDetection]):
         labels_path: Path | None = None,
         processor_factory: AudioProcessorFactory | None = None,
         sample_rate: int | None = None,
+        batch_size: int | None = None,
     ) -> None:
-        super().__init__()
+        super().__init__(batch_size=batch_size)
 
         model_path = get_or_default(model_path, self.DEFAULT_MODEL_PATH)
         if model_path is None:

@@ -52,8 +52,9 @@ class EmotionRecognizer(PredictorBase[cv2t.MatLike, RawEmotionDetection]):
         remote_url: str | None = None,
         classes_path: Path | None = None,
         input_size: tuple[int, int] | None = None,
+        batch_size: int | None = None,
     ) -> None:
-        super().__init__()
+        super().__init__(batch_size=batch_size)
 
         model_path = get_or_default(model_path, self.DEFAULT_MODEL_PATH)
         if model_path is None:

@@ -50,8 +50,9 @@ class PoseEstimator3DLifting(PredictorBase[Pose3DInput, RawPose3DDetection | Non
         remote_url: str | None = None,
         input_size: tuple[int, int] | None = None,
         n_frames: int | None = None,
+        batch_size: int | None = None,
     ) -> None:
-        super().__init__()
+        super().__init__(batch_size=batch_size)
 
         model_path = get_or_default(model_path, self.DEFAULT_MODEL_PATH)
         if model_path is None:
