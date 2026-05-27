@@ -24,6 +24,55 @@ LELAMP_BRAIN_PROVIDER=gemini    # gemini | openai
   `context_loader.py`, `summarizer.py`, `workspace.py`, so the routing
   policy + memory layout stay identical and only the transport differs.
 
+## ⚠️ Native multimodal vs side-channel ASR — read this once
+
+Gemini Live + OpenAI Realtime are **native multimodal** — the model
+encodes mic audio directly into the same latent space it uses for text
+output. There is NO intermediate "STT → text → LLM" cascade. The
+model "hears" the user the way it would read text: raw audio in,
+text/audio out, no string in the middle.
+
+The `input_audio_transcription` we configure is a **separate, optional
+ASR side-channel** that runs in parallel. We use its output only for:
+
+  1. `brain.input` journal logging (debug).
+  2. The delegate transcript routed to OpenClaw (see
+     `_on_delegate` — the model's `delegate_to_lumi` tool no longer
+     takes a `transcript` arg because the model used to hallucinate
+     it from history).
+  3. Re-injection into the next session's context window when an
+     OpenClaw turn lands mid-conversation (see "History strategy").
+
+**The model itself does not see the side-channel transcript** — it's
+listening to the audio directly.
+
+### Side effect to remember
+
+The side-channel ASR can be **WRONG** while the model is still
+**RIGHT**. Example from the journal (2026-05-27 08:37):
+
+```
+brain.input  [live] 'Em bay theo đi Lumi.'      ← side-channel ASR (wrong)
+brain.tts.start [live] 'Ừm, bạn muốn nghe bài thơ về chủ đề gì nè?'
+brain.chitchat [live] '... thơ tình, thơ buồn, hay thiên nhiên?'
+                       ↑ model's reply (right — user asked for a poem)
+```
+
+Audio quality was fine — the user asked for a poem, the model replied
+appropriately. The side-channel ASR (Google's ASR on Gemini Dev API,
+which cannot be locked to `vi-VN`) mis-transcribed entirely. The user
+experience is correct; only the log is wrong.
+
+**Don't debug "the model misunderstood" from `brain.input` alone.**
+A wrong `brain.input` + a correct `brain.chitchat` means the
+side-channel hallucinated; the model heard correctly. The audio path
+is ground truth.
+
+Downstream gotcha: workspace chit-chat persistence and OpenClaw
+history sync both copy `brain.input` text. A bad ASR turn polluting
+those stores can carry stale wrong text into the *next* session's
+initial bake. If we ever bench/visualise this, account for it.
+
 ## Model choice: `gemini-2.5-flash-live-preview`
 
 Default is **`gemini-2.5-flash-live-preview`**, not the newer 3.1. The
@@ -288,3 +337,54 @@ raw provider audio (none currently does).
 - **OpenAI Realtime** path is restored but not tested in this iteration.
   GA shape might have drifted; touch up before flipping
   `LELAMP_BRAIN_PROVIDER=openai`.
+- **Speaker recognition + enroll on live chit-chat path** — voiceprint
+  ID currently fires only on the delegate path (`_on_delegate` →
+  `decorate_callback`). Chit-chat reply never tells the model who's
+  talking, so live brain can't address users by name and the
+  enroll-nudge skill (which lives on the OpenClaw side) never runs for
+  unknown voices that stay in chit-chat. Planned wiring:
+    1. **Mode A — ID at session open** (recommended start): on
+       Phase 1 → Phase 2, run `_identify_and_decorate` on the rolling
+       audio buffer **in parallel** with `session.start()` so the
+       speaker label is ready by the time the WS handshake completes.
+       Latency-neutral because speaker ID (~50-200ms ONNX on Pi) is
+       always shorter than the WS connect (~500-1000ms).
+    2. **Enroll fallback for unknown voices**: when the parallel ID
+       returns `Unknown Speaker[voice:<hash>]`, force-delegate the
+       first turn so OpenClaw's existing enroll-nudge skill fires
+       ("Xin chào! Cho mình biết tên với?"). Once the user replies a
+       name, OpenClaw registers the voiceprint and subsequent sessions
+       see the canonical "<Name>: ..." label.
+    3. **Inject label into live session**: push a
+       `conversation.item.create({role:"system", text:"Current
+       speaker: <Name>"})` right after the WS opens (OpenAI) or
+       append a one-line `[speaker: <Name>]` to system_instruction
+       at session build (Gemini — no system-role items mid-session
+       on Dev API).
+    Multi-speaker turn-by-turn re-ID (Mode B, ~50-200ms TTFA hit per
+    turn) and background re-ID (Mode C, zero hot-path cost) are
+    upgrades to defer until single-speaker rooms are working
+    end-to-end.
+- **ASR quality bench** — three different speech-to-text systems are
+  in play depending on the configured mode, and we don't have a
+  side-by-side accuracy comparison on the same Vietnamese audio yet.
+  Quick sketch of what each path uses:
+    - `call` mode → Deepgram `nova-3-general` (smart_format, Vietnamese
+      tuned). Proven on the device for months.
+    - `live` + OpenAI Realtime → `gpt-4o-mini-transcribe` (or
+      `whisper-1` if the account hasn't unlocked the newer model).
+      Side-channel only — the realtime model itself processes audio
+      natively. Lock-able via `transcription.language='vi'`.
+    - `live` + Gemini Live → Google's internal ASR via
+      `input_audio_transcription`. Side-channel only — Gemini's main
+      model also processes audio natively. **Cannot** lock language on
+      Developer API (`language_codes` is Enterprise-only), which
+      surfaces as occasional hallucination into French / English on
+      short or noisy turns (see journal example 2026-05-27 07:37:29
+      "Et qu'est-ce qu'il y a de louche?" while the user was asking
+      for a story in Vietnamese).
+    A formal bench across all three on a fixed set of Vietnamese
+    utterances (clean, noisy, short, long, code-switched) would tell
+    us how much the side-channel hallucinations actually distort the
+    logs / sync history, and whether locking down a single ASR for
+    the entire device is worth the migration cost.
