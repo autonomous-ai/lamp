@@ -506,9 +506,31 @@ class OpenAIRealtimeSession(BrainSession):
             "LELAMP_OPENAI_REALTIME_REASONING_EFFORT", "minimal",
         ).strip()
 
+        # Output modality. ``audio`` = server generates audio + paired
+        # transcript (we drop the audio and play the transcript through
+        # ElevenLabs). ``text`` = server only generates text — skips
+        # audio token generation entirely (~4× cheaper per output token
+        # at GA pricing, and the average reply is dominated by output
+        # tokens). Default = ``text`` because LiveBrainRunner routes
+        # every reply through ElevenLabs via on_text; the audio chunks
+        # were always silently dropped. Override with
+        # ``LELAMP_LIVE_OPENAI_OUTPUT_MODALITY=audio`` if a downstream
+        # eventually wants raw provider audio.
+        output_modality = (
+            os.environ.get("LELAMP_LIVE_OPENAI_OUTPUT_MODALITY", "text")
+            .strip().lower()
+            or "text"
+        )
+        if output_modality not in ("text", "audio"):
+            logger.warning(
+                "LELAMP_LIVE_OPENAI_OUTPUT_MODALITY=%r invalid — using 'text'",
+                output_modality,
+            )
+            output_modality = "text"
+
         cfg: dict[str, Any] = {
             "type": "realtime",
-            "output_modalities": ["audio"],
+            "output_modalities": [output_modality],
             "instructions": self._system_instruction,
             "audio": {
                 "input": {
@@ -543,10 +565,6 @@ class OpenAIRealtimeSession(BrainSession):
                         "interrupt_response": False,
                     },
                 },
-                "output": {
-                    "format": {"type": "audio/pcm", "rate": INPUT_RATE_HZ},
-                    "voice": self._voice,
-                },
             },
             "tools": [
                 {
@@ -576,6 +594,15 @@ class OpenAIRealtimeSession(BrainSession):
             ],
             "tool_choice": "auto",
         }
+        # Only attach the audio.output block when actually generating
+        # audio. In text-only mode the field is pointless and some GA
+        # API versions reject an `audio.output` config that contradicts
+        # `output_modalities=["text"]`.
+        if output_modality == "audio":
+            cfg["audio"]["output"] = {
+                "format": {"type": "audio/pcm", "rate": INPUT_RATE_HZ},
+                "voice": self._voice,
+            }
         if reasoning_effort:
             cfg["reasoning"] = {"effort": reasoning_effort}
         return cfg

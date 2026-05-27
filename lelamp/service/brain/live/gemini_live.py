@@ -564,8 +564,19 @@ class GeminiLiveSession(BrainSession):
               keeps. Default 20ms.
 
         We never set ``disabled=True`` — the manual-signal path was
-        retired (TTS echo gate is enough). Returns ``{}`` when no env
-        var is set so the connection keeps the SDK defaults verbatim.
+        retired (TTS echo gate is enough).
+
+        In-code defaults are tighter than the SDK defaults because the
+        SDK defaults (silence=100ms, start_sensitivity=HIGH) fragment
+        natural pauses and twitch on background noise — every twitch
+        is a free response.create that bills audio output. With
+        always-on lamps that's expensive. Defaults here:
+
+          silence_duration_ms          = 800  (SDK: 100)
+          start_of_speech_sensitivity  = LOW  (SDK: HIGH)
+
+        Env vars override per-deployment. Setting the env to a literal
+        ``sdk`` keeps the SDK default (escape hatch).
         """
         types = self._types
         silence_ms_raw = os.environ.get("LELAMP_LIVE_VAD_SILENCE_MS", "").strip()
@@ -573,30 +584,47 @@ class GeminiLiveSession(BrainSession):
         end_sens = os.environ.get("LELAMP_LIVE_VAD_END_SENSITIVITY", "").strip().lower()
         prefix_ms_raw = os.environ.get("LELAMP_LIVE_VAD_PREFIX_PADDING_MS", "").strip()
 
-        # Bail early if nothing's configured.
-        if not (silence_ms_raw or start_sens or end_sens or prefix_ms_raw):
-            return {}
-
         kwargs: dict = {}
-        if silence_ms_raw:
+
+        # silence_duration_ms — env wins, else 800ms default. "sdk" =
+        # skip the field entirely so the server falls back to its own
+        # default (100ms).
+        if silence_ms_raw == "sdk":
+            pass
+        elif silence_ms_raw:
             try:
                 kwargs["silence_duration_ms"] = int(silence_ms_raw)
             except ValueError:
-                logger.warning("LELAMP_LIVE_VAD_SILENCE_MS=%r is not an int — ignored", silence_ms_raw)
-        if prefix_ms_raw:
+                logger.warning("LELAMP_LIVE_VAD_SILENCE_MS=%r is not an int — using default 800", silence_ms_raw)
+                kwargs["silence_duration_ms"] = 800
+        else:
+            kwargs["silence_duration_ms"] = 800
+
+        # prefix_padding_ms — only sent when env explicitly set. SDK
+        # default (20ms) is fine; no cost justification to override.
+        if prefix_ms_raw and prefix_ms_raw != "sdk":
             try:
                 kwargs["prefix_padding_ms"] = int(prefix_ms_raw)
             except ValueError:
                 logger.warning("LELAMP_LIVE_VAD_PREFIX_PADDING_MS=%r is not an int — ignored", prefix_ms_raw)
-        if start_sens:
+
+        # start_of_speech_sensitivity — env wins, else LOW default.
+        if start_sens == "sdk":
+            pass
+        else:
+            effective_start = start_sens or "low"
             try:
                 kwargs["start_of_speech_sensitivity"] = getattr(
                     types.StartSensitivity,
-                    f"START_SENSITIVITY_{start_sens.upper()}",
+                    f"START_SENSITIVITY_{effective_start.upper()}",
                 )
             except (AttributeError, TypeError) as e:
-                logger.warning("VAD start sensitivity %r rejected by SDK: %s", start_sens, e)
-        if end_sens:
+                logger.warning("VAD start sensitivity %r rejected by SDK: %s", effective_start, e)
+
+        # end_of_speech_sensitivity — only sent when env explicitly set.
+        # SDK default behaviour interacts with silence_duration_ms;
+        # leave it alone unless a deployment tuner asks for it.
+        if end_sens and end_sens != "sdk":
             try:
                 kwargs["end_of_speech_sensitivity"] = getattr(
                     types.EndSensitivity,

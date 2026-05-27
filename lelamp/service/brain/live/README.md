@@ -137,19 +137,60 @@ brain/live/
 ## VAD knobs (Gemini Live native)
 
 Gemini Live exposes a small VAD config — no RMS / energy threshold.
-Default `silence_duration_ms=100` is documented as too aggressive
-(fragments natural pauses); 500-800ms is recommended. We expose:
+The SDK's own defaults (silence_duration_ms=100, start_sensitivity=HIGH)
+are too twitchy: every fragmented pause is a free `response.create`
+that bills audio output. We override with tighter in-code defaults
+out of the box:
 
 ```bash
-LELAMP_LIVE_VAD_SILENCE_MS=500           # default 100, recommend 500-800
-LELAMP_LIVE_VAD_START_SENSITIVITY=low    # low | high (default high)
+LELAMP_LIVE_VAD_SILENCE_MS=800           # our default 800 (SDK: 100). Set "sdk" to use SDK default.
+LELAMP_LIVE_VAD_START_SENSITIVITY=low    # our default low (SDK: high). Set "sdk" to use SDK default.
 LELAMP_LIVE_VAD_END_SENSITIVITY=         # low | high (unset → SDK default)
-LELAMP_LIVE_VAD_PREFIX_PADDING_MS=       # int ms (default 20)
+LELAMP_LIVE_VAD_PREFIX_PADDING_MS=       # int ms (unset → SDK default 20)
 ```
 
-Unset = SDK default. The runner does **not** do any client-side RMS
-filtering — Gemini's VAD sees the full audio stream and decides for
-itself.
+Unset env → tightened default. Env value = override. Env value = literal
+`sdk` → skip the field so the server uses its own default (escape
+hatch for A/B testing).
+
+The runner does **not** do any client-side RMS filtering on the audio
+sent to Gemini — Gemini's VAD sees the stream and decides for itself.
+The local VAD in `voice_service.py` gates audio frames BEFORE they
+reach the WS (separate path; see voice_service `_make_live_vad_check`).
+
+## Cost / always-on knobs
+
+The lamp typically stays powered for whole-day use, so the runner has
+two gates that keep idle billing bounded:
+
+1. **Local VAD frame gate** (`is_speech_callback` from voice_service).
+   Silence frames are dropped before `session.send_audio`, so audio-in
+   tokens only accrue while someone is actually talking. No env knob —
+   the chain (RMS → WebRTC → Silero) is wired in voice_service.py.
+
+2. **Idle-close session gate.** If the active WS sees no positive VAD
+   verdict for `LELAMP_LIVE_IDLE_CLOSE_S` (default 90s) AND TTS is
+   quiet AND no reply is being generated, the runner closes the
+   session and goes back to "mic open, no session." The next speech
+   frame opens a fresh one (~0.7-1s connect, billed to that turn's
+   perceived latency). Saves the GoAway/reconnect cycle of full-prompt
+   re-injection during quiet hours — ~100-150 reconnects/day → ~one
+   per real conversation.
+
+   ```bash
+   LELAMP_LIVE_IDLE_CLOSE_S=90              # default 90; 0 = always-on (legacy)
+   ```
+
+   Tune: raise to 180-300 if natural conversation pauses are long and
+   the 1s wake delay on the next sentence is noticeable; lower to
+   30-60 in a noisy environment where the local VAD may already be
+   the dominant savings.
+
+3. **Response-firing gate** (`_should_skip_response`). Even when a
+   transcript arrives, hallucination / echo / too-short cases skip
+   `request_response()` so we don't pay for output audio + text on
+   noise. Provider-side VAD also won't auto-commit pure-silence frames
+   because the local gate kept them off the wire.
 
 ## TTS path
 
@@ -158,9 +199,19 @@ Hard-wired to ElevenLabs via `TTSService.speak_queue`. The previous
 deployments always want one consistent voice across call and live
 modes, no toggle needed.
 
-The provider still emits audio chunks (3.x Live tier has no text-only
-response modality on Developer API) — the runner drops them and uses
-`output_audio_transcription` to get the words for ElevenLabs.
+**Gemini Live (3.x Developer API):** the provider still emits audio
+chunks regardless of caller intent — there's no text-only response
+modality on this tier. The runner drops every chunk and uses
+`output_audio_transcription` for the words. Wasted output tokens
+billed; accept until the API grows a text modality.
+
+**OpenAI Realtime (GA, gpt-realtime-2 and later):** supports
+`output_modalities=["text"]`, which we set by default. The server only
+generates text (no audio gen → ~4× cheaper per output token at GA
+pricing), and the runner pipes that text into ElevenLabs verbatim via
+`response.output_text.*` events. Override with
+`LELAMP_LIVE_OPENAI_OUTPUT_MODALITY=audio` if a downstream wants the
+raw provider audio (none currently does).
 
 ## Known gaps / follow-ups
 

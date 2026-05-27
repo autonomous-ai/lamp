@@ -89,6 +89,19 @@ _POST_TTS_HOLDOFF_S = float(os.environ.get("LELAMP_LIVE_POST_TTS_HOLDOFF_S", "0.
 # call mode. Tunable.
 _LIVE_VAD_HOLD_S = float(os.environ.get("LELAMP_LIVE_VAD_HOLD_S", "1.5"))
 
+# Idle-close window. If the active realtime session sees no speech-
+# frame from the local VAD for this many seconds (and no TTS / reply
+# is in flight), the runner closes the WS and re-enters Phase 1
+# (mic open, no session) to wait for the next conversation. Without
+# this gate, an always-on lamp pays for a session open + system-prompt
+# cache miss on every GoAway (~10-15 min) — 24h × 4-6 reconnects/h =
+# ~100-150 full-prompt opens/day even at 3am with nobody home.
+# Default 90s — long enough that natural turn-taking pauses don't
+# churn reconnects (a real conversation refreshes the timer every
+# few seconds), short enough that idle billing is bounded. Set 0 to
+# disable (legacy always-open behaviour).
+_IDLE_CLOSE_S = float(os.environ.get("LELAMP_LIVE_IDLE_CLOSE_S", "90"))
+
 
 class _ArecordStream:
     """Subprocess wrapper around ALSA arecord — same shape as the one
@@ -343,9 +356,27 @@ class LiveBrainRunner:
                     continue
 
     def _run_one_session(self, frame_size: int) -> None:
-        """Open mic, open a BrainSession, push frames until the session
-        closes itself (delegate, GoAway, error). The outer loop will
-        then open a fresh one."""
+        """Open mic, wait for the first speech frame, then open a
+        BrainSession and push frames until the session closes
+        (delegate, GoAway, error) or the idle-close timer lapses.
+
+        Two phases per call:
+
+          Phase 1 (idle): mic open, no realtime WS. Local VAD watches
+            the stream; the rolling audio buffer keeps filling so
+            speaker recog has 30s of warm audio when a delegate fires.
+            Echo gate drops TTS tail / Lumi's own voice. We exit Phase
+            1 only on a positive VAD verdict — no session is opened
+            (and no provider tokens are spent) until then.
+
+          Phase 2 (active): open the WS, send the trigger frame first
+            so the first word isn't lost, then run the normal stream
+            loop. Exits when the provider closes the session, when
+            ``_restart_after_turn`` flips, OR when the idle-close
+            timer (``LELAMP_LIVE_IDLE_CLOSE_S``) lapses — at which
+            point the outer loop calls us again and we re-enter
+            Phase 1.
+        """
         if self._alsa_device is not None:
             mic_ctx = _ArecordStream(
                 alsa_device=self._alsa_device, rate=_STT_RATE,
@@ -357,43 +388,56 @@ class LiveBrainRunner:
                 blocksize=frame_size, device=self._input_device,
             )
 
-        session = self._brain.create_session()
-        ok = session.start(
-            on_delegate=self._on_delegate,
-            on_audio_chunk=lambda _: None,  # text-out via on_text; drop audio
-            on_text=self._on_text,
-            on_user_input=self._on_user_input,
-            on_error=self._on_error,
-        )
-        if not ok:
-            logger.warning("Live brain session.start() returned False — sleeping 2s")
-            self._stop_event.wait(2.0)
-            return
+        with mic_ctx as mic:
+            # ---- Phase 1: idle (no session) ---------------------------
+            trigger_frame = self._wait_for_speech(mic, frame_size)
+            if trigger_frame is None:
+                return  # stop_event fired during idle wait
 
-        with self._session_lock:
-            self._session = session
-        with self._reply_lock:
-            self._reply_buf = ""
-            self._reply_log_buf = ""
-            self._user_input_buf = ""
-            self._last_user_input = ""
-            self._delegate_text_detected = False
-            self._restart_after_turn = False
-            self._user_input_logged = False
-            self._tts_start_logged = False
-            self._utterance_has_speech = self._is_speech_callback is None
-        # Re-arm echo gate state. Don't leak holdoff timing across
-        # sessions — a stale ``_tts_stopped_at`` from the previous
-        # session would otherwise keep muting the mic on a fresh open.
-        self._tts_stopped_at = None
-        self._tts_was_speaking = False
-        # Snapshot the initial history cursor so the first post-turn
-        # sync only pushes truly NEW OpenClaw turns. Pulls the same
-        # turns that load_context() just baked into the system prompt.
-        self._last_synced_ts = self._latest_openclaw_ts()
+            # ---- Phase 2: active (session open) -----------------------
+            session = self._brain.create_session()
+            ok = session.start(
+                on_delegate=self._on_delegate,
+                on_audio_chunk=lambda _: None,  # text-out via on_text; drop audio
+                on_text=self._on_text,
+                on_user_input=self._on_user_input,
+                on_error=self._on_error,
+            )
+            if not ok:
+                logger.warning("Live brain session.start() returned False — sleeping 2s")
+                self._stop_event.wait(2.0)
+                return
 
-        try:
-            with mic_ctx as mic:
+            with self._session_lock:
+                self._session = session
+            with self._reply_lock:
+                self._reply_buf = ""
+                self._reply_log_buf = ""
+                self._user_input_buf = ""
+                self._last_user_input = ""
+                self._delegate_text_detected = False
+                self._restart_after_turn = False
+                self._user_input_logged = False
+                self._tts_start_logged = False
+                # Phase 1 only exits on a real speech frame (or the
+                # no-VAD legacy path), so the current utterance
+                # already has speech.
+                self._utterance_has_speech = True
+            # Re-arm echo gate state. Don't leak holdoff timing across
+            # sessions — a stale ``_tts_stopped_at`` from the previous
+            # session would otherwise keep muting the mic on a fresh open.
+            self._tts_stopped_at = None
+            self._tts_was_speaking = False
+            # Snapshot the initial history cursor so the first post-turn
+            # sync only pushes truly NEW OpenClaw turns. Pulls the same
+            # turns that load_context() just baked into the system prompt.
+            self._last_synced_ts = self._latest_openclaw_ts()
+
+            try:
+                # Ship the trigger frame first so the first word of the
+                # utterance isn't dropped by the Phase 1 → Phase 2
+                # transition.
+                session.send_audio(trigger_frame)
                 while not self._stop_event.is_set() and not session.is_closed():
                     if self._restart_after_turn:
                         # Turn just ended — bail out so the outer loop
@@ -408,6 +452,24 @@ class LiveBrainRunner:
                             "Live brain turn ended — restarting session for fresh history"
                         )
                         break
+                    # Idle-close: TTS quiet + no reply being generated
+                    # + no speech-frame for IDLE_CLOSE_S → close the WS
+                    # and let the outer loop re-enter Phase 1 (mic stays
+                    # closed for ~50ms during mic_ctx churn but no
+                    # session billing until next speech).
+                    if _IDLE_CLOSE_S > 0:
+                        with self._reply_lock:
+                            reply_in_flight = bool(self._reply_log_buf)
+                        if (
+                            not self._tts_is_speaking()
+                            and not reply_in_flight
+                            and (time.time() - self._last_speech_frame_ts) > _IDLE_CLOSE_S
+                        ):
+                            logger.info(
+                                "Live brain idle %.0fs — closing session to save tokens",
+                                _IDLE_CLOSE_S,
+                            )
+                            break
                     try:
                         data, _ = mic.read(frame_size)
                     except IOError as e:
@@ -463,13 +525,51 @@ class LiveBrainRunner:
                             # silence frame.
                             continue
                     session.send_audio(frame_bytes)
-        finally:
-            with self._session_lock:
-                self._session = None
+            finally:
+                with self._session_lock:
+                    self._session = None
+                try:
+                    session.close()
+                except Exception:
+                    pass
+
+    def _wait_for_speech(self, mic, frame_size: int) -> Optional[bytes]:
+        """Phase 1 loop — keep the mic running but don't open the
+        realtime session until the local VAD says someone is talking.
+        Returns the trigger frame on speech, or ``None`` if the stop
+        event fires first. When no VAD callback is wired (legacy
+        always-on behaviour) the very first frame triggers immediately.
+
+        The rolling audio buffer keeps filling here so when a session
+        opens and the user delegates within the first ~30s, the
+        speaker recognizer still has warm audio to chew on. The echo
+        gate also runs in this phase so TTS playback from a previous
+        session can't trigger a new session via room reverb."""
+        while not self._stop_event.is_set():
             try:
-                session.close()
-            except Exception:
-                pass
+                data, _ = mic.read(frame_size)
+            except IOError as e:
+                logger.info("Live mic EOF in idle phase: %s", e)
+                return None
+            frame_bytes = data.tobytes()
+            self._audio_buf.append(frame_bytes)
+            if self._tts_is_speaking():
+                continue
+            if self._is_speech_callback is None:
+                # No VAD wired — fall back to legacy behaviour: the
+                # first non-TTS frame opens the session. This is
+                # degraded cost mode and only happens if voice_service
+                # didn't pass a VAD callback in.
+                return frame_bytes
+            try:
+                is_speech = bool(self._is_speech_callback(data))
+            except Exception as e:
+                logger.debug("is_speech_callback raised in idle: %s", e)
+                is_speech = True  # fail-open: don't sit silent on a VAD bug
+            if is_speech:
+                self._last_speech_frame_ts = time.time()
+                return frame_bytes
+        return None
 
     # --- callbacks ---------------------------------------------------------
 
