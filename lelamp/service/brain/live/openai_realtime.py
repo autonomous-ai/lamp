@@ -33,6 +33,7 @@ Selection happens in :mod:`lelamp.service.brain.factory` —
 """
 
 import asyncio
+import time
 import base64
 import json
 import logging
@@ -46,6 +47,8 @@ from lelamp.service.brain.prompts import (
     DECISION_RULES_LIVE,
     DELEGATE_TOOL_DESCRIPTION,
     DELEGATE_TOOL_NAME,
+    WAIT_FOR_USER_TOOL_DESCRIPTION,
+    WAIT_FOR_USER_TOOL_NAME,
     language_hint,
     resolve_stt_language,
 )
@@ -203,6 +206,12 @@ class OpenAIRealtimeSession(BrainSession):
         self._on_error: Optional[Callable[[Exception], None]] = None
         self._on_usage: Optional[Callable[[int, int, int], None]] = None
 
+        # Live connection handle — populated inside _run() once the WS
+        # handshake completes, cleared on close. Exposed so
+        # ``send_context_turns`` can schedule mid-session item.create
+        # events from any thread.
+        self._conn: Optional[object] = None
+
         # call_id → function name, filled when response.output_item.added
         # arrives for a function_call item. Needed because
         # response.function_call_arguments.{delta,done} only carry call_id
@@ -307,6 +316,7 @@ class OpenAIRealtimeSession(BrainSession):
             # The beta endpoint started rejecting handshakes with
             # 4000 `beta_api_shape_disabled` once GA shipped.
             async with self._client.realtime.connect(model=self._model) as conn:
+                self._conn = conn
                 config = self._build_session_config()
                 # Log the wire payload at a friendly level so we can
                 # verify: which transcribe model the server actually
@@ -349,7 +359,111 @@ class OpenAIRealtimeSession(BrainSession):
                         except Exception:
                             pass
         finally:
+            self._conn = None
             logger.info("OpenAI Realtime session closed")
+
+    def request_response(self) -> None:
+        """Explicitly fire ``response.create`` from any thread.
+
+        Pairs with ``turn_detection.create_response = false`` — the
+        server commits the input buffer and ships the transcription
+        completion event, but stays quiet until the runner decides
+        the transcript is worth a response. Filters out phantom
+        triggers from Whisper hallucinating on TTS echo / room noise.
+
+        Idempotent on closed sessions: silently drops if the WS is
+        gone."""
+        if self._loop is None or self._conn is None or self._closed:
+            return
+
+        async def _create():
+            try:
+                await self._conn.response.create()
+            except Exception as e:
+                logger.warning("response.create failed: %s", e)
+
+        try:
+            asyncio.run_coroutine_threadsafe(_create(), self._loop)
+        except RuntimeError:
+            pass
+
+    def send_context_turns(self, turns: list[dict]) -> None:
+        """Inject extra conversation history into the live session
+        without triggering a model response.
+
+        Sends one ``conversation.item.create`` event per turn through
+        the open WS. OpenAI Realtime treats these as added context
+        only — generation only happens when the caller sends
+        ``response.create``, which we never do here. The runner uses
+        this to push OpenClaw turns (Telegram, web, other voice
+        sessions) that landed while this voice session was open so
+        the live brain stays current without a WS restart.
+
+        ``turns`` is a list of ``{"role": "user"|"model", "text": ...}``
+        dicts; ``"model"`` is normalised to OpenAI's ``"assistant"``.
+        Marshals onto the session's asyncio loop via
+        ``run_coroutine_threadsafe`` so it's safe to call from the
+        VoiceService thread."""
+        if not turns:
+            return
+        if self._loop is None or self._conn is None or self._closed:
+            return
+        normalized = []
+        for t in turns:
+            text = (t.get("text") or "").strip()
+            if not text:
+                continue
+            role = t.get("role") or "user"
+            if role == "model":
+                role = "assistant"
+            normalized.append({"role": role, "text": text})
+        if not normalized:
+            return
+
+        async def _push():
+            t0 = time.time()
+            pushed = 0
+            try:
+                for entry in normalized:
+                    # Content type must match role: ``input_text`` for
+                    # role=user (things the user said), ``output_text``
+                    # for role=assistant (things the model previously
+                    # said). The server rejects mismatches with
+                    # ``"Invalid value: 'input_text'. Value must be
+                    # 'output_text'."``.
+                    content_type = (
+                        "output_text"
+                        if entry["role"] == "assistant"
+                        else "input_text"
+                    )
+                    await self._conn.conversation.item.create(
+                        item={
+                            "type": "message",
+                            "role": entry["role"],
+                            "content": [{
+                                "type": content_type,
+                                "text": entry["text"],
+                            }],
+                        },
+                    )
+                    pushed += 1
+                logger.info(
+                    "brain.history.sync [live] pushed %d turn(s) in %.2fs",
+                    pushed, time.time() - t0,
+                )
+            except Exception as e:
+                logger.warning(
+                    "brain.history.sync [live] failed after %d/%d turns "
+                    "in %.2fs: %s", pushed, len(normalized),
+                    time.time() - t0, e,
+                )
+
+        try:
+            asyncio.run_coroutine_threadsafe(_push(), self._loop)
+        except RuntimeError:
+            # Loop closed mid-call — silent drop; runner will retry
+            # on the next turn boundary.
+            pass
 
     def _build_transcription_kwargs(self) -> dict[str, Any]:
         """Build the audio.input.transcription payload. Forces the ASR
@@ -377,7 +491,22 @@ class OpenAIRealtimeSession(BrainSession):
         24 kHz — VoiceService sends 16 kHz from the mic, so the send
         loop resamples each chunk with ``scipy.signal.resample_poly``.
         """
-        return {
+        # Reasoning effort (gpt-realtime-2 + later reasoning-class
+        # models only): minimal | low (default) | medium | high | xhigh.
+        # We default the field to ``minimal`` for a voice front-door —
+        # the model spends fewer hidden thinking tokens before
+        # emitting its first audio token, shrinking TTFB. Earlier
+        # non-reasoning models (gpt-realtime, gpt-realtime-1.5)
+        # silently ignore the field, so it's safe to send always.
+        # Override per-deployment with
+        # ``LELAMP_OPENAI_REALTIME_REASONING_EFFORT``; unset / empty
+        # means "don't send the field, let the server pick its
+        # default".
+        reasoning_effort = os.environ.get(
+            "LELAMP_OPENAI_REALTIME_REASONING_EFFORT", "minimal",
+        ).strip()
+
+        cfg: dict[str, Any] = {
             "type": "realtime",
             "output_modalities": ["audio"],
             "instructions": self._system_instruction,
@@ -393,16 +522,25 @@ class OpenAIRealtimeSession(BrainSession):
                     # `self._language` is empty/`auto`, fall back to
                     # auto-detect so multilingual households still work.
                     "transcription": self._build_transcription_kwargs(),
-                    # server_vad lets OpenAI decide when a turn ends. The
-                    # alternative (`turn_detection: None`) puts that on
-                    # the client via input_audio_buffer.commit — we don't
-                    # need it because VoiceService already gates mic
-                    # frames during TTS playback.
+                    # server_vad commits the input buffer + fires the
+                    # transcription completion event when speech ends,
+                    # but we OPT OUT of auto-firing responses
+                    # (``create_response: false``). The runner gates
+                    # response.create itself in :meth:`request_response`
+                    # so a phantom transcript (Whisper hallucination on
+                    # TTS echo / room noise) doesn't burn tokens on a
+                    # full audio response. ``interrupt_response: false``
+                    # also keeps a generating response alive if new
+                    # speech lands mid-reply — we don't support barge-in
+                    # in live mode and cancellation just produces stub
+                    # ``response.done status=cancelled`` events.
                     "turn_detection": {
                         "type": "server_vad",
                         "threshold": 0.5,
                         "prefix_padding_ms": 300,
                         "silence_duration_ms": 500,
+                        "create_response": False,
+                        "interrupt_response": False,
                     },
                 },
                 "output": {
@@ -426,9 +564,21 @@ class OpenAIRealtimeSession(BrainSession):
                         "required": ["transcript"],
                     },
                 },
+                {
+                    "type": "function",
+                    "name": WAIT_FOR_USER_TOOL_NAME,
+                    "description": WAIT_FOR_USER_TOOL_DESCRIPTION,
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                    },
+                },
             ],
             "tool_choice": "auto",
         }
+        if reasoning_effort:
+            cfg["reasoning"] = {"effort": reasoning_effort}
+        return cfg
 
     def _ensure_resampler(self) -> None:
         """Lazy-import scipy + numpy. Both already in lelamp deps; lazy
@@ -505,13 +655,16 @@ class OpenAIRealtimeSession(BrainSession):
         audio = getattr(sess, "audio", None) if sess is not None else None
         ai_input = getattr(audio, "input", None) if audio is not None else None
         echoed_transcription = getattr(ai_input, "transcription", None)
+        echoed_turn_detection = getattr(ai_input, "turn_detection", None)
         echoed_voice = (
             getattr(getattr(audio, "output", None), "voice", None)
             if audio is not None else None
         )
         logger.info(
-            "OpenAI Realtime %s — server echo: voice=%s transcription=%s",
+            "OpenAI Realtime %s — server echo: voice=%s transcription=%s "
+            "turn_detection=%s",
             event.type, echoed_voice, echoed_transcription,
+            echoed_turn_detection,
         )
 
     async def _on_response_audio_delta(self, conn, event) -> None:
@@ -545,19 +698,17 @@ class OpenAIRealtimeSession(BrainSession):
                 pass
 
     async def _on_user_transcript_done(self, conn, event) -> None:
-        # `.completed` carries the full final transcript; emit it as the
-        # final user-input event so callers that buffered deltas can either
-        # use deltas OR this single final string and end up with the same
-        # text.
+        # ``.completed`` carries the full final transcript. Fire it
+        # directly as the is_final event (text, True) — the runner
+        # will then REPLACE its accumulated delta buffer with this
+        # authoritative final, no double-counting. The previous
+        # implementation also fired ``(text, False)`` first which
+        # appended the full text on top of deltas, producing
+        # "ItchyItchy" / "Em đi đi.Em đi đi." style duplicates.
         text = getattr(event, "transcript", None) or ""
-        if text and self._on_user_input is not None:
-            try:
-                self._on_user_input(text, False)
-            except Exception:
-                pass
         if self._on_user_input is not None:
             try:
-                self._on_user_input("", True)
+                self._on_user_input(text, True)
             except Exception:
                 pass
 
@@ -578,6 +729,24 @@ class OpenAIRealtimeSession(BrainSession):
         call_id = getattr(event, "call_id", None)
         name = getattr(event, "name", None) or self._fn_names.get(call_id or "", "")
         raw_args = getattr(event, "arguments", "") or ""
+        if name == WAIT_FOR_USER_TOOL_NAME:
+            # No-op tool — the model used it to acknowledge silence /
+            # ASR hallucination instead of speaking. ACK it so the
+            # server doesn't stall, but do NOT log it loudly (would
+            # spam the journal with one line per quiet frame batch).
+            logger.debug("wait_for_user invoked — staying silent")
+            if call_id:
+                try:
+                    await conn.conversation.item.create(
+                        item={
+                            "type": "function_call_output",
+                            "call_id": call_id,
+                            "output": json.dumps({"result": "waiting"}),
+                        },
+                    )
+                except Exception as e:
+                    logger.warning("wait_for_user ACK failed: %s", e)
+            return
         if name != DELEGATE_TOOL_NAME:
             logger.info("ignoring unknown tool call: %s", name)
             return

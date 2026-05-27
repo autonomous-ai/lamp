@@ -79,6 +79,16 @@ _LUMI_SENSING_URL = "http://127.0.0.1:5000/api/sensing/event"
 # can interrupt naturally.
 _POST_TTS_HOLDOFF_S = float(os.environ.get("LELAMP_LIVE_POST_TTS_HOLDOFF_S", "0.6"))
 
+# How long to keep streaming frames after the local VAD last said
+# "this is speech". Without a hold-over, the frame-level gate cuts
+# mid-utterance every time a quiet consonant / between-word breath
+# drops below RMS threshold — OpenAI then sees fragmented audio it
+# can't transcribe. 1.5s matches the classic SILENCE_TIMEOUT_S /
+# call-mode IDLE→SPEECH state machine, so live mode end-of-turn
+# behaviour is roughly identical to what users already learned in
+# call mode. Tunable.
+_LIVE_VAD_HOLD_S = float(os.environ.get("LELAMP_LIVE_VAD_HOLD_S", "1.5"))
+
 
 class _ArecordStream:
     """Subprocess wrapper around ALSA arecord — same shape as the one
@@ -135,6 +145,7 @@ class LiveBrainRunner:
         input_device: Optional[int] = None,
         decorate_callback: Optional[Callable[[str, list], tuple]] = None,
         send_to_lumi_callback: Optional[Callable[[str, str], None]] = None,
+        is_speech_callback: Optional[Callable[[bytes], bool]] = None,
     ):
         self._brain = brain
         self._tts = tts_service
@@ -158,6 +169,15 @@ class LiveBrainRunner:
         # functions (degraded format).
         self._decorate_callback = decorate_callback
         self._send_to_lumi_callback = send_to_lumi_callback
+        # Local VAD chain (RMS → WebRTC → Silero) shared with the call
+        # mode path. ``is_speech_callback(frame_bytes) -> bool`` returns
+        # True when the frame contains speech, False for silence /
+        # background. Used to suppress non-speech frames before they
+        # reach the realtime provider — saves tokens (OpenAI Realtime
+        # bills on audio in) AND keeps the provider's server VAD from
+        # latching onto room noise / TV background. None disables the
+        # gate entirely (stream every frame, original behaviour).
+        self._is_speech_callback = is_speech_callback
 
         # Rolling mic-frame buffer for speaker recognition. ~30 s
         # window matches the call-mode loop (see voice_service.py
@@ -184,6 +204,26 @@ class LiveBrainRunner:
         # a fresh session starts and every time turn_complete fires.
         self._reply_buf = ""
         self._reply_lock = threading.Lock()
+
+        # Per-utterance speech-present flag. Flipped True whenever a
+        # mic frame passes the local VAD gate (RMS → WebRTC → Silero)
+        # and gets shipped to the provider. Read on
+        # ``_on_user_input`` is_final to decide whether to ask the
+        # provider for a response — pure echo / room noise that
+        # bypassed the gate but happened to transcribe (Whisper
+        # hallucination) won't trigger a wasted response if the flag
+        # is False. Reset every turn_complete + on transcript
+        # is_final. Stays True (degraded behaviour) when no VAD
+        # callback was wired so the runner still works without a
+        # local gate.
+        self._utterance_has_speech = self._is_speech_callback is None
+
+        # Timestamp of the most recent frame the local VAD verdict'd
+        # as speech. ``-inf`` so the IDLE check (now - ts > HOLD_S)
+        # holds true at startup — we don't stream the first
+        # ``_LIVE_VAD_HOLD_S`` of boot audio to OpenAI just because
+        # the timer hasn't been written to yet.
+        self._last_speech_frame_ts: float = float("-inf")
 
         # Mirror of the call-mode per-turn logs so the journal shows
         # the same `brain.input` / `brain.chitchat` shape regardless
@@ -341,6 +381,7 @@ class LiveBrainRunner:
             self._restart_after_turn = False
             self._user_input_logged = False
             self._tts_start_logged = False
+            self._utterance_has_speech = self._is_speech_callback is None
         # Re-arm echo gate state. Don't leak holdoff timing across
         # sessions — a stale ``_tts_stopped_at`` from the previous
         # session would otherwise keep muting the mic on a fresh open.
@@ -384,6 +425,43 @@ class LiveBrainRunner:
                     # user turn.
                     if self._tts_is_speaking():
                         continue
+                    # Local VAD gate (when wired). Skipping silence
+                    # frames keeps the provider's server VAD from
+                    # auto-committing on background noise and cuts
+                    # the audio-in token bill — the realtime billing
+                    # model charges per second of input audio, so
+                    # streaming pure silence 24/7 is pure waste.
+                    # Callback expects a numpy int16 frame (same
+                    # shape voice_service's classic VAD loop gets),
+                    # not raw bytes — see _make_live_vad_check.
+                    #
+                    # State machine (mirrors call-mode IDLE→SPEECH):
+                    # any positive VAD verdict refreshes a hold-over
+                    # timer; while the timer is fresh we forward
+                    # every frame regardless of RMS so quiet
+                    # consonants / inter-word breath don't fragment
+                    # the utterance and starve OpenAI's transcriber.
+                    if self._is_speech_callback is not None:
+                        try:
+                            is_speech = bool(self._is_speech_callback(data))
+                        except Exception as e:
+                            logger.debug("is_speech_callback raised: %s", e)
+                            is_speech = True  # fail-open: don't drop on error
+                        now = time.time()
+                        if is_speech:
+                            self._last_speech_frame_ts = now
+                            # Flag the current utterance as having
+                            # real speech so request_response() fires
+                            # after the transcript completes.
+                            # Without this flag a pure-echo turn
+                            # (Whisper hallucinated on TTS tail
+                            # leaking past the holdoff) would still
+                            # trigger a model response.
+                            self._utterance_has_speech = True
+                        elif (now - self._last_speech_frame_ts) > _LIVE_VAD_HOLD_S:
+                            # Holdoff lapsed — back to IDLE, drop this
+                            # silence frame.
+                            continue
                     session.send_audio(frame_bytes)
         finally:
             with self._session_lock:
@@ -421,16 +499,18 @@ class LiveBrainRunner:
             if text:
                 self._reply_buf += text
                 self._reply_log_buf += text
-                # First reply token of this turn — log the user
-                # transcript NOW (rather than waiting for
-                # turn_complete) so the journal reads
-                # "brain.input → … reply streams … → brain.chitchat"
-                # instead of dumping both at the end together.
-                if not self._user_input_logged:
-                    snapshot = self._user_input_buf.strip()
-                    if snapshot:
-                        user_input_to_log = snapshot
-                        self._user_input_logged = True
+                # NOTE: brain.input is now logged from _on_user_input
+                # on its is_final event (input audio buffer committed
+                # by the server). Logging on the first reply token
+                # was racy — for OpenAI Realtime the user-input
+                # deltas arrive in parallel with the response stream,
+                # so the buffered snapshot at "first reply token"
+                # often contained only the FIRST delta of the user's
+                # transcript ("làm" instead of "làm bài thơ"). The
+                # is_final event arrives once the server has the
+                # full transcript ready, well before the reply
+                # streams done — which gives the natural
+                # input → reply ordering we want anyway.
 
             # Sticky prefix detection. Only check while we haven't
             # already decided this turn is a delegate.
@@ -456,9 +536,10 @@ class LiveBrainRunner:
                     delegate_transcript = self._last_user_input.strip()
                 # Re-arm per-turn latches. Without this, the second
                 # turn of a long-lived session would silently skip
-                # the brain.input log because the flag carries over
-                # from the previous turn.
+                # the brain.input + brain.tts.start logs because the
+                # flags carry over from the previous turn.
                 self._user_input_logged = False
+                self._tts_start_logged = False
                 # Reset all per-turn buffers + the sticky flag.
                 self._reply_buf = ""
                 self._reply_log_buf = ""
@@ -522,24 +603,46 @@ class LiveBrainRunner:
             self._speak_sentence(tail)
         if full_reply:
             logger.info("brain.chitchat [live] %r", full_reply)
+            # Keep one turn back so the next turn's echo check (in
+            # _should_skip_response) can compare against it after
+            # _reply_log_buf has been cleared.
+            self._last_full_reply = full_reply
 
         # No per-turn session restart — we accept stale history
         # within a Gemini session (~10-15 min until GoAway). Restart
         # was tried and dropped on 2026-05-26: it gave fresh
         # OpenClaw history every turn but Gemini lost its in-session
         # memory, so replies turned into generic "I can do X, Y, Z"
-        # feature lists instead of following the conversation. Quality
-        # regression > stale-history win. See live/README.md
-        # §"Known gaps".
+        # feature lists instead of following the conversation.
+        #
+        # Instead, sync any OpenClaw turns (Telegram, web chat, other
+        # voice sessions) that landed during this turn into the live
+        # session via ``conversation.item.create`` (OpenAI Realtime)
+        # or ``send_client_content(turn_complete=False)`` (Gemini —
+        # currently a no-op on 3.x Live tier, but the call is safe).
+        # No model response is triggered — the items just enrich the
+        # context for the next turn. See live/README.md §"History
+        # strategy".
+        self._sync_openclaw_history()
 
     def _on_user_input(self, text: str, is_final: bool) -> None:
         """User mic transcription from the live provider. Accumulates
         partials. The ``brain.input`` journal line is normally logged
         from :meth:`_on_text` on the first reply-token (so the natural
         order in the journal is input → reply, not "both at the end"),
-        but THIS method handles the fallback case where Gemini decides
-        the right answer is silence — no reply means _on_text never
-        fires, so we log here on is_final.
+        but THIS method handles the fallback case where the model
+        decides the right answer is silence — no reply means
+        _on_text never fires, so we log here on is_final.
+
+        Providers disagree on the is_final shape: Gemini Live fires
+        ``("", True)``; OpenAI Realtime fires ``(full_transcript, True)``
+        after streaming deltas. To handle both: when ``is_final`` and
+        ``text`` is non-empty, treat ``text`` as the server's
+        authoritative final transcript and REPLACE the accumulated
+        delta buffer with it. Otherwise (empty final OR partial) keep
+        the existing accumulator path. Prevents the doubled
+        ``"Em đi đi.Em đi đi."`` bug where OpenAI deltas + the final
+        transcript both got appended.
 
         Side effect: when ``is_final`` fires we snapshot the
         transcript into ``self._last_user_input`` so the [DELEGATE]
@@ -554,21 +657,125 @@ class LiveBrainRunner:
                 self._last_user_input = ""
 
         with self._reply_lock:
-            if text:
-                self._user_input_buf += text
             if is_final:
+                # Server's authoritative final overrides anything we
+                # buffered from deltas (OpenAI Realtime ships both).
+                if text:
+                    self._user_input_buf = text
                 final_text = self._user_input_buf.strip()
                 self._user_input_buf = ""
                 if final_text:
                     self._last_user_input = final_text
-                fallback_log = final_text and not self._user_input_logged
+                # Always log every transcript final. The old _logged
+                # latch was meant to avoid double-logging back when
+                # _on_text also wrote brain.input on first reply
+                # token — that branch is gone. Worse: for a delegate
+                # turn _on_text never fires text-is_final, so the
+                # latch stuck True across turns and silently swallowed
+                # every subsequent brain.input. We instead log
+                # unconditionally and treat _user_input_logged as a
+                # legacy debug latch only.
+                fallback_log = bool(final_text)
                 if fallback_log:
                     self._user_input_logged = True
+                # Snapshot speech-present flag and reset for the next
+                # utterance. We use the snapshot below to decide
+                # whether to fire response.create.
+                had_speech = self._utterance_has_speech
+                self._utterance_has_speech = self._is_speech_callback is None
             else:
+                if text:
+                    self._user_input_buf += text
                 final_text = None
                 fallback_log = False
+                had_speech = False
         if fallback_log:
             logger.info("brain.input  [live] %r", final_text)
+
+        # Gate response.create — only fires when:
+        #   1. The session supports explicit response.create
+        #      (OpenAIRealtimeSession; Gemini Live auto-fires).
+        #   2. The transcript looks like real user speech (passes
+        #      length + hallucination + echo filter).
+        #   3. Local VAD saw at least one speech frame this utterance
+        #      (or no VAD wired — fail-open).
+        # Otherwise log and skip — saves tokens + stops the
+        # echo-loop / hallucination loop the user is hitting.
+        if not is_final:
+            return
+        with self._session_lock:
+            session = self._session
+        if session is None:
+            return
+        if not hasattr(session, "request_response"):
+            return  # Gemini Live: auto-fires, nothing to do here.
+        if not final_text:
+            return
+        skip_reason = self._should_skip_response(final_text, had_speech)
+        if skip_reason:
+            logger.info(
+                "brain.skip   [live] %r — %s",
+                final_text, skip_reason,
+            )
+            return
+        try:
+            session.request_response()
+        except Exception as e:
+            logger.warning("request_response failed: %s", e)
+
+    # Known Whisper / gpt-4o-transcribe hallucinations on silence or
+    # short / low-info audio. The ASR latches onto language-common
+    # boilerplate when the actual audio doesn't carry much speech —
+    # "Hẹn gặp lại các bạn trong những video tiếp theo" is the
+    # Vietnamese YouTube outro pattern; "Thanks for watching" is the
+    # English equivalent. Match is substring + case-insensitive
+    # because the ASR sometimes drops the leading word or appends
+    # extra punctuation.
+    _HALLUCINATION_PATTERNS = (
+        "hẹn gặp lại các bạn",
+        "trong những video tiếp theo",
+        "thanks for watching",
+        "subscribe to the channel",
+        "like and subscribe",
+        "ご視聴ありがとうございました",
+    )
+
+    def _should_skip_response(self, transcript: str, had_speech: bool) -> Optional[str]:
+        """Return a non-empty reason string when this transcript
+        should NOT trigger a model response, or None to proceed."""
+        t = transcript.strip()
+        if not t:
+            return "empty transcript"
+        if not had_speech:
+            return "no speech frames passed local VAD this utterance"
+        # Length floor — single-token transcripts (\"uh\", \"oh\")
+        # are usually mic pop / lip-smack noise, not a real prompt.
+        # Two-token floor catches the common Vietnamese filler "Ừm."
+        # which the user does sometimes actually mean — keep it
+        # permissive to avoid blocking real input.
+        if len(t) < 2:
+            return f"transcript too short ({len(t)} chars)"
+        lo = t.lower()
+        for pat in self._HALLUCINATION_PATTERNS:
+            if pat in lo:
+                return f"matches ASR hallucination pattern {pat!r}"
+        # Echo of Lumi's own most recent reply — happens when the
+        # TTS tail leaks past the post-TTS holdoff and ASR transcribes
+        # it. Compare against the trailing portion of the last
+        # chit-chat we logged. Conservative: only skip on a very
+        # high-overlap match (>=80% of transcript chars in the last
+        # reply) to avoid swallowing real "yes I heard you" follow-ups.
+        last_reply = (self._reply_log_buf or "")
+        # _reply_log_buf is cleared on turn_complete, so we also keep
+        # a one-turn-back snapshot for the echo compare.
+        last_full = getattr(self, "_last_full_reply", "") or ""
+        haystacks = (last_reply.lower(), last_full.lower())
+        for h in haystacks:
+            if not h:
+                continue
+            if lo in h:
+                return "transcript is a substring of last reply (echo)"
+        return None
 
     def _speak_sentence(self, sentence: str) -> None:
         """Push one sentence into TTSService. Uses speak_queue when
@@ -742,10 +949,47 @@ class LiveBrainRunner:
         turns = self._load_openclaw_turns()
         return max((t["ts"] for t in turns), default=0.0)
 
+    # Prefixes that mark a turn as "not real user conversation" — sensing
+    # events, vision frame descriptions, untrusted metadata wrappers,
+    # operator instructions. Injecting these mid-session derails the
+    # model: it starts talking about "what it just saw" or "the user
+    # asked the time again" when really the user just said "làm thơ đi".
+    _SYNC_SKIP_PREFIXES = (
+        "[whisper]", "[sensing:", "[activity]", "[emotion]",
+        "[speech_emotion]", "[posture", "[motion", "[ambient]",
+        "Sender (untrusted metadata):", "(system)", "[HW:", "/emotion",
+        "/led", "/servo",
+    )
+
+    def _is_syncable_turn(self, turn: dict) -> bool:
+        """True when this OpenClaw turn looks like real conversation
+        worth injecting into the live session's context. Filters out
+        sensing events, vision detections, operator commands, system
+        noise — anything that would confuse the realtime model about
+        what the user actually said."""
+        text = (turn.get("text") or "").strip()
+        if not text:
+            return False
+        # Strip leading "[user] " / "[user] [ambient] " priority tags
+        # that Lumi server adds — keep the substantive part.
+        head = text
+        for tag in ("[user] [ambient] ", "[user] "):
+            if head.startswith(tag):
+                head = head[len(tag):]
+                break
+        if not head.strip():
+            return False
+        for prefix in self._SYNC_SKIP_PREFIXES:
+            if head.startswith(prefix):
+                return False
+        return True
+
     def _sync_openclaw_history(self) -> None:
         """Push any OpenClaw turns with ts > _last_synced_ts into the
         live session as additional context (turn_complete=False).
-        Bumps the cursor so the next sync only sees newer turns."""
+        Filters out sensing / operator / vision noise so the realtime
+        model only sees real conversation. Bumps the cursor so the
+        next sync only sees newer turns."""
         with self._session_lock:
             session = self._session
         if session is None:
@@ -754,19 +998,26 @@ class LiveBrainRunner:
             return  # Not a Gemini Live session (or older shape)
 
         turns = self._load_openclaw_turns()
-        new_turns = [t for t in turns if t["ts"] > self._last_synced_ts]
+        # All unfiltered turns past the cursor — used to advance the
+        # cursor past noise events too (otherwise we'd re-check the
+        # same sensing event every turn).
+        all_new = [t for t in turns if t["ts"] > self._last_synced_ts]
+        new_turns = [t for t in all_new if self._is_syncable_turn(t)]
+        if not all_new:
+            return
+        if new_turns:
+            try:
+                session.send_context_turns([
+                    {"role": t["role"], "text": t["text"]} for t in new_turns
+                ])
+            except Exception as e:
+                logger.warning("OpenClaw history sync raised: %s", e)
+                return
+        # Bump cursor past everything we've seen so noise we filtered
+        # out doesn't get re-scanned on the next turn.
+        self._last_synced_ts = max(t["ts"] for t in all_new)
         if not new_turns:
             return
-        try:
-            session.send_context_turns([
-                {"role": t["role"], "text": t["text"]} for t in new_turns
-            ])
-        except Exception as e:
-            logger.warning("OpenClaw history sync raised: %s", e)
-            return
-        # Bump cursor only after a successful push so a transient
-        # failure can be retried on the next turn.
-        self._last_synced_ts = max(t["ts"] for t in new_turns)
         # Visibility — mirrors the call-mode brain.context dumps so the
         # journal shows exactly which turns we injected. Capped at the
         # first 80 chars of each text so the log stays scannable.
