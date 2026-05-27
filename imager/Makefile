@@ -71,21 +71,90 @@ endif
 	diskutil eject /dev/disk$(DISK) 2>/dev/null || true
 	@echo "==> Flash complete"
 
-# ── upload — push built image to GCS, version-stamped ──────────────────────
+# ── upload — push built image + release note to GCS, version-stamped ─────
 # Versioned filename: golden-<target>-<UTC-timestamp>-<git-sha>.img.xz
 # Bucket + path mirror the OTA artifact layout (s3-autonomous-upgrade-3/lumi/).
 GCS_BUCKET := s3-autonomous-upgrade-3
 GCS_PATH   := lumi/imager/output
+GCS_LEDGER := lumi/imager/RELEASES.md
 VERSION    := $(shell date -u +%Y%m%d-%H%M%S)-$(shell git -C .. rev-parse --short HEAD 2>/dev/null || echo nogit)
 TARGET_PREFIX_rpi := golden-rpi
 TARGET_PREFIX_opi := golden-opi
 TARGET_PREFIX := $(TARGET_PREFIX_$(TARGET))
-VERSIONED_IMG := $(TARGET_PREFIX)-$(VERSION)$(if $(filter %.xz,$(IMG_FILE)),.img.xz,.img)
+VERSIONED_BASE := $(TARGET_PREFIX)-$(VERSION)
+VERSIONED_IMG  := $(VERSIONED_BASE)$(if $(filter %.xz,$(IMG_FILE)),.img.xz,.img)
+RELEASE_NOTE   := output/$(VERSIONED_BASE).release.txt
+MANIFEST_FILE  := output/manifest-$(TARGET).json
 
-upload:
-	@[ -f output/$(IMG_FILE) ] || { echo "ERROR: output/$(IMG_FILE) not found. Run 'make build' first."; exit 1; }
+upload: $(RELEASE_NOTE)
 	@command -v gcloud >/dev/null 2>&1 || { echo "ERROR: gcloud not installed. brew install --cask gcloud-cli"; exit 1; }
-	@echo "==> Uploading output/$(IMG_FILE) → gs://$(GCS_BUCKET)/$(GCS_PATH)/$(VERSIONED_IMG)"
+	@echo "==> Uploading image → gs://$(GCS_BUCKET)/$(GCS_PATH)/$(VERSIONED_IMG)"
 	gcloud storage cp output/$(IMG_FILE) gs://$(GCS_BUCKET)/$(GCS_PATH)/$(VERSIONED_IMG)
-	@echo "==> Public URL:"
-	@echo "    https://storage.googleapis.com/$(GCS_BUCKET)/$(GCS_PATH)/$(VERSIONED_IMG)"
+	@echo "==> Uploading release note → gs://$(GCS_BUCKET)/$(GCS_PATH)/$(VERSIONED_BASE).release.txt"
+	gcloud storage cp $(RELEASE_NOTE) gs://$(GCS_BUCKET)/$(GCS_PATH)/$(VERSIONED_BASE).release.txt
+	@echo "==> Updating cumulative ledger gs://$(GCS_BUCKET)/$(GCS_LEDGER)"
+	@TMP=$$(mktemp); \
+	if gcloud storage cp gs://$(GCS_BUCKET)/$(GCS_LEDGER) $$TMP 2>/dev/null; then \
+		echo "    (existing ledger fetched, prepending new entry)"; \
+	else \
+		printf "# Lumi Imager Releases\n\nAppend-only history of built images. Newest first.\n\n" > $$TMP; \
+	fi; \
+	NEW=$$(mktemp); \
+	{ awk '/^# Lumi Imager Releases/,/^$$/' $$TMP; cat $(RELEASE_NOTE); echo ""; echo "---"; echo ""; awk 'BEGIN{p=0} /^## /{p=1} p' $$TMP; } > $$NEW; \
+	gcloud storage cp $$NEW gs://$(GCS_BUCKET)/$(GCS_LEDGER); \
+	rm -f $$TMP $$NEW
+	@echo ""
+	@echo "==> DONE. Public URLs:"
+	@echo "    Image:   https://storage.googleapis.com/$(GCS_BUCKET)/$(GCS_PATH)/$(VERSIONED_IMG)"
+	@echo "    Release: https://storage.googleapis.com/$(GCS_BUCKET)/$(GCS_PATH)/$(VERSIONED_BASE).release.txt"
+	@echo "    Ledger:  https://storage.googleapis.com/$(GCS_BUCKET)/$(GCS_LEDGER)"
+
+# Release note generated from manifest + image checksums at upload time.
+$(RELEASE_NOTE):
+	@[ -f output/$(IMG_FILE) ] || { echo "ERROR: output/$(IMG_FILE) not found. Run 'make build' first."; exit 1; }
+	@mkdir -p output
+	@echo "==> Generating release note $(RELEASE_NOTE)"
+	@IMG_SHA=$$(shasum -a 256 output/$(IMG_FILE) | awk '{print $$1}'); \
+	IMG_BYTES=$$(stat -f %z output/$(IMG_FILE) 2>/dev/null || stat -c %s output/$(IMG_FILE)); \
+	IMG_SIZE=$$(du -h output/$(IMG_FILE) | awk '{print $$1}'); \
+	GIT_SHA_LONG=$$(git -C .. rev-parse HEAD 2>/dev/null || echo unknown); \
+	GIT_BRANCH=$$(git -C .. rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown); \
+	BUILT_AT=$$(date -u +%Y-%m-%dT%H:%M:%SZ); \
+	{ \
+		echo "## $(VERSIONED_BASE)"; \
+		echo ""; \
+		echo "- Target:        $(TARGET)"; \
+		echo "- Built (UTC):   $$BUILT_AT"; \
+		echo "- Git branch:    $$GIT_BRANCH"; \
+		echo "- Git commit:    $$GIT_SHA_LONG"; \
+		echo "- Image size:    $$IMG_SIZE ($$IMG_BYTES bytes)"; \
+		echo "- sha256:        $$IMG_SHA"; \
+		echo "- Output name:   $(VERSIONED_IMG)"; \
+		echo "- Download:      https://storage.googleapis.com/$(GCS_BUCKET)/$(GCS_PATH)/$(VERSIONED_IMG)"; \
+		if [ -f $(MANIFEST_FILE) ]; then \
+			echo ""; \
+			echo "OTA versions baked at build time:"; \
+			jq -r '.ota_versions | to_entries[] | "- \(.key): \(.value)"' $(MANIFEST_FILE) 2>/dev/null || echo "(could not parse manifest)"; \
+			echo ""; \
+			echo "Source image:"; \
+			jq -r '.source_image | "- file_id: \(.file_id)\n- name:    \(.name)\n- sha256:  \(.sha256)"' $(MANIFEST_FILE) 2>/dev/null || true; \
+			echo ""; \
+			echo "Build config:"; \
+			jq -r '"- openclaw: \(.openclaw_version)\n- out_size: \(.out_img_size)\n- ota_url:  \(.ota_metadata_url)"' $(MANIFEST_FILE) 2>/dev/null || true; \
+		else \
+			echo ""; \
+			echo "(no $(MANIFEST_FILE) — OTA versions not captured this build)"; \
+		fi; \
+	} > $(RELEASE_NOTE)
+	@echo "==> Release note written:"
+	@cat $(RELEASE_NOTE)
+
+upload-source:
+	@[ -f input/orangepi.7z ] || { echo "ERROR: input/orangepi.7z not found"; exit 1; }
+	@command -v gcloud >/dev/null 2>&1 || { echo "ERROR: gcloud not installed"; exit 1; }
+	@echo "==> Mirroring input/orangepi.7z → gs://$(GCS_BUCKET)/lumi/imager/source/$(OPI_FILE_NAME)"
+	gcloud storage cp input/orangepi.7z gs://$(GCS_BUCKET)/lumi/imager/source/$(OPI_FILE_NAME)
+	@echo "==> Public URL (use as OPI_SOURCE_URL):"
+	@echo "    https://storage.googleapis.com/$(GCS_BUCKET)/lumi/imager/source/$(OPI_FILE_NAME)"
+
+OPI_FILE_NAME := Orangepi4pro_1.0.6_debian_bookworm_server_linux5.15.147.7z

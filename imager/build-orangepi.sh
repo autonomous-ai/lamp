@@ -986,7 +986,57 @@ else
 fi
 
 echo "[overlay] Phase 3 complete"
+
+# Persist OTA versions to a file inside the image; host script reads it back
+# out after chroot exits to build the manifest. Key=value format so a shell
+# 'source' on the host pulls them into variables.
+cat > /tmp/ota-versions.env <<MANIFEST
+WEB_VER=\${WEB_VER}
+LUMI_VER=\${LUMI_VER}
+BOOTSTRAP_VER=\${BOOTSTRAP_VER}
+LELAMP_VER=\${LELAMP_VER}
+BUDDY_VER=\${BUDDY_VER}
+MANIFEST
 OVERLAY_STAGES
+
+# Capture OTA versions for the build manifest before they get wiped by Phase 5.
+BAKED_WEB_VER=""; BAKED_LUMI_VER=""; BAKED_BOOTSTRAP_VER=""; BAKED_LELAMP_VER=""; BAKED_BUDDY_VER=""
+if [ -f "${MNT}/tmp/ota-versions.env" ]; then
+  # shellcheck disable=SC1090
+  . "${MNT}/tmp/ota-versions.env" || true
+  BAKED_WEB_VER="${WEB_VER:-}"
+  BAKED_LUMI_VER="${LUMI_VER:-}"
+  BAKED_BOOTSTRAP_VER="${BOOTSTRAP_VER:-}"
+  BAKED_LELAMP_VER="${LELAMP_VER:-}"
+  BAKED_BUDDY_VER="${BUDDY_VER:-}"
+  rm -f "${MNT}/tmp/ota-versions.env"
+fi
+
+# Write the build manifest. Makefile `upload` target reads this to populate
+# the per-release note with OTA versions actually baked in.
+SRC_7Z_SHA=$(sha256sum "${SRC_7Z}" 2>/dev/null | cut -d' ' -f1 || echo unknown)
+cat > /output/manifest-opi.json <<MANIFEST_JSON
+{
+  "build_timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "target": "opi",
+  "openclaw_version": "${OPENCLAW_VERSION}",
+  "out_img_size": "${OUT_IMG_SIZE}",
+  "ota_metadata_url": "${OTA_METADATA_URL}",
+  "ota_versions": {
+    "web": "${BAKED_WEB_VER}",
+    "lumi": "${BAKED_LUMI_VER}",
+    "bootstrap": "${BAKED_BOOTSTRAP_VER}",
+    "lelamp": "${BAKED_LELAMP_VER}",
+    "claude-desktop-buddy": "${BAKED_BUDDY_VER}"
+  },
+  "source_image": {
+    "file_id": "${OPI_FILE_ID}",
+    "name": "${OPI_FILE_NAME}.7z",
+    "sha256": "${SRC_7Z_SHA}"
+  }
+}
+MANIFEST_JSON
+log "Manifest: /output/manifest-opi.json"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Phase 4 — Install lumi-resize-once.service (first-boot SD-fill expand)
