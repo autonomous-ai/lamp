@@ -108,6 +108,16 @@ upload: $(RELEASE_NOTE)
 	@echo "    Image:   https://storage.googleapis.com/$(GCS_BUCKET)/$(GCS_PATH)/$(VERSIONED_IMG)"
 	@echo "    Release: https://storage.googleapis.com/$(GCS_BUCKET)/$(GCS_PATH)/$(VERSIONED_BASE).release.txt"
 	@echo "    Ledger:  https://storage.googleapis.com/$(GCS_BUCKET)/$(GCS_LEDGER)"
+	@echo ""
+	@echo "==> Cleaning output/ (set KEEP_OUTPUT=1 to skip)"
+	@if [ -z "$$KEEP_OUTPUT" ]; then \
+		rm -f output/$(IMG_FILE) $(RELEASE_NOTE) $(MANIFEST_FILE); \
+		echo "    Removed: output/$(IMG_FILE)"; \
+		echo "    Removed: $(RELEASE_NOTE)"; \
+		echo "    Removed: $(MANIFEST_FILE)"; \
+	else \
+		echo "    KEEP_OUTPUT set — leaving output/ alone"; \
+	fi
 
 # Release note generated from manifest + image checksums at upload time.
 $(RELEASE_NOTE):
@@ -158,3 +168,16 @@ upload-source:
 	@echo "    https://storage.googleapis.com/$(GCS_BUCKET)/lumi/imager/source/$(OPI_FILE_NAME)"
 
 OPI_FILE_NAME := Orangepi4pro_1.0.6_debian_bookworm_server_linux5.15.147.7z
+
+# ── housekeeping ───────────────────────────────────────────────────────────
+# `make clean` wipes output/ entirely (built images, release notes, manifest,
+# any leftover raw .img). Use after a successful upload to free disk space.
+# Does NOT touch input/ (cached source images stay).
+clean:
+	@echo "==> Wiping output/"
+	rm -rf output/*
+	@echo "    (input/ kept — set 'rm -rf input/*' manually to force fresh source download)"
+
+clean-all: clean
+	@echo "==> Wiping input/ too"
+	rm -rf input/*

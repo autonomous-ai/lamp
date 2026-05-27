@@ -8,7 +8,10 @@ into the Lumi AP/hotspot setup wizard. Flash, insert, power on — no
 make build                        # → output/golden-opi.img.xz (default: OrangePi)
 make sd-card-list                 # find your SD card disk number
 make sd-card-flash DISK=N         # decompresses on the fly via `xz | dd`
-make upload                       # push image + release note to GCS, versioned
+make upload                       # push image + release note to GCS, versioned (auto-cleans output/ on success)
+make upload-source                # mirror input/orangepi.7z → GCS (one-time)
+make clean                        # nuclear: wipe output/ entirely (input/ kept)
+make clean-all                    # wipe both output/ and input/
 ```
 
 Lần đầu build ~25–40 phút (download vendor base image, qemu-arm64 chroot apt
@@ -144,6 +147,10 @@ Example output filename: `golden-opi-20260527-043849-2e4aa75b.img.xz`
    - `gs://$GCS_BUCKET/$GCS_PATH/golden-opi-<version>.release.txt`
 5. Downloads existing `gs://$GCS_BUCKET/$GCS_LEDGER` (or creates if missing),
    **prepends** the new release note, re-uploads. Newest-first chronology.
+6. **Auto-cleans** `output/golden-opi.img.xz`, the release `.txt`, and
+   `manifest-opi.json` after all uploads succeed (saves ~1 GB local disk).
+   Skip the cleanup with `KEEP_OUTPUT=1 make upload` if you want to keep the
+   artifacts locally (e.g. to flash an SD card right after).
 
 Per-release note format (sample):
 
@@ -256,6 +263,22 @@ The Drive folder also has variants we don't use:
 
 We pin **bookworm_server** because that's what production runs (confirmed via
 `/etc/os-release` on 100.111.149.69).
+
+### Why not re-compress the source to shrink it?
+
+Tested 2026-05-27 — extracting the vendor `.7z` and re-compressing the inner
+`.img` with `xz -9 --threads=0` shrinks 735 MB → 638 MB (~13 % reduction).
+Not worth a refactor:
+
+- Source download is one-time-per-machine (gdown caches `input/orangepi.7z`).
+- 13 % saves ~100 MB on a one-shot upload to the GCS mirror.
+- Vendor `.7z` (LZMA solid) is already near-optimal for already-allocated
+  ext4 data. The extra gain comes from xz seeing zero runs the 7z solid
+  block obscures.
+- A bigger win (~50 %) would need `zerofree` to zero unused ext4 blocks
+  before xz — adds a mount + tool dep + 5–10 min build time. Skipped.
+
+Keep the canonical source as `.7z`. `make upload-source` mirrors it as-is.
 
 ## Troubleshooting
 
