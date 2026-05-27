@@ -259,9 +259,9 @@ class LiveBrainRunner:
 
         # Snapshot of the user-input transcript at the moment its
         # is_final event fired this turn. Stays set across the rest of
-        # the turn so the [DELEGATE] text-marker fallback in _on_text
-        # can synthesise an on_delegate call after the buffer itself
-        # is cleared. Cleared at the next on_user_input partial.
+        # the turn so _on_delegate can recover the user's words after
+        # the live accumulator buffer itself is cleared. Cleared at
+        # the next on_user_input partial.
         self._last_user_input = ""
 
         # ``brain.input`` log latch — flipped True the first time we
@@ -284,15 +284,6 @@ class LiveBrainRunner:
         # to see the full reply text — useful for measuring streaming
         # win vs the non-streaming baseline.
         self._tts_start_logged = False
-
-        # Per-turn delegate detection. Gemini Live should call the
-        # ``delegate_to_lumi`` tool, but it occasionally emits the
-        # literal ``[DELEGATE]`` text marker from the shared
-        # DECISION_RULES instead. When that happens we route the
-        # last user-input transcript through on_delegate ourselves
-        # and suppress TTS playback so the user doesn't hear
-        # "DELEGATE" spoken aloud. Reset every turn_complete.
-        self._delegate_text_detected = False
 
         # Cursor for the OpenClaw history sync mechanism. Holds the
         # epoch-seconds timestamp of the most-recent OpenClaw turn the
@@ -452,7 +443,6 @@ class LiveBrainRunner:
                 self._reply_log_buf = ""
                 self._user_input_buf = ""
                 self._last_user_input = ""
-                self._delegate_text_detected = False
                 self._restart_after_turn = False
                 self._user_input_logged = False
                 self._tts_start_logged = False
@@ -647,19 +637,17 @@ class LiveBrainRunner:
         and log the full reply line so the journal mirrors the call-mode
         ``brain.chitchat`` log shape.
 
-        Also handles the ``[DELEGATE]`` text-marker fallback: when
-        Gemini emits the literal token instead of calling the
-        delegate tool, we suppress TTS for this turn and synthesise
-        an on_delegate(user_input) call from the buffered mic
-        transcription. The detection is sticky for the whole turn —
-        once the prefix lands we never speak any of this reply, even
-        if the model trails it with more text."""
+        Delegate routing in live mode goes through the function tool
+        only (``delegate_to_lumi``). The legacy ``[DELEGATE]`` text
+        marker that call mode uses was a fallback here too but the
+        runner no longer scans for it — the marker text is enabled
+        only on the call-mode prompt; live-mode prompts explicitly
+        forbid it and both Gemini Live + OpenAI Realtime have native
+        function-call channels."""
         if not text and not is_final:
             return
-        delegate_marker = "[DELEGATE]"
         tail: Optional[str] = None
         full_reply: Optional[str] = None
-        delegate_transcript: Optional[str] = None
         user_input_to_log: Optional[str] = None
 
         with self._reply_lock:
@@ -668,19 +656,19 @@ class LiveBrainRunner:
                 self._reply_log_buf += text
                 # Gemini Live fires _on_user_input("", True) only at
                 # turn_complete, which lands AFTER the model's reply
-                # has finished streaming — making brain.input log
-                # ~10-30s after the user actually finished speaking.
-                # OpenAI Realtime gives a proper transcription.done
-                # event before its response so its brain.input fires
-                # at the right moment.
+                # has finished streaming — making brain.transcript
+                # log ~10-30s after the user actually finished
+                # speaking. OpenAI Realtime gives a proper
+                # transcription.done event before its response so
+                # its brain.transcript fires at the right moment.
                 # Bridge for Gemini: when the model starts emitting
                 # reply tokens, that IS the signal "Gemini decided
                 # the user is done". If we have an accumulated user
                 # input buffer that wasn't logged yet, flush it now
-                # so the journal shows input → tts.start in natural
-                # order. Safe for OpenAI too because its is_final
-                # path already sets _user_input_logged=True before
-                # the first reply token arrives.
+                # so the journal shows transcript → tts.start in
+                # natural order. Safe for OpenAI too because its
+                # is_final path already sets _user_input_logged=True
+                # before the first reply token arrives.
                 if (
                     not self._user_input_logged
                     and self._user_input_buf.strip()
@@ -688,35 +676,15 @@ class LiveBrainRunner:
                     user_input_to_log = self._user_input_buf.strip()
                     self._user_input_logged = True
 
-            # Sticky prefix detection. Only check while we haven't
-            # already decided this turn is a delegate.
-            if not self._delegate_text_detected:
-                stripped = self._reply_buf.lstrip()
-                if stripped:
-                    if stripped[0] == "[":
-                        if len(stripped) >= len(delegate_marker):
-                            if stripped.upper().startswith(delegate_marker):
-                                self._delegate_text_detected = True
-                        # else: keep buffering until we have ~10 chars
-                        # — could still be the marker or a voice tag
-                        # like "[chuckle]" which is legitimate chit-chat.
-
             if is_final:
                 full_reply = self._reply_log_buf.strip()
                 tail = self._reply_buf.strip()
-                if self._delegate_text_detected:
-                    # _on_user_input fires its is_final BEFORE we run
-                    # (per the gemini_live ordering swap), so the live
-                    # accumulator is already empty. Read the snapshot
-                    # written by _on_user_input instead.
-                    delegate_transcript = self._last_user_input.strip()
                 # Per-turn latches (_user_input_logged / _tts_start_logged)
                 # used to reset HERE — moved to after the tail flush
                 # below. Resetting too early made the is_final tail
                 # _speak_sentence log a SECOND brain.tts.start (with
                 # the last sentence, not the first), since the flag
                 # was already False by the time tail flush ran.
-                # Reset all per-turn buffers + the sticky flag.
                 self._reply_buf = ""
                 self._reply_log_buf = ""
                 # NOTE: _user_input_buf is reset in _on_user_input when
@@ -724,15 +692,10 @@ class LiveBrainRunner:
                 # block thanks to the swapped order in gemini_live.py
                 # _handle_server_content). We don't clear it here so a
                 # late-arriving partial doesn't go to the next turn.
-                self._delegate_text_detected_was = self._delegate_text_detected
-                self._delegate_text_detected = False
             else:
-                # Only drain when we haven't latched delegate — never
-                # leak audio for what's going to be a delegate turn.
-                if not self._delegate_text_detected:
-                    self._reply_buf = _drain_complete_sentences(
-                        self._reply_buf, self._speak_sentence,
-                    )
+                self._reply_buf = _drain_complete_sentences(
+                    self._reply_buf, self._speak_sentence,
+                )
 
         if user_input_to_log:
             # Logged as "transcript" not "input": the model in live
@@ -743,41 +706,6 @@ class LiveBrainRunner:
             logger.info("brain.transcript [live] %r", user_input_to_log)
 
         if not is_final:
-            return
-
-        # Final fire — either log chit-chat + flush tail to TTS, or
-        # synthesise a delegate from the captured user-input buffer.
-        if getattr(self, "_delegate_text_detected_was", False):
-            if delegate_transcript:
-                logger.info(
-                    "brain.chitchat [live] '[DELEGATE] suppressed → delegate via %r'",
-                    delegate_transcript,
-                )
-                self._on_delegate(delegate_transcript)
-            else:
-                logger.warning(
-                    "live brain emitted [DELEGATE] but no user input "
-                    "buffered — dropping turn"
-                )
-            self._delegate_text_detected_was = False
-            # Force-close the session: once Gemini has the literal
-            # ``[DELEGATE]`` token in its dialog history it tends to
-            # go silent for every subsequent turn (response=0). We
-            # don't restart-per-turn for the chit-chat path (memory
-            # regression — see the chit-chat branch comment below),
-            # but we DO restart specifically for the delegate path
-            # because the alternative is "Lumi never replies again
-            # until GoAway".
-            logger.info(
-                "Live brain: closing session after [DELEGATE] text "
-                "to recover from Gemini's response=0 spiral"
-            )
-            with self._session_lock:
-                if self._session is not None:
-                    try:
-                        self._session.close()
-                    except Exception:
-                        pass
             return
 
         if tail:
@@ -856,13 +784,13 @@ class LiveBrainRunner:
         transcript both got appended.
 
         Side effect: when ``is_final`` fires we snapshot the
-        transcript into ``self._last_user_input`` so the [DELEGATE]
-        text-marker path in :meth:`_on_text` can still recover the
-        user's words after the accumulator buffer itself is cleared."""
+        transcript into ``self._last_user_input`` so :meth:`_on_delegate`
+        can still recover the user's words after the live accumulator
+        buffer itself is cleared."""
         if not text and not is_final:
             return
         # First partial of a new turn — wipe the previous turn's
-        # snapshot so a delayed delegate marker can't grab stale text.
+        # snapshot so a late callback can't grab stale text.
         if text and not is_final and not self._user_input_buf:
             with self._reply_lock:
                 self._last_user_input = ""
