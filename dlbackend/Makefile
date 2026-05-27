@@ -28,10 +28,9 @@ SSL_KEY ?= $(SSL_DIR)/key.pem
 HOST ?= 0.0.0.0
 
 # Port layout:
-#   8888 — nginx (external)
-#   7999 — lbserver (round-robin, prepends /_internal)
-#   8000 — old DL server (nginx /_internal/ → here)
-#   8001 — DL server (nginx /_internal/lelamp/ → here)
+#   8899 — nginx (external, HTTP or SSL)
+#   7999 — lbserver (master) or dlserver (slave)
+#   8001 — dlserver (master only, behind LB)
 #   8890 — jupyter
 LBSERVER_PORT ?= 7999
 DLSERVER_PORT ?= 8001
@@ -86,9 +85,13 @@ start-runpod-master: start-nginx start-runpod-dlserver start-runpod-lbserver
 
 start-runpod-master-ssl: start-nginx-ssl start-runpod-dlserver start-runpod-lbserver
 
-start-runpod-slave: start-nginx start-runpod-dlserver
+start-runpod-slave: start-nginx stop-runpod-dlserver install
+	@nohup python -m dlserver --host 127.0.0.1 --port $(LBSERVER_PORT) --log-dir /workspace/logs/dlbackend --pid-file $(DLSERVER_PID) </dev/null >/dev/null 2>&1 &
+	@echo "dlserver started on port $(LBSERVER_PORT) (slave, no LB)"
 
-start-runpod-slave-ssl: start-nginx-ssl start-runpod-dlserver
+start-runpod-slave-ssl: start-nginx-ssl stop-runpod-dlserver install
+	@nohup python -m dlserver --host 127.0.0.1 --port $(LBSERVER_PORT) --log-dir /workspace/logs/dlbackend --pid-file $(DLSERVER_PID) </dev/null >/dev/null 2>&1 &
+	@echo "dlserver started on port $(LBSERVER_PORT) (slave-ssl, no LB)"
 
 gen-ssl-cert:
 	@if [ ! -f $(SSL_CERT) ] || [ ! -f $(SSL_KEY) ]; then \
