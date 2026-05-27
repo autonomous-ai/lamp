@@ -183,7 +183,13 @@ class TextBrain:
         ) * 2
 
         # Filesystem layer: workspace dir, daily JSONL writers, MEMORY.md.
-        self._workspace = BrainWorkspace()
+        # ``subdir="call"`` namespaces this under ${ROOT}/call/ so the
+        # live providers (live-gemini / live-openai) get their own
+        # isolated workspaces under sibling subdirs. The constructor
+        # auto-hoists any pre-A-layout files (${ROOT}/session/, /bench/,
+        # /MEMORY.md) into ${ROOT}/call/ on first boot so historical
+        # chit-chat / bench data survives the migration.
+        self._workspace = BrainWorkspace(subdir="call")
         self._restore_session_from_workspace()
 
         # Compression layer: rolling summary + day-rollover diary.

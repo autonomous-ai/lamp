@@ -109,6 +109,7 @@ class GeminiLiveBrain(Brain):
         language: str = DEFAULT_LANGUAGE,
         context: Optional[BrainContext] = None,
         decision_rules: str = DECISION_RULES_LIVE,
+        workspace=None,
     ):
         self._api_key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
         self._model = model
@@ -116,6 +117,14 @@ class GeminiLiveBrain(Brain):
         self._language = _resolve_language(language)
         self._decision_rules = decision_rules
         self._context = context  # if None, loaded lazily per session (always fresh)
+        # Per-provider BrainWorkspace (typed as Any to avoid a forward
+        # import — workspace.py imports nothing from this module so the
+        # cycle is fine, but we want this constructor to stay lazy).
+        # When set, load_context() pulls extra chit-chat history from
+        # ``workspace.session.dir`` and merges with OpenClaw turns so
+        # sessions survive GoAway / idle-close cycles with their own
+        # in-process memory.
+        self._workspace = workspace
         self._client = None
         self._types = None
         self._import_error: Optional[Exception] = None
@@ -162,7 +171,12 @@ class GeminiLiveBrain(Brain):
             self._resumption_handle = handle
 
     def create_session(self) -> BrainSession:
-        ctx = self._context or load_context()
+        extra_dir = None
+        if self._workspace is not None and self._workspace.session.enabled:
+            d = self._workspace.session.dir
+            if d is not None:
+                extra_dir = str(d)
+        ctx = self._context or load_context(extra_session_dir=extra_dir)
         system_instruction = self._build_system_instruction(ctx)
         # Visibility log — dumps the recent-history turns we just baked
         # into the system instruction so the journal mirrors the

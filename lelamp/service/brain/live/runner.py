@@ -159,6 +159,7 @@ class LiveBrainRunner:
         decorate_callback: Optional[Callable[[str, list], tuple]] = None,
         send_to_lumi_callback: Optional[Callable[[str, str], None]] = None,
         is_speech_callback: Optional[Callable[[bytes], bool]] = None,
+        workspace=None,
     ):
         self._brain = brain
         self._tts = tts_service
@@ -166,6 +167,16 @@ class LiveBrainRunner:
         self._input_device = input_device
         self._np = None
         self._sd = None
+        # Per-provider BrainWorkspace (typed loose — see brain classes
+        # for the matching field). Used to persist chit-chat turn
+        # pairs after each is_final reply so the NEXT session can pick
+        # them back up via load_context's extra_session_dir merge.
+        # Skip the persist path entirely when the workspace is None or
+        # its session writer is disabled (e.g. LELAMP_BRAIN_WORKSPACE
+        # off, disk full, etc.) — the runner still functions in
+        # ephemeral mode, just with the in-session-only memory
+        # behaviour that exists pre-A-layout.
+        self._workspace = workspace
 
         # Hooks back into VoiceService for delegate formatting.
         # ``decorate_callback(transcript, audio_buffer) -> (decorated, name)``
@@ -707,23 +718,47 @@ class LiveBrainRunner:
             # _should_skip_response) can compare against it after
             # _reply_log_buf has been cleared.
             self._last_full_reply = full_reply
+            # Persist the turn pair so the NEXT session (after GoAway,
+            # idle-close, or process restart) can pick this chit-chat
+            # up via load_context's extra_session_dir merge. Skipped
+            # for delegate turns — those already land in OpenClaw's
+            # JSONL via the sensing endpoint, so writing them here
+            # would double-count. Skipped when no workspace is wired
+            # (degraded ephemeral mode).
+            self._persist_chitchat_turn(self._last_user_input.strip(), full_reply)
 
-        # No per-turn session restart — we accept stale history
-        # within a Gemini session (~10-15 min until GoAway). Restart
-        # was tried and dropped on 2026-05-26: it gave fresh
-        # OpenClaw history every turn but Gemini lost its in-session
-        # memory, so replies turned into generic "I can do X, Y, Z"
-        # feature lists instead of following the conversation.
-        #
-        # Instead, sync any OpenClaw turns (Telegram, web chat, other
-        # voice sessions) that landed during this turn into the live
-        # session via ``conversation.item.create`` (OpenAI Realtime)
-        # or ``send_client_content(turn_complete=False)`` (Gemini —
-        # currently a no-op on 3.x Live tier, but the call is safe).
-        # No model response is triggered — the items just enrich the
-        # context for the next turn. See live/README.md §"History
-        # strategy".
-        self._sync_openclaw_history()
+        # History sync used to fire HERE (after turn_complete) — moved
+        # to _on_user_input is_final so the model sees fresh OpenClaw
+        # turns BEFORE generating the current reply (e.g. user says
+        # "summarise our chat" — sync runs, then request_response, so
+        # the summary covers the freshly-pushed turns instead of
+        # waiting one turn behind).
+
+    def _persist_chitchat_turn(self, user_text: str, assistant_text: str) -> None:
+        """Append the {user, assistant} turn pair to the per-provider
+        workspace's session JSONL. Format matches what
+        ``TextBrain._append_session_turn`` writes so context_loader's
+        merge logic treats both modes' history identically::
+
+            {"role": "user"|"assistant", "text": "...", "ts": <epoch_seconds>}
+
+        Skipped when the workspace is None or its session writer is
+        disabled (LELAMP_BRAIN_WORKSPACE=off, disk failure, etc.).
+        Best-effort — never raises into the brain callback path.
+        """
+        if self._workspace is None:
+            return
+        session = getattr(self._workspace, "session", None)
+        if session is None or not getattr(session, "enabled", False):
+            return
+        now = time.time()
+        try:
+            if user_text:
+                session.write({"role": "user", "text": user_text, "ts": now})
+            if assistant_text:
+                session.write({"role": "assistant", "text": assistant_text, "ts": now})
+        except Exception as e:
+            logger.debug("live brain chit-chat persist failed: %s", e)
 
     def _on_user_input(self, text: str, is_final: bool) -> None:
         """User mic transcription from the live provider. Accumulates
@@ -818,10 +853,23 @@ class LiveBrainRunner:
                 final_text, skip_reason,
             )
             return
-        try:
-            session.request_response()
-        except Exception as e:
-            logger.warning("request_response failed: %s", e)
+        # Pull any OpenClaw turns (Telegram, web chat, other voice
+        # sessions, the just-completed delegate's reply) into the
+        # live session BEFORE the model generates this reply — so
+        # the answer is grounded in the freshest context, not "one
+        # turn behind". ``then_request_response=True`` chains the
+        # response.create call inside the same async coroutine as
+        # the item.create batch so there's no asyncio await race
+        # putting response.create on the WS before the last item.
+        # Returns False when there were no new turns AND no chained
+        # request_response was scheduled — in that case we fire
+        # request_response ourselves.
+        scheduled = self._sync_openclaw_history(then_request_response=True)
+        if not scheduled:
+            try:
+                session.request_response()
+            except Exception as e:
+                logger.warning("request_response failed: %s", e)
 
     # Known Whisper / gpt-4o-transcribe hallucinations on silence or
     # short / low-info audio. The ASR latches onto language-common
@@ -1084,18 +1132,30 @@ class LiveBrainRunner:
                 return False
         return True
 
-    def _sync_openclaw_history(self) -> None:
+    def _sync_openclaw_history(self, then_request_response: bool = False) -> bool:
         """Push any OpenClaw turns with ts > _last_synced_ts into the
-        live session as additional context (turn_complete=False).
-        Filters out sensing / operator / vision noise so the realtime
-        model only sees real conversation. Bumps the cursor so the
-        next sync only sees newer turns."""
+        live session as additional context. Filters out sensing /
+        operator / vision noise so the realtime model only sees real
+        conversation. Bumps the cursor so the next sync only sees
+        newer turns.
+
+        ``then_request_response`` chains ``response.create`` inside
+        the SAME async coroutine that pushes the items, guaranteeing
+        the model's reply is grounded in the freshly-pushed context.
+        Without this flag a runner-side ``session.request_response()``
+        could race the sync coroutine at asyncio await boundaries and
+        ship response.create before the last item.create lands.
+
+        Returns True when it scheduled work on the session loop (either
+        synced turns OR a chained response.create), False when there
+        was nothing to do and the caller should fire request_response
+        on its own."""
         with self._session_lock:
             session = self._session
         if session is None:
-            return
+            return False
         if not hasattr(session, "send_context_turns"):
-            return  # Not a Gemini Live session (or older shape)
+            return False  # Gemini Live: no inline-sync support yet
 
         turns = self._load_openclaw_turns()
         # All unfiltered turns past the cursor — used to advance the
@@ -1103,29 +1163,42 @@ class LiveBrainRunner:
         # same sensing event every turn).
         all_new = [t for t in turns if t["ts"] > self._last_synced_ts]
         new_turns = [t for t in all_new if self._is_syncable_turn(t)]
-        if not all_new:
-            return
-        if new_turns:
-            try:
-                session.send_context_turns([
-                    {"role": t["role"], "text": t["text"]} for t in new_turns
-                ])
-            except Exception as e:
-                logger.warning("OpenClaw history sync raised: %s", e)
-                return
         # Bump cursor past everything we've seen so noise we filtered
-        # out doesn't get re-scanned on the next turn.
-        self._last_synced_ts = max(t["ts"] for t in all_new)
-        if not new_turns:
-            return
-        # Visibility — mirrors the call-mode brain.context dumps so the
-        # journal shows exactly which turns we injected. Capped at the
-        # first 80 chars of each text so the log stays scannable.
+        # out doesn't get re-scanned on the next turn. Safe to do
+        # before the send because the send is best-effort: a failed
+        # WS write doesn't justify re-pushing the same JSONL noise.
+        if all_new:
+            self._last_synced_ts = max(t["ts"] for t in all_new)
+        if not new_turns and not then_request_response:
+            return False
+        # Visibility — log BEFORE the send so the journal shows what
+        # we're about to inject even if the send hangs / fails.
         for t in new_turns:
             preview = t["text"][:80]
             logger.info(
                 "brain.history.sync [live] +%s %r", t["role"], preview,
             )
+        try:
+            session.send_context_turns(
+                [{"role": t["role"], "text": t["text"]} for t in new_turns],
+                then_request_response=then_request_response,
+            )
+        except TypeError:
+            # Older session shape without the chained flag — fall back
+            # to the unchained send. Caller will need to fire
+            # request_response separately.
+            try:
+                session.send_context_turns(
+                    [{"role": t["role"], "text": t["text"]} for t in new_turns]
+                )
+            except Exception as e:
+                logger.warning("OpenClaw history sync raised: %s", e)
+                return False
+            return False
+        except Exception as e:
+            logger.warning("OpenClaw history sync raised: %s", e)
+            return False
+        return True
 
     # --- helpers -----------------------------------------------------------
 

@@ -103,6 +103,7 @@ class OpenAIRealtimeBrain(Brain):
         language: str = DEFAULT_LANGUAGE,
         context: Optional[BrainContext] = None,
         decision_rules: str = DECISION_RULES_LIVE,
+        workspace=None,
     ):
         self._api_key = api_key or os.environ.get("OPENAI_API_KEY")
         self._model = model
@@ -117,6 +118,12 @@ class OpenAIRealtimeBrain(Brain):
         self._language = (language or DEFAULT_LANGUAGE or resolve_stt_language() or "").strip()
         self._decision_rules = decision_rules
         self._context = context  # if None, loaded lazily per session (always fresh)
+        # Per-provider BrainWorkspace. When set, create_session() seeds
+        # load_context() with this workspace's session dir so chit-chat
+        # from previous WS sessions (same provider) feeds back into the
+        # next session's system prompt. See gemini_live.py for the same
+        # mechanism. Typed loose to avoid an import cycle.
+        self._workspace = workspace
         self._client = None
         self._import_error: Optional[Exception] = None
 
@@ -143,7 +150,12 @@ class OpenAIRealtimeBrain(Brain):
         return self._client is not None
 
     def create_session(self) -> BrainSession:
-        ctx = self._context or load_context()
+        extra_dir = None
+        if self._workspace is not None and self._workspace.session.enabled:
+            d = self._workspace.session.dir
+            if d is not None:
+                extra_dir = str(d)
+        ctx = self._context or load_context(extra_session_dir=extra_dir)
         system_instruction = self._build_system_instruction(ctx)
         return OpenAIRealtimeSession(
             client=self._client,
@@ -387,24 +399,28 @@ class OpenAIRealtimeSession(BrainSession):
         except RuntimeError:
             pass
 
-    def send_context_turns(self, turns: list[dict]) -> None:
-        """Inject extra conversation history into the live session
-        without triggering a model response.
+    def send_context_turns(
+        self, turns: list[dict], then_request_response: bool = False
+    ) -> None:
+        """Inject extra conversation history into the live session.
 
         Sends one ``conversation.item.create`` event per turn through
         the open WS. OpenAI Realtime treats these as added context
         only — generation only happens when the caller sends
-        ``response.create``, which we never do here. The runner uses
-        this to push OpenClaw turns (Telegram, web, other voice
-        sessions) that landed while this voice session was open so
-        the live brain stays current without a WS restart.
+        ``response.create``. Set ``then_request_response=True`` to
+        chain the create call inside the SAME async coroutine; this
+        guarantees the model sees the freshly-pushed items in its
+        context when it generates the reply (otherwise scheduling
+        two separate coroutines via run_coroutine_threadsafe can
+        race at asyncio await boundaries and ship response.create
+        on the WS before the last item.create lands).
 
         ``turns`` is a list of ``{"role": "user"|"model", "text": ...}``
         dicts; ``"model"`` is normalised to OpenAI's ``"assistant"``.
         Marshals onto the session's asyncio loop via
         ``run_coroutine_threadsafe`` so it's safe to call from the
         VoiceService thread."""
-        if not turns:
+        if not turns and not then_request_response:
             return
         if self._loop is None or self._conn is None or self._closed:
             return
@@ -417,7 +433,10 @@ class OpenAIRealtimeSession(BrainSession):
             if role == "model":
                 role = "assistant"
             normalized.append({"role": role, "text": text})
-        if not normalized:
+        # Only bail when there's nothing to push AND no chained
+        # response.create — otherwise we'd swallow the trigger when
+        # the caller wants a response without history.
+        if not normalized and not then_request_response:
             return
 
         async def _push():
@@ -457,6 +476,13 @@ class OpenAIRealtimeSession(BrainSession):
                     "in %.2fs: %s", pushed, len(normalized),
                     time.time() - t0, e,
                 )
+            if then_request_response:
+                try:
+                    await self._conn.response.create()
+                except Exception as e:
+                    logger.warning(
+                        "response.create (chained after sync) failed: %s", e,
+                    )
 
         try:
             asyncio.run_coroutine_threadsafe(_push(), self._loop)

@@ -23,6 +23,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -551,6 +552,120 @@ def _fetch_recent_turns(
     return turns[-limit:]
 
 
+_DATE_JSONL_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})\.jsonl$")
+
+
+def _turn_epoch(time_field: Any) -> float:
+    """Best-effort conversion of a Turn-style timestamp field to epoch
+    seconds. Accepts ISO 8601 strings (with or without ``Z``), numeric
+    strings, raw numbers (seconds or millis — auto-detected by
+    magnitude), or empty. Unparseable / empty values sort to 0 (oldest)
+    so they don't accidentally float to the top of a sorted history."""
+    if time_field is None or time_field == "":
+        return 0.0
+    if isinstance(time_field, (int, float)):
+        v = float(time_field)
+        return v / 1000.0 if v > 1e11 else v
+    s = str(time_field).strip()
+    if not s:
+        return 0.0
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
+    except (ValueError, TypeError):
+        pass
+    try:
+        v = float(s)
+        return v / 1000.0 if v > 1e11 else v
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _load_extra_session_turns(
+    session_dir: Optional[str], limit: int,
+) -> List["Turn"]:
+    """Read tail records from a brain workspace's ``session/`` dir
+    (the daily JSONL layout that BrainWorkspace writes). Used to seed
+    live brain sessions with chit-chat history from previous sessions
+    so a GoAway / idle-close cycle doesn't drop the conversation
+    memory on the floor.
+
+    Record shape matches what ``TextBrain._append_session_turn`` and
+    ``LiveBrainRunner`` write::
+
+        {"role": "user"|"assistant", "text": "...", "ts": <epoch_seconds>}
+
+    Walks newest → oldest dated files until ``limit`` records are
+    collected, returns chronological order. Malformed / non-conforming
+    lines are silently skipped."""
+    if not session_dir or limit <= 0:
+        return []
+    dir_path = Path(session_dir)
+    if not dir_path.is_dir():
+        return []
+    files = sorted(
+        (p for p in dir_path.glob("*.jsonl") if _DATE_JSONL_RE.match(p.name)),
+        reverse=True,
+    )
+    collected_rev: List[Turn] = []
+    for p in files:
+        if len(collected_rev) >= limit:
+            break
+        try:
+            with open(p, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+        except OSError as e:
+            logger.debug("extra session read %s failed: %s", p, e)
+            continue
+        for line in reversed(lines):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            role = obj.get("role")
+            if role not in ("user", "assistant"):
+                continue
+            text = (obj.get("text") or "").strip()
+            if not text:
+                continue
+            # ``ts`` (epoch) is the canonical brain-side stamp;
+            # ``time`` would be the OpenClaw-side ISO string. Accept
+            # either so this loader works against any JSONL that
+            # follows the {role,text,time-ish} shape.
+            ts_field = obj.get("ts", obj.get("time", ""))
+            collected_rev.append(Turn(role=role, text=text, time=str(ts_field)))
+            if len(collected_rev) >= limit:
+                break
+    collected_rev.reverse()
+    return collected_rev
+
+
+def _merge_turns_by_time(
+    primary: List["Turn"], extra: List["Turn"], limit: int,
+) -> List["Turn"]:
+    """Merge two Turn lists chronologically, cap at ``limit`` (keep the
+    newest tail). Stable sort: when timestamps tie, ``primary``
+    (OpenClaw) wins position over ``extra`` (brain session) so the
+    canonical user-facing history stays consistent."""
+    if not extra:
+        return primary[-limit:] if limit > 0 else primary
+    if not primary:
+        return extra[-limit:] if limit > 0 else extra
+    # Attach origin tag for stable tiebreak (primary < extra).
+    tagged: list[tuple[float, int, Turn]] = []
+    for t in primary:
+        tagged.append((_turn_epoch(t.time), 0, t))
+    for t in extra:
+        tagged.append((_turn_epoch(t.time), 1, t))
+    tagged.sort(key=lambda x: (x[0], x[1]))
+    merged = [t for _, _, t in tagged]
+    if limit > 0 and len(merged) > limit:
+        merged = merged[-limit:]
+    return merged
+
+
 def _resolve_paths(
     workspace_dir: Optional[str],
     agents_dir: Optional[str],
@@ -591,6 +706,7 @@ def load_context(
     history_limit: int = DEFAULT_HISTORY_LIMIT,
     timeout: float = DEFAULT_HTTP_TIMEOUT,
     include_history: bool = True,
+    extra_session_dir: Optional[str] = None,
 ) -> BrainContext:
     """Load brain context. All sources are best-effort — failures degrade
     gracefully to an empty section.
@@ -599,6 +715,13 @@ def load_context(
         1. OpenClaw session JSONL (exact mirror of chat.history)
         2. Lumi /api/agent/recent (only used if #1 returned nothing — for
            dev machines without the workspace mounted)
+
+    If ``extra_session_dir`` is provided, it should point at a
+    ``BrainWorkspace.session.dir`` (the per-mode JSONL directory). Any
+    chit-chat turns found there are merged chronologically with the
+    OpenClaw history before the limit is applied. Used by live brain
+    sessions to inherit their own previous-session chit-chat across
+    GoAway / idle-close cycles without polluting OpenClaw's history.
     """
     workspace_dir, agents_dir = _resolve_paths(workspace_dir, agents_dir)
     session_key = session_key or os.environ.get("OPENCLAW_SESSION_KEY") or DEFAULT_SESSION_KEY
@@ -612,6 +735,7 @@ def load_context(
 
     turns: List[Turn] = []
     history_source = "none"
+    extra_turns_n = 0
     if include_history:
         turns = _read_openclaw_history(agents_dir, session_key, history_limit)
         if turns:
@@ -620,14 +744,23 @@ def load_context(
             turns = _fetch_recent_turns(lumi_base_url, history_limit, timeout)
             if turns:
                 history_source = "lumi_recent"
+        if extra_session_dir:
+            extra = _load_extra_session_turns(extra_session_dir, history_limit)
+            extra_turns_n = len(extra)
+            if extra:
+                turns = _merge_turns_by_time(turns, extra, history_limit)
+                if history_source == "none":
+                    history_source = "extra_session_only"
+                else:
+                    history_source = f"{history_source}+extra_session"
 
     logger.info(
         "Brain context loaded — identity=%r (%d) user=%d memory=%d soul=%d skills=%d turns=%d "
-        "history_source=%s session_key=%s",
+        "(extra_session=%d) history_source=%s session_key=%s",
         identity_name or "(no IDENTITY.md)", len(identity),
         len(user_profile), len(memory), len(soul),
         skills_catalog.count("\n") + 1 if skills_catalog else 0,
-        len(turns),
+        len(turns), extra_turns_n,
         history_source, session_key,
     )
     return BrainContext(

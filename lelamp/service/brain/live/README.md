@@ -44,6 +44,55 @@ Override via env:
 LELAMP_GEMINI_LIVE_MODEL=gemini-2.5-flash-live-preview  # default
 ```
 
+## Per-provider workspace (layout A)
+
+Each live provider owns its own brain workspace under
+`${LELAMP_BRAIN_WORKSPACE}/live-<provider>/`:
+
+```
+${LELAMP_BRAIN_WORKSPACE:-/root/.brain/workspace}/
+├── call/                      ← call mode (text router)
+│   ├── session/YYYY-MM-DD.jsonl
+│   ├── bench/...
+│   └── MEMORY.md
+├── live-gemini/               ← live mode + Gemini Live
+│   ├── session/YYYY-MM-DD.jsonl
+│   ├── bench/...
+│   └── MEMORY.md
+└── live-openai/               ← live mode + OpenAI Realtime
+    ├── session/YYYY-MM-DD.jsonl
+    ├── bench/...
+    └── MEMORY.md
+```
+
+`voice_service.py` constructs `BrainWorkspace(subdir=f"live-{provider}")`
+once at startup and hands the same instance to both the brain (so
+`create_session()` can pass `extra_session_dir=workspace.session.dir`
+to `load_context`) and the runner (so `_on_text(is_final)` can append
+`{user, assistant}` turn pairs after each chit-chat reply).
+
+**Why isolated:** A/B comparison stays clean — Gemini's chit-chat
+won't pollute OpenAI's bench data and vice versa. The trade-off is
+continuity loss when an operator switches mode mid-day; the new
+mode's workspace starts empty and the brain has no memory of what
+was just discussed. OpenClaw's `IDENTITY/USER/MEMORY/SOUL/SKILLS`
+stay shared via `OPENCLAW_WORKSPACE` (separate filesystem tree), so
+the user-side memory is never fragmented — only the brain's own
+per-provider diary / chit-chat log is.
+
+Per-subdir absolute-path overrides (rarely needed):
+
+```bash
+LELAMP_BRAIN_WORKSPACE_CALL=/mnt/disk1/brain/call
+LELAMP_BRAIN_WORKSPACE_LIVE_GEMINI=/mnt/disk2/brain/live-gemini
+LELAMP_BRAIN_WORKSPACE_LIVE_OPENAI=/mnt/disk2/brain/live-openai
+```
+
+**Migration:** the first call-mode boot after upgrading hoists any
+pre-A-layout files (`${ROOT}/session/`, `/bench/`, `/MEMORY.md`)
+into `${ROOT}/call/` automatically. One-shot, idempotent. Live mode
+subdirs start empty by design (no prior data to migrate).
+
 ## History strategy: session-level (with a known stale gap)
 
 A Gemini Live session is long-lived — typically 10-15 minutes before
@@ -84,13 +133,25 @@ prompt. User-facing "is it saying weird things?" — yes.
 - `load_context()` runs at session start and bakes
   IDENTITY + USER + MEMORY + KNOWLEDGE + SOUL + SKILLS + the last
   ~20 OpenClaw turns into the system instruction.
+- When the brain has a workspace (see §"Per-provider workspace"
+  above), `load_context()` also reads the workspace's
+  `session/YYYY-MM-DD.jsonl` tail and merges those chit-chat turns
+  with OpenClaw history by timestamp. Net effect: chit-chat from
+  previous WS sessions (same provider) survives GoAway / idle-close
+  cycles even though Gemini's in-server memory dies on close.
 - Within the 10-15 minute Gemini Live session, the in-session
   conversation memory carries everything spoken — Gemini follows
   the dialogue naturally, no extra plumbing needed.
 - On `GoAway`, the runner opens a fresh session, `load_context()`
-  re-reads OpenClaw JSONL, and the brain catches up on anything
-  that happened during the old session — including Telegram / web /
-  other-voice turns.
+  re-reads OpenClaw JSONL + the brain workspace tail, and the brain
+  catches up on anything that happened during the old session —
+  Telegram / web / other-voice turns from OpenClaw plus its own
+  prior chit-chat from the workspace JSONL.
+- `LiveBrainRunner._on_text(is_final=True)` writes the turn pair
+  (`{role: user, ...}` + `{role: assistant, ...}`) to the workspace
+  session log after each chit-chat reply. Delegate turns are skipped
+  (OpenClaw's sensing endpoint already logs them via the call-mode
+  path).
 
 **Known gap:** OpenClaw turns that land *during* a live session stay
 invisible to the live brain until the next GoAway. For a household

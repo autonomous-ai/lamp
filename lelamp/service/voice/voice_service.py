@@ -292,8 +292,17 @@ class VoiceService:
             try:
                 from lelamp.service.brain.live.factory import make_brain
                 from lelamp.service.brain.live.runner import LiveBrainRunner
+                from lelamp.service.brain.workspace import BrainWorkspace
                 provider = os.environ.get("LELAMP_BRAIN_PROVIDER", "gemini").strip().lower()
-                live_brain = make_brain(provider)
+                # Per-provider workspace — see workspace.py docstring
+                # for layout-A rationale. Each live provider gets its
+                # own session/bench/MEMORY.md under <root>/live-<provider>/
+                # so chit-chat history doesn't cross-contaminate when
+                # A/B testing. The brain reads it via load_context's
+                # extra_session_dir; the runner writes turn pairs into
+                # it on every chit-chat reply.
+                live_workspace = BrainWorkspace(subdir=f"live-{provider}")
+                live_brain = make_brain(provider, workspace=live_workspace)
                 if live_brain is not None and live_brain.available:
                     self._live_runner = LiveBrainRunner(
                         brain=live_brain,
@@ -314,6 +323,12 @@ class VoiceService:
                         # Gemini — saves cost + bandwidth + privacy
                         # vs the previous "stream 24/7" behaviour.
                         is_speech_callback=self._make_live_vad_check(),
+                        # Same workspace handle the brain reads from —
+                        # the runner appends {user, assistant} turn
+                        # pairs after each chit-chat reply so the next
+                        # session sees them via load_context's
+                        # extra_session_dir merge.
+                        workspace=live_workspace,
                     )
                     logger.info(
                         "VoiceService brain mode=live (provider=%s) — classic VAD bypassed",

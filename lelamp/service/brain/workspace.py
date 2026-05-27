@@ -4,13 +4,31 @@ mirroring the layout OpenClaw uses for its own workspace.
 
 Layout (rooted at ``LELAMP_BRAIN_WORKSPACE``):
 
-    <workspace>/
+    <workspace>/<subdir>/
       MEMORY.md                     long-term curated memory (per-day diary
                                     appended by the summarizer; also loaded
                                     into the brain's static system prompt
                                     alongside OpenClaw's MEMORY.md)
       session/YYYY-MM-DD.jsonl      daily chit-chat log, 30d retention
       bench/YYYY-MM-DD.jsonl        daily decide() bench log, 7d retention
+
+Each brain mode owns its own subdir so chit-chat / bench data stays
+isolated across providers:
+
+    <workspace>/call/                 — call mode (text router)
+    <workspace>/live-gemini/          — live mode + Gemini Live
+    <workspace>/live-openai/          — live mode + OpenAI Realtime
+
+This is full layout-A isolation: switching mode mid-day means the new
+mode starts with no chit-chat memory of what was said in another
+mode's workspace. OpenClaw's IDENTITY/USER/MEMORY/SOUL/SKILLS stay
+shared via ``OPENCLAW_WORKSPACE`` (separate filesystem tree), so the
+user-side memory is never fragmented — only the brain's own
+per-provider diary / chit-chat log is.
+
+Per-subdir env overrides for absolute paths (rarely needed):
+``LELAMP_BRAIN_WORKSPACE_CALL``, ``LELAMP_BRAIN_WORKSPACE_LIVE_GEMINI``,
+``LELAMP_BRAIN_WORKSPACE_LIVE_OPENAI``.
 
 Two parallel concerns live here:
 
@@ -24,10 +42,17 @@ Two parallel concerns live here:
     ``MEMORY.md`` read/append. Owning these in one object keeps
     text_router.py readable.
 
-Legacy migration: a previous version stored a single flat
-``session.jsonl`` / ``bench.jsonl`` directly under ``/root/local/brain``.
-On init we move those files into the new daily layout (best-effort,
-mtime → date bucket) so historical entries survive the upgrade.
+Legacy migration:
+
+  - Pre-1.x stored a single flat ``session.jsonl`` / ``bench.jsonl`` under
+    ``/root/local/brain``. On init we move those into the new daily
+    layout (best-effort, mtime → date bucket).
+  - Pre-subdir layout stored ``session/``, ``bench/``, ``MEMORY.md``
+    directly under ``LELAMP_BRAIN_WORKSPACE``. When ``subdir="call"`` is
+    requested (the new home for the call-mode brain), we move those
+    legacy paths into ``<root>/call/`` on first init — one-shot,
+    idempotent (only runs when the target subdir doesn't already
+    contain the file/dir).
 """
 
 from __future__ import annotations
@@ -214,8 +239,15 @@ class BrainWorkspace:
         root: Optional[Path] = None,
         session_retention_days: Optional[int] = None,
         bench_retention_days: Optional[int] = None,
+        subdir: Optional[str] = None,
     ):
-        self._root: Optional[Path] = self._resolve_root(root)
+        # ``subdir`` namespaces a workspace under the shared root so
+        # each brain mode (call / live-gemini / live-openai) owns an
+        # isolated session+bench+MEMORY.md set. None = use the shared
+        # root directly (pre-subdir layout — keep for callers that
+        # haven't migrated; new code should always pass a subdir).
+        self._subdir = subdir
+        self._root: Optional[Path] = self._resolve_root(root, subdir)
         if self._root is None:
             self.session = _DailyJsonl.__new__(_DailyJsonl)
             self.session._dir = None  # type: ignore[attr-defined]
@@ -224,6 +256,13 @@ class BrainWorkspace:
             self._memory_path: Optional[Path] = None
             self._memory_lock = threading.Lock()
             return
+
+        # When a subdir is requested, hoist any legacy data sitting at
+        # the shared root into the subdir before the daily writers
+        # touch it. Only the call subdir owns legacy data; other
+        # subdirs are new layout so the migration is a no-op for them.
+        if subdir:
+            self._migrate_root_to_subdir(subdir)
 
         session_retention = (
             session_retention_days
@@ -242,10 +281,10 @@ class BrainWorkspace:
             ))
         )
         self.session = _DailyJsonl(
-            self._root / "session", session_retention, "session",
+            self._root / "session", session_retention, f"session[{subdir or 'root'}]",
         )
         self.bench = _DailyJsonl(
-            self._root / "bench", bench_retention, "bench",
+            self._root / "bench", bench_retention, f"bench[{subdir or 'root'}]",
         )
         self._memory_path = self._root / "MEMORY.md"
         self._memory_lock = threading.Lock()
@@ -253,25 +292,113 @@ class BrainWorkspace:
         self._migrate_legacy_files()
 
         logger.info(
-            "brain workspace ready at %s (session retention=%dd, bench retention=%dd)",
-            self._root, session_retention, bench_retention,
+            "brain workspace ready at %s (subdir=%s, session retention=%dd, bench retention=%dd)",
+            self._root, subdir or "(root)", session_retention, bench_retention,
         )
 
-    @staticmethod
-    def _resolve_root(explicit: Optional[Path]) -> Optional[Path]:
+    # Per-subdir env override knobs. Allow an operator to point one
+    # mode's workspace at a completely different filesystem location
+    # (e.g. a separate disk for OpenAI's bench data) without touching
+    # the shared root env.
+    _SUBDIR_ENV_OVERRIDE = {
+        "call":         "LELAMP_BRAIN_WORKSPACE_CALL",
+        "live-gemini":  "LELAMP_BRAIN_WORKSPACE_LIVE_GEMINI",
+        "live-openai":  "LELAMP_BRAIN_WORKSPACE_LIVE_OPENAI",
+    }
+
+    @classmethod
+    def _resolve_root(
+        cls,
+        explicit: Optional[Path],
+        subdir: Optional[str],
+    ) -> Optional[Path]:
+        # Explicit Path argument wins absolutely — used by tests + code
+        # paths that already computed the right directory.
         if explicit is not None:
             raw = str(explicit)
+            final = Path(raw)
         else:
-            raw = os.environ.get("LELAMP_BRAIN_WORKSPACE", _DEFAULT_WORKSPACE_ROOT).strip()
+            # Per-subdir absolute-path override wins next, so an
+            # operator can park one mode's workspace on a different
+            # disk without touching LELAMP_BRAIN_WORKSPACE.
+            override_env = cls._SUBDIR_ENV_OVERRIDE.get(subdir or "") if subdir else None
+            override_raw = os.environ.get(override_env, "").strip() if override_env else ""
+            if override_raw:
+                raw = override_raw
+                final = Path(raw)
+            else:
+                raw = os.environ.get("LELAMP_BRAIN_WORKSPACE", _DEFAULT_WORKSPACE_ROOT).strip()
+                if subdir:
+                    final = Path(raw) / subdir
+                else:
+                    final = Path(raw)
         if not raw or raw.lower() in ("off", "none", "disabled", "/dev/null"):
             logger.info("brain workspace disabled (LELAMP_BRAIN_WORKSPACE=%r)", raw)
             return None
-        path = Path(raw)
         try:
-            path.mkdir(parents=True, exist_ok=True)
+            final.mkdir(parents=True, exist_ok=True)
         except OSError as e:
-            logger.warning("brain workspace root %s unavailable: %s — disabled", path, e)
+            logger.warning("brain workspace root %s unavailable: %s — disabled", final, e)
             return None
+        return final
+
+    def _migrate_root_to_subdir(self, subdir: str) -> None:
+        """One-shot migration for the pre-subdir layout.
+
+        Pre-1.x stored ``session/``, ``bench/``, ``MEMORY.md`` directly
+        under the shared root. The first time we boot with ``subdir``
+        in use, hoist those into ``<root>/<subdir>/`` so historical
+        chit-chat / bench / diary survives the layout change.
+
+        Only safe for the subdir that historically owned the data
+        (i.e. ``call`` — the only mode that wrote here before). For
+        other subdirs we no-op; their workspaces start empty.
+
+        Idempotent: skips any file/dir that already exists at the
+        destination so a second run is a no-op.
+        """
+        if self._root is None or subdir != "call":
+            return
+        # ``self._root`` here is ``<shared_root>/call`` (or the per-
+        # subdir override). The legacy location is the parent — but
+        # ONLY when we resolved via the default root + subdir join,
+        # not when the override env was used (those point at an
+        # arbitrary path with no legacy ancestor to scan).
+        shared_root_raw = os.environ.get("LELAMP_BRAIN_WORKSPACE", _DEFAULT_WORKSPACE_ROOT).strip()
+        override_env = self._SUBDIR_ENV_OVERRIDE.get(subdir, "")
+        if override_env and os.environ.get(override_env, "").strip():
+            return  # operator points override at custom path — no legacy ancestor
+        shared_root = Path(shared_root_raw)
+        if not shared_root.is_dir() or shared_root == self._root:
+            return
+        for name in ("session", "bench"):
+            src = shared_root / name
+            dst = self._root / name
+            if src.is_dir() and not dst.exists():
+                try:
+                    src.rename(dst)
+                    logger.info(
+                        "brain workspace: hoisted legacy %s → %s", src, dst,
+                    )
+                except OSError as e:
+                    logger.warning(
+                        "brain workspace: legacy hoist %s → %s failed: %s",
+                        src, dst, e,
+                    )
+        legacy_memory = shared_root / "MEMORY.md"
+        target_memory = self._root / "MEMORY.md"
+        if legacy_memory.is_file() and not target_memory.exists():
+            try:
+                legacy_memory.rename(target_memory)
+                logger.info(
+                    "brain workspace: hoisted legacy %s → %s",
+                    legacy_memory, target_memory,
+                )
+            except OSError as e:
+                logger.warning(
+                    "brain workspace: MEMORY.md hoist %s → %s failed: %s",
+                    legacy_memory, target_memory, e,
+                )
         return path
 
     @property
