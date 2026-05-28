@@ -1351,13 +1351,13 @@ Store an admin token in config or a separate root-only file. Prefer separate fil
 Example file:
 
 ```text
-/root/config/lumi-admin-token
+/root/config/lamp-admin-token
 ```
 
 Permissions:
 
 ```sh
-chmod 600 /root/config/lumi-admin-token
+chmod 600 /root/config/lamp-admin-token
 ```
 
 Middleware:

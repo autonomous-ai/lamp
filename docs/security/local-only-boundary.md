@@ -636,7 +636,7 @@ If these are only dev/bench tools:
 - Delete or compile-gate `system.GET("shell", ...)`
 - Delete or compile-gate `oc.GET("config-json", ...)`
 
-Use build tags or config flag, e.g. `LUMI_ENABLE_DEV_ADMIN=false` default.
+Use build tags or config flag, e.g. `LAMP_ENABLE_DEV_ADMIN=false` default.
 
 #### Recommended strategy B — Local-only middleware
 

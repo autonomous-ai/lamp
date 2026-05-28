@@ -33,7 +33,7 @@ type sensingEvent struct {
 //
 // Env overrides:
 //
-//	LUMI_SENSING_URL     default http://127.0.0.1:5000/api/sensing/event
+//	LAMP_SENSING_URL     default http://127.0.0.1:5000/api/sensing/event
 //	TWITCH_SENSING_TYPE  default voice_command
 //
 // Fire-and-forget. The send runs in a background goroutine so the caller's
@@ -43,7 +43,7 @@ func ForwardChatMessage(ctx context.Context, nick, text string) {
 }
 
 func forward(ctx context.Context, nick, text string) {
-	url := os.Getenv("LUMI_SENSING_URL")
+	url := os.Getenv("LAMP_SENSING_URL")
 	if url == "" {
 		url = defaultLampSensingURL
 	}
