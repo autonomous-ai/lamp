@@ -162,7 +162,7 @@ func ProvideAgentHandler(gw domain.AgentGateway, bus *monitor.Bus, sled *statusl
 	// Init flow emitter here so ws_connect events (fired from StartWS before any HTTP request)
 	// are broadcast to SSE. Lamp is a single-user device so the global trace ID is sufficient;
 	// concurrent turn interleaving is not a concern in normal operation.
-	flow.Init(bus, config.LumiVersion)
+	flow.Init(bus, config.LampVersion)
 	mood.Init()
 	wellbeing.Init()
 	musicsuggestion.Init()

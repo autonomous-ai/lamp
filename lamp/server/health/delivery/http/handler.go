@@ -63,7 +63,7 @@ func (h *HealthHandler) SystemInfo(c *gin.Context) {
 		"lelampUptime":   readLeLampUptime(),
 		"lelampVersion":  readLeLampVersion(),
 		"goRoutines": runtime.NumGoroutine(),
-		"version":    config.LumiVersion,
+		"version":    config.LampVersion,
 		"deviceId":   h.config.DeviceID,
 		"agent":      h.agentInfo(),
 	}
@@ -225,7 +225,7 @@ func (h *HealthHandler) Dashboard(c *gin.Context) {
 			"connected":  h.agentGateway.IsReady(),
 			"sessionKey": h.agentGateway.GetSessionKey() != "",
 		},
-		"version":  config.LumiVersion,
+		"version":  config.LampVersion,
 		"deviceId": h.config.DeviceID,
 	}
 	c.JSON(http.StatusOK, serializers.ResponseSuccess(dash))

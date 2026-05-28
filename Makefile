@@ -12,7 +12,7 @@ WEB_DIR        := $(LAMP_DIR)/web
 
 # Go build
 MODULE         := go-lamp.autonomous.ai
-LDFLAGS_LAMP   := -X $(MODULE)/server/config.LumiVersion=$(VERSION)
+LDFLAGS_LAMP   := -X $(MODULE)/server/config.LampVersion=$(VERSION)
 LDFLAGS_BOOT   := -X $(MODULE)/bootstrap/config.BootstrapVersion=$(VERSION)
 LDFLAGS_IRC    := -X main.Version=$(VERSION)
 

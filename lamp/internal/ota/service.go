@@ -48,7 +48,7 @@ func ProvideService(cfg *config.Config, netSvc *network.Service) *Service {
 			Timeout: 15 * time.Second,
 		},
 		status: Status{
-			CurrentVersion: config.LumiVersion,
+			CurrentVersion: config.LampVersion,
 		},
 	}
 }
@@ -163,7 +163,7 @@ func (s *Service) poll() {
 
 	s.mu.Lock()
 	s.metadata = &meta
-	current := config.LumiVersion
+	current := config.LampVersion
 	available := lampMeta.Version
 	s.status = Status{
 		CurrentVersion:   current,

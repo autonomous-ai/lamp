@@ -352,7 +352,7 @@ func NewMQTTInfoResponse(cfg *config.Config, msgType string, mac string) MQTTInf
 	return MQTTInfoResponse{
 		Device:      "ai_lumi",
 		Type:        msgType,
-		Version:     config.LumiVersion,
+		Version:     config.LampVersion,
 		ID:          cfg.DeviceID,
 		Mac:         mac,
 		Time:        time.Now().UTC().Format(time.RFC3339Nano),

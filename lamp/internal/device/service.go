@@ -186,7 +186,7 @@ func (s *Service) Setup(data domain.SetupRequest) error {
 			Status:         "working",
 			SetupCompleted: true,
 			Mac:            GetDeviceMac(),
-			Version:        config.LumiVersion,
+			Version:        config.LampVersion,
 		})
 	}
 	return nil
@@ -271,7 +271,7 @@ func (s *Service) StartStatusReporter(ctx context.Context) {
 				Status:         "working",
 				SetupCompleted: s.config.SetUpCompleted,
 				Mac:            GetDeviceMac(),
-				Version:        config.LumiVersion,
+				Version:        config.LampVersion,
 			})
 			dump, _ := json.Marshal(resp)
 			slog.Debug("received response from backend", "component", "status-reporter", "response", string(dump))

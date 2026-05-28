@@ -19,7 +19,7 @@ func main() {
 	flag.Parse()
 
 	if showVersion {
-		fmt.Println(config.LumiVersion)
+		fmt.Println(config.LampVersion)
 		return
 	}
 
