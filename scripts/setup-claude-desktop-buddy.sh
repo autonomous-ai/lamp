@@ -10,7 +10,7 @@
 #   4. Enables and starts the service
 set -euo pipefail
 
-OTA_METADATA_URL="${OTA_METADATA_URL:-https://storage.googleapis.com/s3-autonomous-upgrade-3/lumi/ota/metadata.json}"
+OTA_METADATA_URL="${OTA_METADATA_URL:-https://storage.googleapis.com/s3-autonomous-upgrade-3/lamp/ota/metadata.json}"
 BUDDY_DIR="/opt/claude-desktop-buddy"
 
 ensure_root() {

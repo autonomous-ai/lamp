@@ -4,9 +4,9 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SETUP_FILE="${SCRIPT_DIR}/setup.sh"
 
-# Bucket and path matching https://storage.googleapis.com/s3-autonomous-upgrade-3/lumi/setup.sh
+# Bucket and path matching https://storage.googleapis.com/s3-autonomous-upgrade-3/lamp/setup.sh
 GCS_BUCKET="${GCS_BUCKET:-s3-autonomous-upgrade-3}"
-GCS_PATH="${GCS_PATH:-lumi/setup.sh}"
+GCS_PATH="${GCS_PATH:-lamp/setup.sh}"
 
 if [[ ! -f "$SETUP_FILE" ]]; then
   echo "Error: setup.sh not found at $SETUP_FILE"
