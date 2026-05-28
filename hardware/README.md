@@ -18,5 +18,5 @@ This folder is owned by the hardware team. Upload here:
 - Wiring diagrams and pinouts
 - Enclosure and assembly photos
 
-Large binary CAD files are **not committed**. They are uploaded to **Mega.nz**
-and the public share link is tracked in [`cad/README.md`](cad/README.md).
+Large binary CAD files are stored via **Git LFS** (see `.gitattributes`).
+File list and revision notes live in [`cad/README.md`](cad/README.md).
