@@ -203,13 +203,21 @@ async def proxy_ws(client_ws: WebSocket, path: str) -> None:
                                 data = result.plain_data.decode()
                             except ValidationError:
                                 logger.warning(
-                                    "[WS] /%s → %s: Rejecting unencrypted message", path, ws_url
+                                    "[WS] /%s → %s: Rejecting unencrypted message",
+                                    path,
+                                    ws_url,
                                 )
                                 continue
                             except (InvalidTag, ValueError) as e:
                                 logger.error("[WS] /%s → %s: Decrypt failed: %s", path, ws_url, e)
                                 continue
-                        logger.info("[WS] /%s → %s: %s", path, ws_url, data[:100])
+                        logger.info(
+                            "[WS] /%s → %s (encrypted=%s): %s",
+                            path,
+                            ws_url,
+                            session is not None,
+                            data[:100],
+                        )
                         await backend_ws.send(data)
                 except WebSocketDisconnect:
                     await backend_ws.close()
@@ -218,7 +226,13 @@ async def proxy_ws(client_ws: WebSocket, path: str) -> None:
                 try:
                     async for msg in backend_ws:
                         if isinstance(msg, str):
-                            logger.info("[WS] %s → /%s: %s", ws_url, path, msg[:100])
+                            logger.info(
+                                "[WS] %s → /%s (encrypted=%s): %s",
+                                ws_url,
+                                path,
+                                session is not None,
+                                msg[:100],
+                            )
                             if session is not None:
                                 encrypted = session.encrypt(
                                     AESGCMPlainPayload(plain_data=msg.encode())
@@ -226,7 +240,13 @@ async def proxy_ws(client_ws: WebSocket, path: str) -> None:
                                 msg = WSCipherMessage.from_raw_payload(encrypted).model_dump_json()
                             await client_ws.send_text(msg)
                         else:
-                            logger.info("[WS] %s → /%s: %s", ws_url, path, msg[:100].decode())
+                            logger.info(
+                                "[WS] %s → /%s (encrypted=%s): %s",
+                                ws_url,
+                                path,
+                                session is not None,
+                                msg[:100].decode(),
+                            )
                             if session is not None:
                                 encrypted = session.encrypt(AESGCMPlainPayload(plain_data=msg))
                                 msg = WSCipherMessage.from_raw_payload(encrypted).model_dump_json()
