@@ -16,7 +16,7 @@ Plan for opening up AI Lamp to third-party developers who already have lamp hard
 
 | Service | Port | Stack | Surface | Auth today |
 |---------|------|-------|---------|------------|
-| Lumi | 5000 | Go / Gin | `/api/sensing/*`, `/api/openclaw/*` (incl. SSE), `/api/guard/*`, `/api/mood/*`, `/api/monitor/*` | None, 127.0.0.1 only |
+| Lamp | 5000 | Go / Gin | `/api/sensing/*`, `/api/openclaw/*` (incl. SSE), `/api/guard/*`, `/api/mood/*`, `/api/monitor/*` | None, 127.0.0.1 only |
 | LeLamp | 5001 | Python / FastAPI | ~80 endpoints: `/servo/*`, `/led/*`, `/camera/*`, `/audio/*`, `/voice/*`, `/face/*`, `/emotion/*`, `/scene/*`, `/display/*`, `/sensing/*`, `/speaker/*` | None, 127.0.0.1 only |
 | Buddy | 5002 | Go | `/status`, `/approve`, `/deny`, BLE peripheral | None, 127.0.0.1 only |
 | DLBackend | varies | Python / FastAPI | `/api/dl/yoloworld`, `/api/dl/grounding-dino` | None |
@@ -29,10 +29,10 @@ Key implication: **everything is local-only with no auth**. That is the first bl
 
 | Item | Why | Touches |
 |------|-----|---------|
-| API token auth on LeLamp + Lumi | Without this, devs must SSH into Pi forever | `lumi/server`, `lelamp/server.py` |
+| API token auth on LeLamp + Lamp | Without this, devs must SSH into Pi forever | `lamp/server`, `lelamp/server.py` |
 | Bind 0.0.0.0 + firewall guidance | LAN access from dev laptop | systemd units, web UI doc |
 | API versioning `/v1/*` | Lock contract before opening | All HTTP handlers |
-| OpenAPI spec | Codegen feedstock for SDKs | FastAPI auto for LeLamp; swaggo / kin-openapi for Lumi |
+| OpenAPI spec | Codegen feedstock for SDKs | FastAPI auto for LeLamp; swaggo / kin-openapi for Lamp |
 | mDNS broadcast `lamp.local` | CLI / SDK auto-discover | systemd avahi config |
 | Dev portal (`docs/dev/`) | Quickstart, auth, API ref | docs only |
 
@@ -56,11 +56,11 @@ Goal: integrate lamp into a third-party product with stable contracts.
 | Deliverable | Tech | Notes |
 |-------------|------|-------|
 | Typed SDKs | OpenAPI codegen | Python, TS, Go. No hand-written clients |
-| Webhooks | Lumi | Mirror SSE; retry + backoff; HMAC sig |
+| Webhooks | Lamp | Mirror SSE; retry + backoff; HMAC sig |
 | Fleet API | Cloud (new) | Device registry, batch command, status rollup |
-| Observability | Lumi + LeLamp | `/metrics` Prometheus, structured JSON logs, `/v1/health/deep` |
+| Observability | Lamp + LeLamp | `/metrics` Prometheus, structured JSON logs, `/v1/health/deep` |
 | Stability commitment | Process | Semver on `/v1/*`, 6-month deprecation, CHANGELOG.md |
-| Rate limit + quota | Lumi gateway | Per-token |
+| Rate limit + quota | Lamp gateway | Per-token |
 
 ### Phase 3 — Skill marketplace (3–4 sprints, longest)
 
@@ -76,7 +76,7 @@ Goal: external dev writes skill, publishes, user installs in 1 click.
 | Registry | Cloud | `publish/install/list/remove` API + web UI |
 | Permission prompt | Lamp UI | User approves on install (mobile-app style) |
 | Sandbox | Hard | Limit fs/network. Initially: only Autonomous-reviewed skills bypass |
-| Marketplace web UI | `lumi/web` or new site | Browse, install, manage |
+| Marketplace web UI | `lamp/web` or new site | Browse, install, manage |
 
 **Product/legal decisions required:** review process, revenue model, abuse policy, content guidelines.
 
@@ -93,7 +93,7 @@ P2 and P3 can run in parallel after P0 completes — they touch different surfac
 
 ## 5. Cross-cutting concerns
 
-- **Internal API freeze**: before P1 ships, lock LeLamp / Lumi v1 endpoints. Internal moves on `/internal/*`, public consumes only `/v1/*`. Affects internal velocity — accept the trade.
+- **Internal API freeze**: before P1 ships, lock LeLamp / Lamp v1 endpoints. Internal moves on `/internal/*`, public consumes only `/v1/*`. Affects internal velocity — accept the trade.
 - **Sample skills**: promote guard / music / wellbeing / buddy to "official skill" status — they double as marketplace templates and contract validators.
 - **Support channel**: Discord or GitHub Discussions, on-call rotation.
 - **Docs discipline**: every phase ships with EN (`docs/`) and VI (`docs/vi/`) per CLAUDE.md rule.
@@ -110,10 +110,10 @@ P2 and P3 can run in parallel after P0 completes — they touch different surfac
 ## 7. First sprint scope (proposed)
 
 Phase 0 deliverables only:
-1. API token plumbing on LeLamp + Lumi (5001 + 5000).
+1. API token plumbing on LeLamp + Lamp (5001 + 5000).
 2. LAN binding + systemd unit changes.
 3. `/v1/` route prefix migration.
-4. OpenAPI spec committed (LeLamp auto, Lumi handwritten).
+4. OpenAPI spec committed (LeLamp auto, Lamp handwritten).
 5. Dev portal skeleton (`docs/dev/index.md` + `docs/vi/dev/index.md`).
 
 Outcome: third-party dev can `curl -H "Authorization: Bearer ..." http://lamp.local:5001/v1/servo/play` from their laptop. Everything else stacks on top.

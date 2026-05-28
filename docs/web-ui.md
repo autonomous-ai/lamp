@@ -341,7 +341,7 @@ def get_led_color():
 
 ## 8. Global Source Footer (GPL v3 §6 Compliance)
 
-`lumi/web/src/components/SourceFooter.tsx` is a tiny `position: fixed` link mounted at the App root (`App.tsx`, outside `<Routes>`), so it appears on every page — Setup, Login, Monitor, EditConfig, GwConfig.
+`lamp/web/src/components/SourceFooter.tsx` is a tiny `position: fixed` link mounted at the App root (`App.tsx`, outside `<Routes>`), so it appears on every page — Setup, Login, Monitor, EditConfig, GwConfig.
 
 Renders at `bottom: 6px, right: 8px` with monospace 10px text and opacity `0.7` — visible to anyone who looks for it without blocking form action buttons (Back / Next / Setup / Save) or scroll. Link target: `https://github.com/autonomous-ai/ai-lamp-lumi`.
 
@@ -353,7 +353,7 @@ Reason it exists: LeLamp Python (`lelamp/`) ships GPL v3, baked into the board i
 
 ```bash
 # Build production
-make web-build        # tsc + vite build → lumi/web/dist/
+make web-build        # tsc + vite build → lamp/web/dist/
 
 # Deploy to Pi
 make web-deploy       # web-build + rsync dist/ → /usr/share/nginx/html/setup/
@@ -362,5 +362,5 @@ make web-deploy       # web-build + rsync dist/ → /usr/share/nginx/html/setup/
 make lelamp-deploy    # rsync + pip install + systemctl restart lumi-lelamp.service
 ```
 
-> Deploy uses `PI_HOST=lumi.local` (mDNS). If it doesn't resolve, use IP directly:
+> Deploy uses `PI_HOST=lamp.local` (mDNS). If it doesn't resolve, use IP directly:
 > `PI_USER=root PI_HOST=<DEVICE_IP> make web-deploy`

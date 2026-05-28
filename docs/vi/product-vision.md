@@ -131,7 +131,7 @@ Hầu hết thiết bị thông minh là **reactive** — chờ lệnh. Lumi là
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  Lumi Server (Go) — Sensing Loop nhẹ, chạy liên tục            │
+│  Lamp Server (Go) — Sensing Loop nhẹ, chạy liên tục            │
 │                                                                 │
 │  Edge detection on-device, chi phí thấp:                        │
 │  • Camera: có người / vắng / độ sáng môi trường                │
@@ -345,7 +345,7 @@ Kiến trúc được thiết kế theo nguyên tắc **tách biệt rõ ràng**
 ┌─────────────────────────────────┼─────────────────────────────┐
 │                                 ▼                             │
 │  ┌──────────────────────────────────────────────────────────┐ │
-│  │              LUMI SERVER (Go)                            │ │
+│  │              LAMP SERVER (Go)                            │ │
 │  │         Fork từ openclaw-lobster                         │ │
 │  │                                                          │ │
 │  │  ┌─────────┐ ┌─────────┐ ┌──────┐ ┌──────┐ ┌────────┐  │ │
@@ -393,7 +393,7 @@ OpenClaw là bộ não AI của toàn bộ hệ thống. Nó thay thế hoàn to
 | **Voice I/O** | STT (Speech-to-Text) + TTS (Text-to-Speech) + emotion detection |
 | **Skills Ecosystem** | SKILL.md files mô tả API → LLM tự quyết định gọi khi nào |
 
-#### Lumi Server — Tầng Hệ Thống (Go)
+#### Lamp Server — Tầng Hệ Thống (Go)
 
 Fork từ openclaw-lobster. Đây là tầng **luôn chạy**, hoạt động **không cần OpenClaw**.
 
@@ -449,7 +449,7 @@ Body: {"x": 3, "y": 2, "r": 255, "g": 0, "b": 0}
 2. OpenClaw LLM đọc SKILL.md → biết có endpoint `/led/color`
 3. LLM quyết định parameters: `{"r": 255, "g": 165, "b": 0, "brightness": 70}`
 4. Gọi `curl -X POST http://127.0.0.1:5000/led/color -d '...'`
-5. Lumi server nhận request → gọi LeLamp runtime → LED thay đổi
+5. Lamp server nhận request → gọi LeLamp runtime → LED thay đổi
 
 ---
 
@@ -672,7 +672,7 @@ Body: {"x": 3, "y": 2, "r": 255, "g": 0, "b": 0}
 - Mỗi activity logged vào per-user JSONL timeline qua `POST /api/openclaw/wellbeing/log`.
 - Mỗi event, skill đọc history gần nhất, tính thời gian từ lần hydration/break reset cuối, nhắc nếu vượt threshold.
 - Per-user tracking: `current_user` từ sensing context tag, stranger dùng chung timeline `"unknown"`.
-- `lumi/resources/openclaw-skills/wellbeing/SKILL.md` — full workflow với threshold logic, dedup rules, và cooldowns.
+- `lamp/resources/openclaw-skills/wellbeing/SKILL.md` — full workflow với threshold logic, dedup rules, và cooldowns.
 
 **Câu hỏi đã giải quyết**:
 - [x] Khoảng thời gian nhắc → AI-driven thresholds tính từ activity log (không phải timer cố định).
@@ -693,7 +693,7 @@ Body: {"x": 3, "y": 2, "r": 255, "g": 0, "b": 0}
 - User detected happy/excited → Lumi gợi ý nhạc upbeat
 
 **Triển khai**:
-- `lumi/resources/openclaw-skills/music-suggestion/SKILL.md` — skill chủ động riêng (tách khỏi reactive `music/SKILL.md`).
+- `lamp/resources/openclaw-skills/music-suggestion/SKILL.md` — skill chủ động riêng (tách khỏi reactive `music/SKILL.md`).
 - **Hai triggers**:
   1. **Mood-driven**: Sau khi `mood/SKILL.md` log mood decision (sad, stressed, tired, excited, happy, bored) → music-suggestion fire.
   2. **Sedentary-driven**: `motion.activity` với sedentary labels (using computer, writing, etc.) → trigger gợi ý trực tiếp.
@@ -735,7 +735,7 @@ Body: {"x": 3, "y": 2, "r": 255, "g": 0, "b": 0}
 
 **Triển khai**:
 - `lelamp/speaker_recognizer.py` + `lelamp/service/voice/speaker_recognizer/speaker_recognizer.py` — voice embedding model, profile storage, real-time matching.
-- `lumi/resources/openclaw-skills/speaker-recognizer/SKILL.md` — self-enrollment skill (mic intro, Telegram voice note, two-turn enrollment).
+- `lamp/resources/openclaw-skills/speaker-recognizer/SKILL.md` — self-enrollment skill (mic intro, Telegram voice note, two-turn enrollment).
 - Voice profiles lưu per-user cùng face data tại `/root/local/users/{name}/`.
 - Telegram identity linked khi voice enrollment để DM targeting.
 

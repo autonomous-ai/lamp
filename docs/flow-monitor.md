@@ -7,7 +7,7 @@ The Flow Monitor is an observability layer for tracking agent turns end-to-end. 
 ## Architecture
 
 ```
-LeLamp (Python)                    Lumi Server (Go)                     Web UI (React)
+LeLamp (Python)                    Lamp Server (Go)                     Web UI (React)
   sensing event ──POST──→ SensingHandler ──flow.Start/End──→ JSONL file
                             │                                    ↓
                             └─ agentGateway.SendChat ──→ OpenClaw (WS)
