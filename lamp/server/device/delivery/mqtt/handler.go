@@ -33,7 +33,7 @@ func ProvideDeviceMQTTHandler(cfg *config.Config, mqttFactory *mqtt.Factory, ds 
 
 func (h *DeviceMQTTHandler) publish(data interface{}) error {
 	ctx := context.Background()
-	mqttClient := h.mqttFactory.GetClient("lumi-device-" + h.config.DeviceID)
+	mqttClient := h.mqttFactory.GetClient("lamp-device-" + h.config.DeviceID)
 	if err := mqttClient.Connect(ctx); err != nil {
 		return err
 	}

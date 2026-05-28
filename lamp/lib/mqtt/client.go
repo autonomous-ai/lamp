@@ -60,9 +60,9 @@ func ProvideClient(opts Options) *MQTT {
 func defaultClientID() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
-		return "lumi-mqtt-0"
+		return "lamp-mqtt-0"
 	}
-	return "lumi-mqtt-" + hex.EncodeToString(b)
+	return "lamp-mqtt-" + hex.EncodeToString(b)
 }
 
 // Connect establishes the connection and starts auto-reconnect. It returns when the context
