@@ -114,11 +114,12 @@ async def proxy_http(request: Request, path: str) -> Response:
     resp_headers = dict(resp.headers)
 
     logger.info(
-        "[HTTP] %s /%s → %s (encrypted=%s): %s",
+        "[HTTP] %s /%s → %s (encrypted=%s): %s %s",
         request.method,
         path,
         url,
         encrypted_key is not None,
+        resp.status_code,
         resp.text[:100],
     )
 
@@ -265,11 +266,9 @@ def _setup_logging(log_dir: str | None) -> None:
         Path(log_dir).mkdir(parents=True, exist_ok=True)
         for bak in Path(log_dir).glob("lbserver.log*.bak"):
             bak.unlink()
-        log_path = Path(log_dir) / "lbserver.log"
-        if log_path.exists():
-            log_path.rename(log_path.with_suffix(".log.bak"))
-        for old in Path(log_dir).glob("lbserver.log.*"):
+        for old in Path(log_dir).glob("lbserver.log*"):
             old.rename(Path(str(old) + ".bak"))
+        log_path = Path(log_dir) / "lbserver.log"
         handler = RotatingFileHandler(str(log_path), maxBytes=1_048_576, backupCount=3)
         handler.setFormatter(logging.Formatter(LOG_FORMAT))
         logging.basicConfig(level=logging.INFO, handlers=[handler])

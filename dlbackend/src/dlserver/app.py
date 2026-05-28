@@ -207,11 +207,9 @@ def _setup_logging(log_dir: str | None) -> None:
         # Clean up old .bak files, then rename current logs to .bak
         for bak in Path(log_dir).glob("dlserver.log*.bak"):
             bak.unlink()
-        log_path = Path(log_dir) / "dlserver.log"
-        if log_path.exists():
-            log_path.rename(log_path.with_suffix(".log.bak"))
-        for old in Path(log_dir).glob("dlserver.log.*"):
+        for old in Path(log_dir).glob("dlserver.log*"):
             old.rename(Path(str(old) + ".bak"))
+        log_path = Path(log_dir) / "dlserver.log"
         handler = RotatingFileHandler(
             str(log_path), maxBytes=1_048_576, backupCount=3
         )
