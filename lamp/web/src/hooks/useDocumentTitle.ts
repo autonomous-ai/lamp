@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-const BASE = "Lumi";
+const BASE = "Lamp";
 
 export function useDocumentTitle(parts: string | string[]) {
   useEffect(() => {

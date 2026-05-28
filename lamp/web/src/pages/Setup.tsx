@@ -51,7 +51,7 @@ function normaliseSetupError(message: string): string {
   const parts: string[] = [];
   if (missing.length > 0) parts.push(`Missing: ${missing.join(", ")}.`);
   if (other.length > 0) parts.push(`Invalid: ${other.join(", ")}.`);
-  parts.push("Re-open Setup from the Lumi app, or add ?debug=true to enter them manually.");
+  parts.push("Re-open Setup from the Lamp app, or add ?debug=true to enter them manually.");
   return parts.join(" ");
 }
 
@@ -85,21 +85,21 @@ export default function Setup({ mode = "initial" }: SetupProps = {}) {
 
   const urlParams = useSetupUrlParams(searchParams);
 
-  // When Lumi (golang) pushes provisioning credentials via query params, the
+  // When Lamp (golang) pushes provisioning credentials via query params, the
   // operator only needs to pick a Wi-Fi — every other field is already filled.
-  // Treat presence of llm_api_key as the signal Lumi handed us a full config:
+  // Treat presence of llm_api_key as the signal Lamp handed us a full config:
   // hide the AI Brain / Channels / Language / TTS menu entries and keep those
   // sections mounted (display:none) so their state still submits with the form.
   // Gated to initial (AP) mode so editing on the LAN IP keeps the full menu.
   const lumiPushedConfig = mode === "initial" && !!urlParams.llmApiKey;
 
-  // Language + Lumi's Voice are gated behind ?debug=true: regular operators
+  // Language + Lamp's Voice are gated behind ?debug=true: regular operators
   // get the auto-detected language and the "alloy"/openai voice defaults,
   // which still flow through submit because the sections stay in the DOM
   // (display:none) — same pattern as STT/MQTT below.
   const debug = searchParams.get("debug") === "true";
 
-  // Default operator path: Lumi parent pushes config via URL params, so
+  // Default operator path: Lamp parent pushes config via URL params, so
   // AI Brain / Channels never need to be touched manually — sidebar entries
   // for them stay hidden unless ?debug=true. Manual fresh setup without
   // pushed params also requires ?debug=true to reach those sections.
@@ -114,7 +114,7 @@ export default function Setup({ mode = "initial" }: SetupProps = {}) {
       { id: "llm" as SectionId,     label: "AI Brain",   icon: <Brain size={15} /> },
       { id: "channel" as SectionId, label: "Channels",   icon: <MessageSquare size={15} /> },
       { id: "language" as SectionId, label: "Language",  icon: <Globe size={15} /> },
-      { id: "tts" as SectionId,     label: "Lumi's Voice", icon: <Volume2 size={15} /> },
+      { id: "tts" as SectionId,     label: "Lamp's Voice", icon: <Volume2 size={15} /> },
     ] : []),
     // Voice / Face appear in continue mode only — they need the lamp's
     // hardware + backend, both unavailable while we're still on the AP.
@@ -124,7 +124,7 @@ export default function Setup({ mode = "initial" }: SetupProps = {}) {
     ] : []),
   ];
 
-  // When Lumi pushed config, the operator only needs Device + Wi-Fi visible —
+  // When Lamp pushed config, the operator only needs Device + Wi-Fi visible —
   // the rest are filled from URL and submitted silently. Sections remain in
   // the DOM (see `lumiPushedConfig` display:none wrappers below) so values
   // still flow through the form; we just hide the menu entries.
@@ -667,7 +667,7 @@ export default function Setup({ mode = "initial" }: SetupProps = {}) {
                   <>
                     <div style={{ fontSize: 32, marginBottom: 12 }}>⏳</div>
                     <div style={{ fontSize: 15, fontWeight: 600, color: C.amber, marginBottom: 8 }}>
-                      Lumi is joining your Wi-Fi…
+                      Lamp is joining your Wi-Fi…
                     </div>
                     <div style={{ fontSize: 12, color: C.textDim, marginBottom: lampMdnsHost ? 18 : 0 }}>
                       This usually takes 10-30 seconds. Stay on this network.
@@ -704,7 +704,7 @@ export default function Setup({ mode = "initial" }: SetupProps = {}) {
                   <>
                     <div style={{ fontSize: 32, marginBottom: 12 }}>✦</div>
                     <div style={{ fontSize: 15, fontWeight: 600, color: C.amber, marginBottom: 16 }}>
-                      Lumi is online!
+                      Lamp is online!
                     </div>
 
                     {/* mDNS path (primary): the lamp publishes
@@ -725,14 +725,14 @@ export default function Setup({ mode = "initial" }: SetupProps = {}) {
                         </div>
                         <a
                           // Carry the current pathname + query params so any
-                          // ?llm_api_key=… etc. from Lumi remain in scope on
+                          // ?llm_api_key=… etc. from Lamp remain in scope on
                           // the new host (redundant — lamp already persisted
                           // them via submit — but cheap and useful when the
                           // operator re-runs setup with different overrides).
                           // Force reload when the user is already on the
                           // canonical .local URL — otherwise the browser
                           // no-ops the same-URL click and they stay stuck on
-                          // the "Lumi is online!" screen even though the lamp
+                          // the "Lamp is online!" screen even though the lamp
                           // is reachable in continue mode now.
                           href={`http://${lampMdnsHost}.local${window.location.pathname}${getInitialSearch()}`}
                           onClick={(e) => {
@@ -756,7 +756,7 @@ export default function Setup({ mode = "initial" }: SetupProps = {}) {
                           {setupLanIP && (
                             <> Try <span style={{ fontFamily: "ui-monospace, monospace" }}>http://{setupLanIP}/</span> or </>
                           )}
-                          {" "}find Lumi's IP in your router's admin page (look
+                          {" "}find Lamp's IP in your router's admin page (look
                           for "{lampMdnsHost}").
                         </div>
                       </>
