@@ -1,4 +1,5 @@
-.PHONY: install install-cpu install-gpu install-lb install-dev \
+.PHONY: venv-dlserver venv-lbserver \
+       install install-cpu install-gpu install-tensorrt install-lb install-dev \
        start start-dlserver start-lbserver \
        start-runpod-master start-runpod-master-ssl start-runpod-slave start-runpod-slave-ssl \
        start-nginx start-nginx-ssl gen-ssl-cert \
@@ -40,6 +41,27 @@ DLSERVER_PID ?= /tmp/dlserver.pid
 LBSERVER_PID ?= /tmp/lbserver.pid
 
 # ---------------------------------------------------------------------------
+# Venv
+# ---------------------------------------------------------------------------
+
+DLSERVER_VENV ?= .venv/dlserver
+LBSERVER_VENV ?= .venv/lbserver
+
+venv-dlserver:
+	@if [ ! -d "$(DLSERVER_VENV)" ]; then \
+		echo "Creating dlserver venv at $(DLSERVER_VENV)..."; \
+		python -m venv $(DLSERVER_VENV); \
+	fi
+	@. $(DLSERVER_VENV)/bin/activate && echo "dlserver venv activated"
+
+venv-lbserver:
+	@if [ ! -d "$(LBSERVER_VENV)" ]; then \
+		echo "Creating lbserver venv at $(LBSERVER_VENV)..."; \
+		python -m venv $(LBSERVER_VENV); \
+	fi
+	@. $(LBSERVER_VENV)/bin/activate && echo "lbserver venv activated"
+
+# ---------------------------------------------------------------------------
 # Install
 # ---------------------------------------------------------------------------
 
@@ -47,6 +69,7 @@ install:
 	@if command -v nvidia-smi > /dev/null 2>&1 && nvidia-smi > /dev/null 2>&1; then \
 		echo "CUDA detected — installing onnxruntime-gpu"; \
 		pip install -e ".[dl,gpu]"; \
+		$(MAKE) install-tensorrt; \
 	else \
 		echo "No CUDA detected — installing onnxruntime (CPU)"; \
 		pip install -e ".[dl,cpu]"; \
@@ -57,6 +80,30 @@ install-cpu:
 
 install-gpu:
 	pip install -e ".[dl,gpu]"
+	$(MAKE) install-tensorrt
+
+install-tensorrt:
+	@echo "Installing TensorRT 10.8 (cu12) + cuDNN 9..."
+	@pip uninstall tensorrt tensorrt_cu13 tensorrt_cu13_bindings tensorrt_cu13_libs -y 2>/dev/null || true
+	@pip install tensorrt_cu12==10.8.* tensorrt_cu12_bindings==10.8.* tensorrt_cu12_libs==10.8.* nvidia-cudnn-cu12 || \
+		echo "WARNING: TensorRT/cuDNN installation failed — falling back to CUDA/CPU"
+	@VENV_SITE_PACKAGES=$$(python -c "import site; print(site.getsitepackages()[0])") && \
+	CUDNN_LIB=$$(find "$$VENV_SITE_PACKAGES" -name "libcudnn.so.9" -exec dirname {} \; 2>/dev/null | head -1) && \
+	TRT_LIB=$$(find "$$VENV_SITE_PACKAGES" -name "libnvinfer.so.10" -exec dirname {} \; 2>/dev/null | head -1) && \
+	if [ -z "$$CUDNN_LIB" ]; then echo "WARNING: libcudnn.so.9 not found in venv"; fi && \
+	if [ -z "$$TRT_LIB" ]; then echo "WARNING: libnvinfer.so.10 not found in venv"; fi && \
+	if [ -n "$$TRT_LIB" ] || [ -n "$$CUDNN_LIB" ]; then \
+		BASHRC_LINE="export LD_LIBRARY_PATH=$$CUDNN_LIB:$$TRT_LIB:\$$LD_LIBRARY_PATH"; \
+		if ! grep -q "libnvinfer" ~/.bashrc 2>/dev/null; then \
+			echo "$$BASHRC_LINE" >> ~/.bashrc; \
+			echo "Added LD_LIBRARY_PATH to ~/.bashrc"; \
+		else \
+			echo "LD_LIBRARY_PATH already in ~/.bashrc"; \
+		fi; \
+		export LD_LIBRARY_PATH="$$CUDNN_LIB:$$TRT_LIB:$$LD_LIBRARY_PATH"; \
+	fi && \
+	echo "  cuDNN lib: $$CUDNN_LIB" && \
+	echo "  TRT lib:   $$TRT_LIB"
 
 install-lb:
 	pip install -e ".[lb]"
@@ -68,13 +115,13 @@ install-dev:
 # Local dev (foreground, blocking)
 # ---------------------------------------------------------------------------
 
-start: install
+start: venv-dlserver install
 	python -m dlserver --host $(HOST) --port $(DLSERVER_PORT)
 
-start-dlserver: install
+start-dlserver: venv-dlserver install
 	python -m dlserver --host $(HOST) --port $(DLSERVER_PORT)
 
-start-lbserver: install-lb
+start-lbserver: venv-lbserver install-lb
 	python -m lbserver --host $(HOST) --port $(LBSERVER_PORT)
 
 # ---------------------------------------------------------------------------
@@ -85,11 +132,11 @@ start-runpod-master: start-nginx start-runpod-dlserver start-runpod-lbserver
 
 start-runpod-master-ssl: start-nginx-ssl start-runpod-dlserver start-runpod-lbserver
 
-start-runpod-slave: start-nginx stop-runpod-dlserver install
+start-runpod-slave: start-nginx stop-runpod-dlserver venv-dlserver install
 	@nohup python -m dlserver --host 127.0.0.1 --port $(LBSERVER_PORT) --log-dir /workspace/logs/dlbackend --pid-file $(DLSERVER_PID) </dev/null >/dev/null 2>&1 &
 	@echo "dlserver started on port $(LBSERVER_PORT) (slave, no LB)"
 
-start-runpod-slave-ssl: start-nginx-ssl stop-runpod-dlserver install
+start-runpod-slave-ssl: start-nginx-ssl stop-runpod-dlserver venv-dlserver install
 	@nohup python -m dlserver --host 127.0.0.1 --port $(LBSERVER_PORT) --log-dir /workspace/logs/dlbackend --pid-file $(DLSERVER_PID) </dev/null >/dev/null 2>&1 &
 	@echo "dlserver started on port $(LBSERVER_PORT) (slave-ssl, no LB)"
 
@@ -120,7 +167,7 @@ start-nginx-ssl: gen-ssl-cert
 	pkill nginx 2>/dev/null || true
 	nginx -c $(NGINX_SSL_CONF)
 
-start-runpod-dlserver: install stop-runpod-dlserver
+start-runpod-dlserver: venv-dlserver install stop-runpod-dlserver
 	@nohup python -m dlserver --host 127.0.0.1 --port $(DLSERVER_PORT) --log-dir /workspace/logs/dlbackend --pid-file $(DLSERVER_PID) </dev/null >/dev/null 2>&1 &
 	@echo "dlserver started on port $(DLSERVER_PORT)"
 
@@ -131,7 +178,7 @@ stop-runpod-dlserver:
 		echo "dlserver stopped"; \
 	fi
 
-start-runpod-lbserver: install-lb stop-runpod-lbserver
+start-runpod-lbserver: venv-lbserver install-lb stop-runpod-lbserver
 	@nohup python -m lbserver --host 127.0.0.1 --port $(LBSERVER_PORT) --log-dir /workspace/logs/lbserver --pid-file $(LBSERVER_PID) </dev/null >/dev/null 2>&1 &
 	@echo "lbserver started on port $(LBSERVER_PORT)"
 
