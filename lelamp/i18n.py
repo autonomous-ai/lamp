@@ -1,6 +1,6 @@
 """Localized user-facing phrases.
 
-Single source of truth for every multi-language string Lumi speaks. Kept
+Single source of truth for every multi-language string Lamp speaks. Kept
 out of the modules that use them so copy/translation edits don't require
 touching action logic.
 
@@ -48,13 +48,13 @@ PHRASES_BY_LANG = {
     },
 }
 
-# Pet/stroke responses — one is picked at random each time so Lumi
+# Pet/stroke responses — one is picked at random each time so Lamp
 # doesn't sound robotic when repeatedly stroked. Persona moment (not a
-# safety announcement). Tone per Lumi's character (AI companion + smart
+# safety announcement). Tone per Lamp's character (AI companion + smart
 # light + expressive robot, "like a pet/friend"): mix of tickle-cute,
-# affectionate, pet-like (purring), light-themed (Lumi = luminous),
-# "ask for more", and the moody flip-side — playful protest, mock-
-# annoyed, shy, sleepy — so Lumi feels like a real pet with moods, not
+# affectionate, pet-like (purring), light-themed (named what you are —
+# a lamp), "ask for more", and the moody flip-side — playful protest,
+# mock-annoyed, shy, sleepy — so Lamp feels like a real pet with moods, not
 # a smile machine. Keep phrases short — they fire mid-stroke and should
 # feel responsive, not lecture-y.
 #
@@ -267,7 +267,7 @@ DEFAULT_FILLERS_BY_LANG = {
 # every style/query. Cache is keyed by provider/voice/model in TTSService.
 #
 # Pools are split by language × provider:
-#   - language is read from Lumi's stt_language (config.json) at fire time,
+#   - language is read from Lamp's stt_language (config.json) at fire time,
 #     so changing the language picker doesn't require code edits — only a
 #     lelamp restart so the prewarm hits the new pool.
 #   - ElevenLabs variants embed eleven_v3 audio tags ([excited], [curious])

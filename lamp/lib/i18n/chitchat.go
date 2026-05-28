@@ -10,20 +10,20 @@ package i18n
 // ChitchatPhrases() so the intent matcher iterates it.
 var chitchatInputs = map[Phrase]map[string][]string{
 	PhraseChitchatGreeting: {
-		LangVI:   {"chào", "chào lumi", "xin chào", "lumi ơi", "hey lumi"},
-		LangEN:   {"hi", "hello", "hi lumi", "hello lumi", "hey", "hey lumi"},
+		LangVI:   {"chào", "chào lamp", "xin chào", "lamp ơi", "hey lamp"},
+		LangEN:   {"hi", "hello", "hi lamp", "hello lamp", "hey", "hey lamp"},
 		LangZhCN: {"你好", "你好啊", "嗨", "嘿"},
 		LangZhTW: {"你好", "嗨"},
 	},
 	PhraseChitchatFarewell: {
-		LangVI:   {"tạm biệt", "tạm biệt lumi"},
-		LangEN:   {"bye", "bye lumi", "goodbye", "see you", "see ya", "later"},
+		LangVI:   {"tạm biệt", "tạm biệt lamp"},
+		LangEN:   {"bye", "bye lamp", "goodbye", "see you", "see ya", "later"},
 		LangZhCN: {"再见", "拜拜"},
 		LangZhTW: {"再見", "拜拜"},
 	},
 	PhraseChitchatThanks: {
-		LangVI:   {"cảm ơn", "cảm ơn lumi"},
-		LangEN:   {"thanks", "thank you", "thanks lumi", "thx"},
+		LangVI:   {"cảm ơn", "cảm ơn lamp"},
+		LangEN:   {"thanks", "thank you", "thanks lamp", "thx"},
 		LangZhCN: {"谢谢", "谢谢你"},
 		LangZhTW: {"謝謝", "謝謝你"},
 	},
@@ -78,7 +78,7 @@ func ChitchatPhrases() []Phrase {
 
 // chitchatCommandWords are verbs/nouns per language that signal an action
 // request, not a social phrase. The intent matcher rejects chitchat match
-// when any of these appear in the input ("chào lumi bật đèn" → bật in VN
+// when any of these appear in the input ("chào lamp bật đèn" → bật in VN
 // command words → fall through to command rules so the LED toggle fires).
 var chitchatCommandWords = map[string][]string{
 	LangVI: {
@@ -108,18 +108,18 @@ func ChitchatCommandWords() []string {
 }
 
 // chitchatWakeWords are name tokens the user prepends before chitchat — the
-// wake word itself plus common STT mis-transcriptions ("Lumi" → "Làmi" /
-// "Lami" / "Lumy") and attention-call compounds ("Lumi ơi"). Stripped from
-// the head of normalized chitchat input so "Lumi xin chào" matches "xin
-// chào" and bare "Lumi ơi" → "" → greeting reply path.
+// wake word itself plus common STT mis-transcriptions ("Lamp" → "Lam" /
+// "Lăm" / "Lâm" / "Lambp") and attention-call compounds ("Lamp ơi"). Stripped
+// from the head of normalized chitchat input so "Lamp xin chào" matches "xin
+// chào" and bare "Lamp ơi" → "" → greeting reply path.
 //
-// Order matters: longest forms first so "lumi ơi xin chào" strips the full
-// "lumi ơi" rather than just "lumi".
+// Order matters: longest forms first so "lamp ơi xin chào" strips the full
+// "lamp ơi" rather than just "lamp".
 var chitchatWakeWords = []string{
 	// Compound attention-call forms — must come before bare names.
-	"lumi ơi", "loomi ơi", "lumy ơi", "luumi ơi", "lami ơi", "làmi ơi", "noah ơi",
+	"lamp ơi", "lampy ơi", "lam ơi", "lăm ơi", "lâm ơi", "lambp ơi", "noah ơi",
 	// Bare-name forms.
-	"lumi", "loomi", "lumy", "luumi", "lami", "làmi", "noah",
+	"lamp", "lampy", "lam", "lăm", "lâm", "lambp", "noah",
 }
 
 // ChitchatWakeWords returns the wake-word list for chitchat input
