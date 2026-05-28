@@ -13,7 +13,7 @@ This is the actionable plan for **MVP of Lamp Buddy** — the macOS companion ap
 
 **In scope:**
 - macOS-only (macOS 13+)
-- Swift Package Manager project at `lumi-buddy/`
+- Swift Package Manager project at `lamp-buddy/`
 - Menu bar app (`NSStatusItem`, no Dock icon)
 - mDNS discovery of lamp on LAN
 - 6-digit pairing flow (lamp web UI shows code)
@@ -48,22 +48,22 @@ Each phase is independently shippable and reviewable.
 **Status:** ✓ Done.
 
 **Files:**
-- `lumi-buddy/README.md`
-- `lumi-buddy/macos/Package.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/main.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/AppDelegate.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/MenuBarController.swift`
-- `lumi-buddy/.gitignore`
+- `lamp-buddy/README.md`
+- `lamp-buddy/macos/Package.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/main.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/AppDelegate.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/MenuBarController.swift`
+- `lamp-buddy/.gitignore`
 
-**Acceptance:** `cd lumi-buddy/macos && swift run` shows a status bar icon. Menu has "About Lamp Buddy", "Quit". No crash. Process activation policy is `.accessory` (no Dock icon).
+**Acceptance:** `cd lamp-buddy/macos && swift run` shows a status bar icon. Menu has "About Lamp Buddy", "Quit". No crash. Process activation policy is `.accessory` (no Dock icon).
 
 ### Phase 1B — Lamp discovery (mDNS)
 
 **Status:** ✓ Done — Bonjour browse for `_lumi._tcp` works; manual hostname fallback also wired.
 
 **Files:**
-- `lumi-buddy/macos/Sources/LumiBuddy/Discovery/LampDiscovery.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/Discovery/LampInfo.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Discovery/LampDiscovery.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Discovery/LampInfo.swift`
 - Update `MenuBarController.swift` to show discovered lamps
 
 **Acceptance:** When a lamp is running on LAN (advertises `_lumi._tcp.local`), buddy menu shows e.g. `lamp-a1b2.local — 192.168.1.50` as a clickable item. Also: manual hostname entry option.
@@ -75,9 +75,9 @@ Each phase is independently shippable and reviewable.
 **Status:** ✓ Done — 6-digit code + token persistence in `buddies.json` + Keychain on the Mac. Includes `DELETE /api/buddy/self` (Bearer-auth) so a user-initiated unpair in the buddy app also drops the lamp's record, keeping both sides in sync.
 
 **Buddy files:**
-- `lumi-buddy/macos/Sources/LumiBuddy/Pairing/PairingManager.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/Pairing/PairingStore.swift` (Keychain)
-- `lumi-buddy/macos/Sources/LumiBuddy/Pairing/PairingWindow.swift` (code entry UI)
+- `lamp-buddy/macos/Sources/LampBuddy/Pairing/PairingManager.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Pairing/PairingStore.swift` (Keychain)
+- `lamp-buddy/macos/Sources/LampBuddy/Pairing/PairingWindow.swift` (code entry UI)
 
 **Lamp Go files:**
 - `lumi/internal/buddy/types.go`
@@ -115,8 +115,8 @@ Each phase is independently shippable and reviewable.
 **Status:** ✓ Done — persistent WS with backoff reconnect. Lamp fires a `ping` hello command immediately after connect so the user's Activity window shows one ✓ row right away, confirming end-to-end reachability.
 
 **Buddy files:**
-- `lumi-buddy/macos/Sources/LumiBuddy/Connection/LumiConnection.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/Connection/Reconnect.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Connection/LumiConnection.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Connection/Reconnect.swift`
 
 **Lamp Go files:**
 - `lumi/internal/buddy/registry.go`
@@ -140,15 +140,15 @@ Each phase is independently shippable and reviewable.
 **Status:** ✓ Done — 16 executors (the MVP set above plus `screenshot`, `click_at`, `scroll`, `mouse_move`, `drag`, `read_clipboard`, `write_clipboard`, `click_button` via Accessibility, `cursor_pos`, `list_displays`). The vision-shaped executors land here ahead of the formal vision phase so the bash+curl reference skill (`computer-use/reference/vision.md`) can use them today.
 
 **Files:**
-- `lumi-buddy/macos/Sources/LumiBuddy/Commands/Command.swift` (types)
-- `lumi-buddy/macos/Sources/LumiBuddy/Commands/CommandDispatcher.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/Commands/Executors/AppExecutor.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/Commands/Executors/URLExecutor.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/Commands/Executors/KeyboardExecutor.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/Commands/Executors/NotificationExecutor.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/Commands/Executors/PingExecutor.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/Permissions/AccessibilityCheck.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/Audit/AuditLog.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Commands/Command.swift` (types)
+- `lamp-buddy/macos/Sources/LampBuddy/Commands/CommandDispatcher.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Commands/Executors/AppExecutor.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Commands/Executors/URLExecutor.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Commands/Executors/KeyboardExecutor.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Commands/Executors/NotificationExecutor.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Commands/Executors/PingExecutor.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Permissions/AccessibilityCheck.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Audit/AuditLog.swift`
 
 **Acceptance:**
 - WS receives command JSON → dispatcher decodes → executor runs → response JSON returned
@@ -209,16 +209,16 @@ Each phase is independently shippable and reviewable.
 **Files:**
 - Verify `docs/lamp-buddy.md` matches actual implementation (update if drift)
 - Verify `docs/vi/lamp-buddy_vi.md` matches
-- Add `lumi-buddy/README.md` build instructions
-- Update root `CLAUDE.md`: doc table row for lumi-buddy
+- Add `lamp-buddy/README.md` build instructions
+- Update root `CLAUDE.md`: doc table row for lamp-buddy
 - Update top-level `Makefile`: `build-buddy` target
 - Add `VERSION_BUDDY` file at root → `0.0.1`
 - Bump `VERSION_LUMI`, `VERSION_WEB` as needed
 
 **Acceptance:**
-- Fresh-checkout dev can `cd lumi-buddy/macos && swift run` and follow README to pair with lamp
+- Fresh-checkout dev can `cd lamp-buddy/macos && swift run` and follow README to pair with lamp
 - CLAUDE.md doc table includes the new row
-- `make build-buddy` produces `lumi-buddy/.build/release/LumiBuddy`
+- `make build-buddy` produces `lamp-buddy/.build/release/LampBuddy`
 
 ---
 
@@ -232,15 +232,15 @@ Each phase is independently shippable and reviewable.
 
 ## File inventory (final state after MVP)
 
-### Swift (`lumi-buddy/macos/`)
+### Swift (`lamp-buddy/macos/`)
 ```
-lumi-buddy/
+lamp-buddy/
 ├── README.md
 ├── .gitignore
 ├── docs/                          # design + MVP plan (EN + VI)
 └── macos/
     ├── Package.swift
-    └── Sources/LumiBuddy/
+    └── Sources/LampBuddy/
         ├── main.swift
         ├── AppDelegate.swift
         ├── MenuBarController.swift
@@ -269,7 +269,7 @@ lumi-buddy/
             └── AuditLog.swift
 ```
 
-Subfolders `lumi-buddy/windows/` and `lumi-buddy/linux/` will host future ports (v1.2+). Each platform self-contained so toolchains don't cross-contaminate.
+Subfolders `lamp-buddy/windows/` and `lamp-buddy/linux/` will host future ports (v1.2+). Each platform self-contained so toolchains don't cross-contaminate.
 
 ### Go (`lumi/`)
 ```
@@ -319,7 +319,7 @@ lumi/web/src/
 
 ## End-to-end acceptance test
 
-1. Mac boots, user starts `lumi-buddy.app` (or `swift run` for dev)
+1. Mac boots, user starts `lamp-buddy.app` (or `swift run` for dev)
 2. Lamp is running on LAN
 3. Buddy menu shows `lamp-xxxx.local` discovered
 4. User clicks "Pair with Lamp" → web UI on lamp displays 6-digit code

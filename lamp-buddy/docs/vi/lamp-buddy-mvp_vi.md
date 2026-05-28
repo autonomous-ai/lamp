@@ -13,7 +13,7 @@
 
 **Trong scope:**
 - macOS-only (macOS 13+)
-- Swift Package Manager project ở `lumi-buddy/`
+- Swift Package Manager project ở `lamp-buddy/`
 - Menu bar app (`NSStatusItem`, không có Dock icon)
 - mDNS discovery lamp trên LAN
 - Pairing 6-digit (web UI lamp hiện code)
@@ -48,22 +48,22 @@ Mỗi phase ship & review độc lập được.
 **Status:** ✓ Done.
 
 **Files:**
-- `lumi-buddy/README.md`
-- `lumi-buddy/macos/Package.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/main.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/AppDelegate.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/MenuBarController.swift`
-- `lumi-buddy/.gitignore`
+- `lamp-buddy/README.md`
+- `lamp-buddy/macos/Package.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/main.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/AppDelegate.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/MenuBarController.swift`
+- `lamp-buddy/.gitignore`
 
-**Acceptance:** `cd lumi-buddy/macos && swift run` hiện icon trên status bar. Menu có "About Lamp Buddy", "Quit". Không crash. Activation policy là `.accessory` (không có Dock icon).
+**Acceptance:** `cd lamp-buddy/macos && swift run` hiện icon trên status bar. Menu có "About Lamp Buddy", "Quit". Không crash. Activation policy là `.accessory` (không có Dock icon).
 
 ### Phase 1B — Discovery lamp (mDNS)
 
 **Status:** ✓ Done — Bonjour browse `_lumi._tcp` chạy; có fallback nhập hostname tay.
 
 **Files:**
-- `lumi-buddy/macos/Sources/LumiBuddy/Discovery/LampDiscovery.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/Discovery/LampInfo.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Discovery/LampDiscovery.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Discovery/LampInfo.swift`
 - Update `MenuBarController.swift` để hiện lamp tìm thấy
 
 **Acceptance:** Khi lamp đang chạy trên LAN (advertise `_lumi._tcp.local`), menu buddy hiện ví dụ `lamp-a1b2.local — 192.168.1.50` như item bấm được. Cũng có: option nhập hostname thủ công.
@@ -75,9 +75,9 @@ Mỗi phase ship & review độc lập được.
 **Status:** ✓ Done — code 6 số + lưu token trong `buddies.json` (lamp) và Keychain (Mac). Có thêm `DELETE /api/buddy/self` (Bearer-auth) để khi user unpair từ buddy app, lamp cũng xóa record — 2 phía sync.
 
 **File buddy:**
-- `lumi-buddy/macos/Sources/LumiBuddy/Pairing/PairingManager.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/Pairing/PairingStore.swift` (Keychain)
-- `lumi-buddy/macos/Sources/LumiBuddy/Pairing/PairingWindow.swift` (UI nhập code)
+- `lamp-buddy/macos/Sources/LampBuddy/Pairing/PairingManager.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Pairing/PairingStore.swift` (Keychain)
+- `lamp-buddy/macos/Sources/LampBuddy/Pairing/PairingWindow.swift` (UI nhập code)
 
 **File Lamp Go:**
 - `lumi/internal/buddy/types.go`
@@ -115,8 +115,8 @@ Mỗi phase ship & review độc lập được.
 **Status:** ✓ Done — WS persistent + reconnect có backoff. Lamp tự fire 1 lệnh `ping` "hello" ngay sau khi connect để Activity window bên buddy hiện 1 dòng ✓ ngay, user xác nhận chain thông suốt.
 
 **File buddy:**
-- `lumi-buddy/macos/Sources/LumiBuddy/Connection/LumiConnection.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/Connection/Reconnect.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Connection/LumiConnection.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Connection/Reconnect.swift`
 
 **File Lamp Go:**
 - `lumi/internal/buddy/registry.go`
@@ -140,15 +140,15 @@ Mỗi phase ship & review độc lập được.
 **Status:** ✓ Done — 16 executors (MVP set + `screenshot`, `click_at`, `scroll`, `mouse_move`, `drag`, `read_clipboard`, `write_clipboard`, `click_button` qua Accessibility, `cursor_pos`, `list_displays`). Các vision executors landed sớm hơn vision phase chính thức để skill bash+curl (`computer-use/reference/vision.md`) dùng được luôn.
 
 **Files:**
-- `lumi-buddy/macos/Sources/LumiBuddy/Commands/Command.swift` (type)
-- `lumi-buddy/macos/Sources/LumiBuddy/Commands/CommandDispatcher.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/Commands/Executors/AppExecutor.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/Commands/Executors/URLExecutor.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/Commands/Executors/KeyboardExecutor.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/Commands/Executors/NotificationExecutor.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/Commands/Executors/PingExecutor.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/Permissions/AccessibilityCheck.swift`
-- `lumi-buddy/macos/Sources/LumiBuddy/Audit/AuditLog.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Commands/Command.swift` (type)
+- `lamp-buddy/macos/Sources/LampBuddy/Commands/CommandDispatcher.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Commands/Executors/AppExecutor.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Commands/Executors/URLExecutor.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Commands/Executors/KeyboardExecutor.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Commands/Executors/NotificationExecutor.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Commands/Executors/PingExecutor.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Permissions/AccessibilityCheck.swift`
+- `lamp-buddy/macos/Sources/LampBuddy/Audit/AuditLog.swift`
 
 **Acceptance:**
 - WS nhận command JSON → dispatcher decode → executor chạy → trả response JSON
@@ -209,16 +209,16 @@ Mỗi phase ship & review độc lập được.
 **Files:**
 - Verify `docs/lamp-buddy.md` match implementation thực (update nếu drift)
 - Verify `docs/vi/lamp-buddy_vi.md` match
-- Thêm `lumi-buddy/README.md` instruction build
+- Thêm `lamp-buddy/README.md` instruction build
 - Update `CLAUDE.md` root: row doc table cho lumi-buddy
 - Update `Makefile` top-level: target `build-buddy`
 - Thêm file `VERSION_BUDDY` ở root → `0.0.1`
 - Bump `VERSION_LUMI`, `VERSION_WEB` nếu cần
 
 **Acceptance:**
-- Dev mới clone về có thể `cd lumi-buddy/macos && swift run` và follow README để pair với lamp
+- Dev mới clone về có thể `cd lamp-buddy/macos && swift run` và follow README để pair với lamp
 - CLAUDE.md doc table có row mới
-- `make build-buddy` cho ra `lumi-buddy/.build/release/LumiBuddy`
+- `make build-buddy` cho ra `lamp-buddy/.build/release/LumiBuddy`
 
 ---
 
@@ -232,15 +232,15 @@ Mỗi phase ship & review độc lập được.
 
 ## File inventory (trạng thái cuối MVP)
 
-### Swift (`lumi-buddy/macos/`)
+### Swift (`lamp-buddy/macos/`)
 ```
-lumi-buddy/
+lamp-buddy/
 ├── README.md
 ├── .gitignore
 ├── docs/                          # design + MVP plan (EN + VI)
 └── macos/
     ├── Package.swift
-    └── Sources/LumiBuddy/
+    └── Sources/LampBuddy/
         ├── main.swift
         ├── AppDelegate.swift
         ├── MenuBarController.swift
@@ -269,7 +269,7 @@ lumi-buddy/
             └── AuditLog.swift
 ```
 
-Subfolder `lumi-buddy/windows/` và `lumi-buddy/linux/` sẽ host port tương lai (v1.2+). Mỗi platform self-contained để toolchain không "lây" lẫn nhau.
+Subfolder `lamp-buddy/windows/` và `lamp-buddy/linux/` sẽ host port tương lai (v1.2+). Mỗi platform self-contained để toolchain không "lây" lẫn nhau.
 
 ### Go (`lumi/`)
 ```
