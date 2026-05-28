@@ -3,16 +3,16 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${SCRIPT_DIR}/.."
-DIST_DIR="${PROJECT_ROOT}/lumi/web/dist"
+DIST_DIR="${PROJECT_ROOT}/lamp/web/dist"
 ZIP_NAME="setup-web.zip"
 ZIP_PATH="${PROJECT_ROOT}/${ZIP_NAME}"
-VERSION_FILE="${PROJECT_ROOT}/lumi/VERSION_WEB"
+VERSION_FILE="${PROJECT_ROOT}/lamp/VERSION_WEB"
 
 # Bucket for web bundle
 GCS_BUCKET="${GCS_BUCKET:-s3-autonomous-upgrade-3}"
 
 echo "========== npm install =========="
-(cd "$PROJECT_ROOT/lumi/web" && npm install)
+(cd "$PROJECT_ROOT/lamp/web" && npm install)
 
 # Auto-increment semver (patch) before upload
 if [[ -f "$VERSION_FILE" ]]; then
@@ -28,10 +28,10 @@ else
   echo "========== Version initialized: ${new_version} =========="
 fi
 
-GCS_PATH="${GCS_PATH:-lumi/ota/web/${new_version}.zip}"
+GCS_PATH="${GCS_PATH:-lamp/ota/web/${new_version}.zip}"
 
 echo "========== npm run build =========="
-(cd "$PROJECT_ROOT/lumi/web" && npm run build)
+(cd "$PROJECT_ROOT/lamp/web" && npm run build)
 
 if [[ ! -d "$DIST_DIR" ]]; then
   echo "Error: dist not found at $DIST_DIR"
@@ -47,8 +47,8 @@ rm -f "$ZIP_PATH"
 echo "========== Upload ${ZIP_NAME} to Google Cloud Storage (no-cache) =========="
 gsutil -h "Cache-Control:no-cache, no-store, must-revalidate" cp "$ZIP_PATH" "gs://${GCS_BUCKET}/${GCS_PATH}"
 
-# Update metadata.json (lumi/ota/metadata.json) - web key
-METADATA_PATH="lumi/ota/metadata.json"
+# Update metadata.json (lamp/ota/metadata.json) - web key
+METADATA_PATH="lamp/ota/metadata.json"
 METADATA_TMP=$(mktemp)
 WEB_URL="${WEB_URL:-https://storage.googleapis.com/${GCS_BUCKET}/${GCS_PATH}}"
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Production setup for Raspberry Pi 5: single-interface AP/STA switch, nginx setup web + API proxy, lumi backend.
+# Production setup for Raspberry Pi 5: single-interface AP/STA switch, nginx setup web + API proxy, lamp backend.
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
@@ -189,7 +189,7 @@ stage_enable_spi() {
   echo "[stage] SPI enablement will take effect after reboot"
 }
 
-OTA_METADATA_URL="${OTA_METADATA_URL:-https://storage.googleapis.com/s3-autonomous-upgrade-3/lumi/ota/metadata.json}"
+OTA_METADATA_URL="${OTA_METADATA_URL:-https://storage.googleapis.com/s3-autonomous-upgrade-3/lamp/ota/metadata.json}"
 
 stage_ota_metadata() {
   echo "[stage] Fetch OTA metadata"
@@ -214,7 +214,7 @@ stage_ota_metadata() {
   echo "[stage] OTA versions: web=$WEB_VERSION lumi=$LUMI_VERSION bootstrap=$BOOTSTRAP_VERSION lelamp=$LELAMP_VERSION buddy=$BUDDY_VERSION"
 }
 
-# Download zip from URL, unzip, copy single binary to dest path (handles lumi-server, bootstrap-server in zip)
+# Download zip from URL, unzip, copy single binary to dest path (handles lamp-server, bootstrap-server in zip)
 install_binary_from_zip() {
   local url="$1"
   local dest_binary="$2"
@@ -225,7 +225,7 @@ install_binary_from_zip() {
   retry "curl -fsSL -H \"Cache-Control: no-cache\" -H \"Pragma: no-cache\" -o \"$zip_tmp\" \"$url\"" 5
   unzip -o -q "$zip_tmp" -d "$dir_tmp"
   rm -f "$zip_tmp"
-  # Zip may contain lumi-server, bootstrap-server or bare binary (at root or in subdir)
+  # Zip may contain lamp-server, bootstrap-server or bare binary (at root or in subdir)
   local bin_file
   bin_file=$(find "$dir_tmp" -type f -executable 2>/dev/null | head -1)
   [ -z "$bin_file" ] && bin_file=$(find "$dir_tmp" -type f 2>/dev/null | head -1)
@@ -240,16 +240,16 @@ install_binary_from_zip() {
 }
 
 # ----------------------------------------------------------
-# Stage 1: Backend (bootstrap + lumi from OTA metadata)
+# Stage 1: Backend (bootstrap + lamp from OTA metadata)
 # ----------------------------------------------------------
 stage_backend() {
-  echo "[stage] Install backend (bootstrap + lumi)"
+  echo "[stage] Install backend (bootstrap + lamp)"
 
   # Migrate old openclaw config dir from /root/openclaw → /root/.openclaw
   if [ -d "/root/openclaw" ] && [ ! -d "/root/.openclaw" ]; then
     echo "[migrate] Moving /root/openclaw → /root/.openclaw"
     mv /root/openclaw /root/.openclaw
-    # Update openclaw_config_dir in lumi config.json if it still points to old path
+    # Update openclaw_config_dir in lamp config.json if it still points to old path
     if [ -f "/root/config/config.json" ]; then
       sed -i 's|"openclaw_config_dir"[[:space:]]*:[[:space:]]*"/root/openclaw"|"openclaw_config_dir": "/root/.openclaw"|g' /root/config/config.json
       echo "[migrate] Updated config.json openclaw_config_dir"
@@ -257,7 +257,7 @@ stage_backend() {
   fi
 
   install_binary_from_zip "$BOOTSTRAP_URL" /usr/local/bin/bootstrap-server "bootstrap"
-  install_binary_from_zip "$LUMI_URL" /usr/local/bin/lumi-server "lumi"
+  install_binary_from_zip "$LUMI_URL" /usr/local/bin/lamp-server "lamp"
 
   cat >/etc/systemd/system/bootstrap.service <<EOF
 [Unit]
@@ -277,31 +277,31 @@ SyslogIdentifier=bootstrap
 WantedBy=multi-user.target
 EOF
 
-  cat >/etc/systemd/system/lumi.service <<EOF
+  cat >/etc/systemd/system/lamp.service <<EOF
 [Unit]
-Description=Lumi Backend
+Description=Lamp Backend
 After=network-online.target
 
 [Service]
 User=root
 WorkingDirectory=/root
-ExecStart=/usr/local/bin/lumi-server
+ExecStart=/usr/local/bin/lamp-server
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=lumi
+SyslogIdentifier=lamp
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
   systemctl daemon-reload
-  systemctl enable bootstrap lumi
-  # Do NOT start lumi here — it switches to AP mode when unconfigured, killing internet.
+  systemctl enable bootstrap lamp
+  # Do NOT start lamp here — it switches to AP mode when unconfigured, killing internet.
   # Services will start after reboot at the end of setup.
   # /usr/local/bin/software-update is written later by stage_ap (covers
-  # all six components: lumi, openclaw, bootstrap, web, lelamp, lumi-buddy).
+  # all six components: lamp, openclaw, bootstrap, web, lelamp, lumi-buddy).
 }
 
 # ----------------------------------------------------------
@@ -496,7 +496,7 @@ stage_buddy() {
   cat >/etc/systemd/system/lumi-buddy.service <<EOF
 [Unit]
 Description=Lumi Claude Desktop Buddy (BLE)
-After=bluetooth.target lumi.service
+After=bluetooth.target lamp.service
 Wants=bluetooth.target
 
 [Service]
@@ -630,7 +630,7 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
   # Download skills from GCS into workspace/skills
-  SKILLS_GCS_PREFIX="https://storage.googleapis.com/s3-autonomous-upgrade-3/lumi/skills"
+  SKILLS_GCS_PREFIX="https://storage.googleapis.com/s3-autonomous-upgrade-3/lamp/skills"
   SKILLS_LIST="audio camera display emotion led-control scene scheduling sensing servo-control"
   mkdir -p "$OPENCLAW_HOME/workspace/skills"
   for skill_name in $SKILLS_LIST; do
@@ -651,6 +651,14 @@ EOF
     journalctl -u openclaw -n 80 --no-pager || true
     exit 1
   fi
+
+  # Install official external plugins. Must run after openclaw service is up
+  # because `openclaw plugins install` talks to the local gateway to register
+  # the plugin. Non-fatal: missing plugin only disables that channel, it does
+  # not break the gateway or other channels.
+  echo "[stage] Installing openclaw external plugins"
+  export PATH="$(npm prefix -g)/bin:$PATH"
+  openclaw plugins install @openclaw/discord@${OPENCLAW_VERSION} --force 2>&1 || echo "[stage] WARN: discord plugin install failed (non-fatal)"
 }
 
 # ----------------------------------------------------------
@@ -721,7 +729,7 @@ server {
     proxy_send_timeout 86400s;
   }
 
-  # Lumi Buddy (macOS companion) persistent WebSocket. Same Upgrade + long-
+  # Lamp Buddy (macOS companion) persistent WebSocket. Same Upgrade + long-
   # timeout requirements as /api/system/shell. Must come BEFORE the generic
   # /api/ block so the exact match wins.
   location = /api/buddy/ws {
@@ -848,7 +856,7 @@ stage_ap() {
     done
   fi
   SUFFIX=${SERIAL: -4}
-  AP_SSID="Lumi-${SUFFIX}"
+  AP_SSID="Lamp-${SUFFIX}"
   echo "[stage] AP SSID = $AP_SSID (serial=$SERIAL)"
 
   # mDNS hostname: per-device .local name so the web UI can redirect after
@@ -857,30 +865,30 @@ stage_ap() {
   # matters — avahi publishes the system hostname verbatim, and `.local` is
   # case-insensitive but URLs in the wild aren't always normalized.
   SUFFIX_LC=$(echo "$SUFFIX" | tr '[:upper:]' '[:lower:]')
-  LUMI_HOSTNAME="lumi-${SUFFIX_LC}"
-  hostnamectl set-hostname "$LUMI_HOSTNAME" 2>/dev/null || hostname "$LUMI_HOSTNAME"
+  LAMP_HOSTNAME="lamp-${SUFFIX_LC}"
+  hostnamectl set-hostname "$LAMP_HOSTNAME" 2>/dev/null || hostname "$LAMP_HOSTNAME"
   # Replace 127.0.1.1 line if present, otherwise append. /etc/hosts is required
   # for sudo/getent to resolve the hostname locally.
   if grep -q '^127\.0\.1\.1' /etc/hosts; then
-    sed -i "s/^127\.0\.1\.1.*/127.0.1.1 $LUMI_HOSTNAME/" /etc/hosts
+    sed -i "s/^127\.0\.1\.1.*/127.0.1.1 $LAMP_HOSTNAME/" /etc/hosts
   else
-    echo "127.0.1.1 $LUMI_HOSTNAME" >> /etc/hosts
+    echo "127.0.1.1 $LAMP_HOSTNAME" >> /etc/hosts
   fi
   systemctl enable avahi-daemon 2>/dev/null || true
   systemctl restart avahi-daemon 2>/dev/null || true
-  echo "[stage] mDNS hostname = $LUMI_HOSTNAME.local"
+  echo "[stage] mDNS hostname = $LAMP_HOSTNAME.local"
   # Sanity check: confirm avahi actually publishes this name locally. A
   # warning here usually means the daemon failed to start (missing dbus,
   # masked service) or another device on the bench already claimed the
-  # name (avahi would have renamed ours to ${LUMI_HOSTNAME}-2). Two lamps
+  # name (avahi would have renamed ours to ${LAMP_HOSTNAME}-2). Two lamps
   # with identical last-4 serial chars on the same LAN is rare (1/65536)
   # but possible — if it happens, the FE's redirect will hit the wrong
   # device, and we'd need to bump the suffix length here and in
-  # lumi/internal/device/hardware.go.
+  # lamp/internal/device/hardware.go.
   sleep 1
   if command -v avahi-resolve-host-name >/dev/null 2>&1; then
-    if ! avahi-resolve-host-name -4 "${LUMI_HOSTNAME}.local" >/dev/null 2>&1; then
-      echo "[stage] WARNING: ${LUMI_HOSTNAME}.local not resolvable via mDNS yet (avahi may need a moment, or another device claimed the name)"
+    if ! avahi-resolve-host-name -4 "${LAMP_HOSTNAME}.local" >/dev/null 2>&1; then
+      echo "[stage] WARNING: ${LAMP_HOSTNAME}.local not resolvable via mDNS yet (avahi may need a moment, or another device claimed the name)"
     fi
   fi
 
@@ -1165,7 +1173,7 @@ else
   echo "  journalctl -u wpa_supplicant@wlan0 -n 50 --no-pager"
 fi
 
-# Re-announce mDNS on the new network so http://lumi-XXXX.local/ resolves
+# Re-announce mDNS on the new network so http://lamp-XXXX.local/ resolves
 # from the user's computer once they reconnect to home Wi-Fi. Without this,
 # avahi sometimes keeps stale records from the AP network and stays silent
 # on the new subnet until the next service restart or reboot.
@@ -1220,13 +1228,15 @@ CONNECTWIFI
   cat >/usr/local/bin/software-update <<'SOFTWAREUPDATE'
 #!/bin/bash
 set -e
-OTA_METADATA_URL="${OTA_METADATA_URL:-https://storage.googleapis.com/s3-autonomous-upgrade-3/lumi/ota/metadata.json}"
+OTA_METADATA_URL="${OTA_METADATA_URL:-https://storage.googleapis.com/s3-autonomous-upgrade-3/lamp/ota/metadata.json}"
 [ "$(id -u)" -ne 0 ] && { echo "Run as root."; exit 1; }
-[ $# -ne 1 ] && { echo "Usage: software-update <lumi|openclaw|web>"; exit 1; }
+[ $# -ne 1 ] && { echo "Usage: software-update <lamp|openclaw|web>"; exit 1; }
 APP="$1"
+# Back-compat: `software-update lumi` still works during the brand rename window.
+[ "$APP" = "lumi" ] && APP="lamp"
 case "$APP" in
-  lumi|openclaw|bootstrap|web|lelamp|lumi-buddy) ;;
-  *) echo "Unknown app: $APP. Use lumi, openclaw, bootstrap, web, lelamp, or lumi-buddy."; exit 1 ;;
+  lamp|openclaw|bootstrap|web|lelamp|lumi-buddy) ;;
+  *) echo "Unknown app: $APP. Use lamp, openclaw, bootstrap, web, lelamp, or lumi-buddy."; exit 1 ;;
 esac
 
 METADATA_TMP=$(mktemp)
@@ -1234,26 +1244,29 @@ ZIP_TMP=""
 DIR_TMP=""
 trap 'rm -f "$METADATA_TMP" "$ZIP_TMP"; rm -rf "$DIR_TMP"' EXIT
 curl -fsSL -H "Cache-Control: no-cache" -H "Pragma: no-cache" -o "$METADATA_TMP" "$OTA_METADATA_URL" || { echo "Failed to fetch metadata from $OTA_METADATA_URL"; exit 1; }
-# Map command name to metadata key (lumi-buddy → claude-desktop-buddy)
+# Map command name to metadata key. Default 1:1. Legacy `lumi` arg from
+# pre-rename invocations still maps to the new `lamp` field.
+# `lumi-buddy` (BLE plugin) maps to claude-desktop-buddy.
 META_KEY="$APP"
+[ "$APP" = "lumi" ] && META_KEY="lamp"
 [ "$APP" = "lumi-buddy" ] && META_KEY="claude-desktop-buddy"
 VERSION=$(jq -r --arg a "$META_KEY" '.[$a].version // empty' "$METADATA_TMP")
 URL=$(jq -r --arg a "$META_KEY" '.[$a].url // empty' "$METADATA_TMP")
 [ -z "$VERSION" ] && { echo "Metadata has no version for $APP"; exit 1; }
 
-if [ "$APP" = "lumi" ]; then
-  [ -z "$URL" ] && { echo "Metadata has no url for lumi"; exit 1; }
+if [ "$APP" = "lamp" ]; then
+  [ -z "$URL" ] && { echo "Metadata has no url for lamp"; exit 1; }
   ZIP_TMP=$(mktemp)
   DIR_TMP=$(mktemp -d)
-  curl -fsSL -H "Cache-Control: no-cache" -o "$ZIP_TMP" "$URL" || { echo "Failed to download lumi"; exit 1; }
+  curl -fsSL -H "Cache-Control: no-cache" -o "$ZIP_TMP" "$URL" || { echo "Failed to download lamp"; exit 1; }
   unzip -o -q "$ZIP_TMP" -d "$DIR_TMP"
   BIN=$(find "$DIR_TMP" -type f -executable 2>/dev/null | head -1)
   [ -z "$BIN" ] && BIN=$(find "$DIR_TMP" -type f 2>/dev/null | head -1)
-  [ -z "$BIN" ] || [ ! -f "$BIN" ] && { echo "No binary in lumi zip"; exit 1; }
-  cp -f "$BIN" /usr/local/bin/lumi-server
-  chmod +x /usr/local/bin/lumi-server
-  systemctl restart lumi
-  echo "lumi updated to $VERSION"
+  [ -z "$BIN" ] || [ ! -f "$BIN" ] && { echo "No binary in lamp zip"; exit 1; }
+  cp -f "$BIN" /usr/local/bin/lamp-server
+  chmod +x /usr/local/bin/lamp-server
+  systemctl restart lamp
+  echo "lamp updated to $VERSION"
 elif [ "$APP" = "bootstrap" ]; then
   [ -z "$URL" ] && { echo "Metadata has no url for bootstrap"; exit 1; }
   ZIP_TMP=$(mktemp)
@@ -1270,6 +1283,7 @@ elif [ "$APP" = "bootstrap" ]; then
 elif [ "$APP" = "openclaw" ]; then
   VER="${VERSION:-latest}"
   npm install -g "openclaw@${VER}" || { echo "npm install openclaw failed"; exit 1; }
+  openclaw plugins install @openclaw/discord@${VER} --force 2>&1 || echo "[software-update] WARN: discord plugin install failed (non-fatal)"
   systemctl restart openclaw
   echo "openclaw updated to $VER"
 elif [ "$APP" = "web" ]; then
@@ -1322,7 +1336,10 @@ SOFTWAREUPDATE
 # ----------------------------------------------------------
 ensure_root
 
-# Stop lumi if running from a previous setup — it switches to AP mode when unconfigured, killing internet.
+# Stop lamp if running from a previous setup — it switches to AP mode when unconfigured, killing internet.
+# Also stop the legacy lumi.service unit on devices upgraded from the pre-rename layout.
+systemctl stop lamp.service 2>/dev/null || true
+systemctl disable lamp.service 2>/dev/null || true
 systemctl stop lumi.service 2>/dev/null || true
 systemctl disable lumi.service 2>/dev/null || true
 
@@ -1346,10 +1363,10 @@ systemctl mask wpa_supplicant.service 2>/dev/null || true
 echo ""
 echo "======================================"
 echo "Setup complete!"
-echo "AP SSID: Lumi-XXXX (actual: ${AP_SSID:-unknown — stage_ap may have failed})"
-echo "Setup page: http://192.168.100.1 (AP) — or http://${LUMI_HOSTNAME:-lumi-xxxx}.local once on home Wi-Fi"
-echo "Backends: systemctl status bootstrap lumi lumi-lelamp lumi-buddy"
-echo "Updates:  software-update <bootstrap|lumi|openclaw|lelamp|lumi-buddy|web>"
+echo "AP SSID: Lamp-XXXX (actual: ${AP_SSID:-unknown — stage_ap may have failed})"
+echo "Setup page: http://192.168.100.1 (AP) — or http://${LAMP_HOSTNAME:-lamp-xxxx}.local once on home Wi-Fi"
+echo "Backends: systemctl status bootstrap lamp lumi-lelamp lumi-buddy"
+echo "Updates:  software-update <bootstrap|lamp|openclaw|lelamp|lumi-buddy|web>"
 if [ -n "$FAILED_STAGES" ]; then
   echo ""
   echo "WARNING: the following stages FAILED:$FAILED_STAGES"

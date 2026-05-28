@@ -9,11 +9,9 @@
 Dự án AI Lamp trải qua nhiều giai đoạn tìm hướng kiến trúc trước khi đi đến quyết định cuối cùng:
 
 1. **Ban đầu**: Dự định xây dựng project Go độc lập, sử dụng MCP protocol để giao tiếp với phần cứng.
-2. **Phát hiện 1**: openclaw-lobster (Go server, nay đổi tên thành Lumi) chia sẻ ~70-80% kiến trúc với những gì AI Lamp cần. Không có lý do viết lại từ đầu.
-3. **Quyết định fork**: Mỗi sản phẩm phần cứng có repo riêng. AI Lamp fork từ lobster và mở rộng cho phần cứng cụ thể.
-4. **Phát hiện 2**: LeLamp runtime (Python) **đã chạy** trên Raspberry Pi 4 với đầy đủ hardware drivers — motor, LED, audio. Không cần viết lại driver trong Go.
-5. **Phát hiện 3**: OpenClaw sử dụng **SKILL.md** (skill system native), **KHÔNG PHẢI MCP**. Skills là file Markdown mô tả API, LLM tự đọc và gọi.
-6. **Quyết định cuối**: Kiến trúc Hybrid — OpenClaw skills gọi Lumi HTTP API, Lumi bridge đến LeLamp Python services.
+2. **Phát hiện 1**: LeLamp runtime (Python) **đã chạy** trên Raspberry Pi 4 với đầy đủ hardware drivers — motor, LED, audio. Không cần viết lại driver trong Go.
+3. **Phát hiện 2**: OpenClaw sử dụng **SKILL.md** (skill system native), **KHÔNG PHẢI MCP**. Skills là file Markdown mô tả API, LLM tự đọc và gọi.
+4. **Quyết định cuối**: Kiến trúc Hybrid — OpenClaw skills gọi Lamp HTTP API, Lamp bridge đến LeLamp Python services.
 
 ### Phần Cứng (Raspberry Pi 4)
 
@@ -30,10 +28,10 @@ Dự án AI Lamp trải qua nhiều giai đoạn tìm hướng kiến trúc trư
 
 ## 2. Quyết Định Kiến Trúc Cuối Cùng
 
-**Kiến trúc Hybrid 3 tầng**: OpenClaw (AI) → Lumi Server (Go) → LeLamp Runtime (Python) → Phần cứng.
+**Kiến trúc Hybrid 3 tầng**: OpenClaw (AI) → Lamp Server (Go) → LeLamp Runtime (Python) → Phần cứng.
 
 Nguyên tắc cốt lõi:
-- **Tầng hệ thống** (Go Lumi) hoạt động **KHÔNG cần OpenClaw** — thiết bị luôn phản hồi được.
+- **Tầng hệ thống** (Go Lamp) hoạt động **KHÔNG cần OpenClaw** — thiết bị luôn phản hồi được.
 - **Điều khiển hướng người dùng** thông qua OpenClaw skills gọi HTTP API.
 - **LeLamp runtime** chỉ làm hardware drivers — không chứa logic AI.
 - **Không dùng MCP** — dùng SKILL.md native của OpenClaw.
@@ -43,7 +41,7 @@ Nguyên tắc cốt lõi:
 
 Mọi thiết bị phần cứng là **plugin** — cắm vào thì driver load + skill available, không cắm thì hệ thống vẫn chạy bình thường.
 
-Khi khởi động, Lumi server tự phát hiện phần cứng và:
+Khi khởi động, Lamp server tự phát hiện phần cứng và:
 1. Chỉ load driver cho phần cứng được phát hiện
 2. Chỉ bật HTTP API endpoint tương ứng
 3. Chỉ deploy SKILL.md liên quan cho OpenClaw
@@ -88,15 +86,14 @@ Giữ nguyên từ dự án LeLamp hiện tại, nhưng bỏ phần AI/LiveKit:
 
 Tất cả hardware expose qua FastAPI trên `127.0.0.1:5001` (systemd: `lumi-lelamp.service`). Nginx proxy `/hw/*` chỉ cho caller trên cùng máy — client bên ngoài nhận 403. Swagger UI tại `/hw/docs` không truy cập được từ LAN.
 
-### Lumi Server (Go, fork từ openclaw-lobster) — Hệ Thống + HTTP API Bridge
+### Lamp Server (Go) — Hệ Thống + HTTP API Bridge
 
 - Tầng hệ thống: reset button, mạng, OTA, MQTT
 - HTTP API bridge: nhận request từ OpenClaw skills, chuyển tiếp đến LeLamp Python services
-- Kế thừa phần lớn code từ lobster
 
 ---
 
-## 4. Tầng 1: Hệ Thống (Lumi Server, Go, luôn chạy)
+## 4. Tầng 1: Hệ Thống (Lamp Server, Go, luôn chạy)
 
 Hoạt động **KHÔNG cần OpenClaw**. Nếu OpenClaw ngừng, thiết bị vẫn khởi động, hiển thị trạng thái, và có thể cấu hình lại.
 
@@ -112,10 +109,10 @@ Hoạt động **KHÔNG cần OpenClaw**. Nếu OpenClaw ngừng, thiết bị v
 
 ### Autonomous Sensing Loop (Tầng 1.5)
 
-Lumi chạy sensing loop liên tục, chi phí thấp, phát hiện sự kiện trên thiết bị (**edge detection**). Khi phát hiện sự kiện đáng kể → đẩy context cho OpenClaw để AI quyết định hành động. Proactive behavior mà không tốn LLM tokens liên tục.
+Lamp chạy sensing loop liên tục, chi phí thấp, phát hiện sự kiện trên thiết bị (**edge detection**). Khi phát hiện sự kiện đáng kể → đẩy context cho OpenClaw để AI quyết định hành động. Proactive behavior mà không tốn LLM tokens liên tục.
 
 ```
-Sensing Loop (Lumi Server, luôn chạy):
+Sensing Loop (Lamp Server, luôn chạy):
   Camera → presence.enter / presence.leave / light.level
   Mic    → sound.level / sound.silence / sound.voice_tone
   Time   → time.schedule (cron-like)
@@ -123,13 +120,13 @@ Sensing Loop (Lumi Server, luôn chạy):
        │
        │ event + context (chỉ khi có thay đổi đáng kể)
        ▼
-  OpenClaw (AI Brain) → quyết định hành động → gọi Lumi HTTP API → phần cứng
+  OpenClaw (AI Brain) → quyết định hành động → gọi Lamp HTTP API → phần cứng
 ```
 
 **Rule-based** (không cần AI): auto-dim khi vắng, adjust brightness khi trời tối, idle animations.
 **AI-driven** (OpenClaw quyết định): chào hỏi, phản ứng mood, empathy, gợi ý theo lịch.
 
-**Kế thừa từ lobster (nay nằm trong thư mục `lumi/`):**
+**Lamp Server modules (trong thư mục `lamp/`):**
 
 ```
 server/server.go          — HTTP server (Gin, port 5000)
@@ -147,8 +144,6 @@ domain/                   — Struct dùng chung (device, network, OTA, OpenClaw
 
 **MQTT commands** (nhận qua fa_channel): `info`, `add_channel`, `ota`
 
-**Đã loại bỏ từ lobster**: GWS (Google Workspace) handlers, internal/llm/ service (listing model đã inline vào openclaw/service.go), luồng onboarding, sendip scripts, release scripts.
-
 ---
 
 ## 5. Tầng 2: OpenClaw Skills (SKILL.md + HTTP API)
@@ -157,16 +152,16 @@ Toàn bộ **điều khiển phần cứng hướng người dùng** thông qua 
 
 1. File **SKILL.md** trong `workspace/skills/` mô tả API cho LLM
 2. OpenClaw tự phát hiện skills (`skills.load.watch: true`)
-3. **LLM đọc SKILL.md** → hiểu API → tự gọi `curl` đến Lumi HTTP API tại `127.0.0.1:5000`
-4. Lumi HTTP API bridge đến LeLamp Python services → điều khiển phần cứng
+3. **LLM đọc SKILL.md** → hiểu API → tự gọi `curl` đến Lamp HTTP API tại `127.0.0.1:5000`
+4. Lamp HTTP API bridge đến LeLamp Python services → điều khiển phần cứng
 
-Đây **KHÔNG phải MCP**. Cùng pattern với `led-control/SKILL.md` hiện có của lobster.
+Đây **KHÔNG phải MCP**.
 
 ### Cấu trúc Skills
 
 ```
 workspace/skills/
-├── led-control/SKILL.md       ← kế thừa từ lobster (mở rộng cho 64 LED grid)
+├── led-control/SKILL.md       ← mở rộng cho 64 LED grid
 ├── servo-control/SKILL.md     ← MỚI
 ├── camera/SKILL.md            ← MỚI
 ├── audio/SKILL.md             ← MỚI
@@ -263,7 +258,7 @@ workspace/skills/
 
 Web UI tại `/monitor` cung cấp khả năng quan sát real-time hoạt động của đèn.
 
-### Monitor API Endpoints (Lumi Server, port 5000)
+### Monitor API Endpoints (Lamp Server, port 5000)
 
 | Endpoint | Method | Mô tả | Nguồn dữ liệu |
 |---|---|---|---|
@@ -340,7 +335,7 @@ Dashboard gồm 4 phần:
                             │ HTTP (curl)
                             ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    Lumi Server (Go, port 5000)                      │
+│                    Lamp Server (Go, port 5000)                      │
 │                                                                     │
 │  ┌──────────────────────┐    ┌────────────────────────────────────┐ │
 │  │  TẦNG 1: HỆ THỐNG    │    │  HTTP API (Tầng 2)                 │ │
@@ -401,7 +396,7 @@ POST /api/emotion
 
 ### Cách Hoạt Động
 
-Lumi server nhận emotion request → chuyển đổi thành tổ hợp:
+Lamp server nhận emotion request → chuyển đổi thành tổ hợp:
 
 | Thành phần | Ví dụ "curious" (intensity 0.8) |
 |---|---|
@@ -441,7 +436,7 @@ OpenClaw (AI/LLM)
 curl HTTP API (127.0.0.1:5000)
     │
     ▼
-Lumi Server (Go)
+Lamp Server (Go)
     │ bridge đến LeLamp
     │
     ▼
@@ -472,37 +467,18 @@ Không cần logic parse lệnh — **LLM tự hiểu từ mô tả trong SKILL.
 
 ---
 
-## 9. Kế Thừa Từ Lobster (openclaw-lobster)
-
-| Thành phần | Đường dẫn | Ghi chú |
-|---|---|---|
-| HTTP Server | `server/server.go` | Gin framework, port 5000 |
-| Quản lý cấu hình | `server/config/` | JSON config với reload |
-| LED skill | `resources/openclaw-skills/led-control/SKILL.md` | Mở rộng cho grid 64 LED |
-| Nút reset | `internal/resetbutton/` | GPIO 26 nhấn giữ |
-| Dịch vụ mạng | `internal/network/` | WiFi AP/STA, quét mạng |
-| Dịch vụ OpenClaw | `internal/openclaw/` | Tạo config, WebSocket |
-| Backend client | `internal/beclient/` | Báo cáo trạng thái |
-| Device service | `internal/device/` | Setup, xử lý lệnh MQTT, báo cáo trạng thái |
-| MQTT client | `lib/mqtt/` | Tự kết nối lại, dispatch |
-| OTA bootstrap | `bootstrap/` | Kiểm tra version, cài đặt |
-| Domain models | `domain/` | Struct dùng chung (device, network, OTA, OpenClaw) |
-| Build & deploy | `scripts/`, `Makefile` | Cross-compile, systemd |
-
----
-
-## 10. Trạng Thái Triển Khai
+## 9. Trạng Thái Triển Khai
 
 Tất cả hardware endpoints chạy trực tiếp trên LeLamp FastAPI (:5001). OpenClaw skills gọi qua `127.0.0.1:5001`.
 
 | Thành phần | Trạng thái |
 |---|---|
-| 10 SKILL.md files | ✅ `lumi/resources/openclaw-skills/` |
+| 10 SKILL.md files | ✅ `lamp/resources/openclaw-skills/` |
 | LeLamp 38 endpoints | ✅ `lelamp/server.py` |
-| Sensing event routing | ✅ `lumi/server/sensing/` |
-| Local intent matching | ✅ `lumi/internal/intent/` |
+| Sensing event routing | ✅ `lamp/server/sensing/` |
+| Local intent matching | ✅ `lamp/internal/intent/` |
 | Voice pipeline (VAD + Deepgram) | ✅ `lelamp/service/voice/` |
-| Ambient idle behaviors | ✅ `lumi/internal/ambient/` |
+| Ambient idle behaviors | ✅ `lamp/internal/ambient/` |
 
 ### Phần Cứng ↔ Tầng Mapping
 
@@ -518,10 +494,10 @@ Tất cả hardware endpoints chạy trực tiếp trên LeLamp FastAPI (:5001).
 
 ---
 
-## 11. Câu Hỏi Mở
+## 10. Câu Hỏi Mở
 
-- [x] **Bridge Go ↔ Python**: HTTP proxy. LeLamp chạy FastAPI trên `127.0.0.1:5001`, Lumi Server proxy request từ port 5000. Đơn giản, dễ debug, không tight coupling.
+- [x] **Bridge Go ↔ Python**: HTTP proxy. LeLamp chạy FastAPI trên `127.0.0.1:5001`, Lamp Server proxy request từ port 5000. Đơn giản, dễ debug, không tight coupling.
 - [x] **Xử lý camera**: On-device OpenCV trong LeLamp Python. Frame diff cho motion detection trong sensing loop.
-- [x] **Đầu vào audio**: LeLamp owns mic. Local VAD (RMS energy) + on-demand Deepgram STT. Wake word "Hey Lumi" detected trong transcript.
-- [x] **LED driver**: LeLamp Python rpi_ws281x driver sở hữu toàn bộ LED control. Go SPI driver đã xóa khỏi Lumi — đèn này dùng LED driver của LeLamp.
+- [x] **Đầu vào audio**: LeLamp owns mic. Local VAD (RMS energy) + on-demand Deepgram STT. Wake word "Hey Lamp" detected trong transcript.
+- [x] **LED driver**: LeLamp Python rpi_ws281x driver sở hữu toàn bộ LED control. Go SPI driver đã xóa khỏi Lamp — đèn này dùng LED driver của LeLamp.
 - [x] **Generative body language**: Emotion presets với randomized parameters. 8 presets (curious, happy, sad, thinking, idle, excited, shy, shock). Mỗi lần gọi tạo biểu cảm unique nhờ randomization.

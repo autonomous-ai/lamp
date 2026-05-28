@@ -59,7 +59,7 @@ Expressiveness without utility is a toy. AI Lamp is a serious productivity and w
 
 ### Pillar 4: "It Acts on Its Own" — Autonomous Sensing & Proactive Behavior
 
-Most smart devices are reactive — they wait for commands. Lumi is **proactive** — it continuously senses its environment and acts autonomously without being asked.
+Most smart devices are reactive — they wait for commands. Lamp is **proactive** — it continuously senses its environment and acts autonomously without being asked.
 
 This is the difference between a tool and a companion. A tool waits. A companion pays attention.
 
@@ -67,7 +67,7 @@ This is the difference between a tool and a companion. A tool waits. A companion
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  Lumi Server (Go) — Lightweight Sensing Loop                    │
+│  Lamp Server (Go) — Lightweight Sensing Loop                    │
 │                                                                 │
 │  Continuous, low-cost edge detection:                           │
 │  • Camera: presence/absence, light level, face position         │
@@ -86,30 +86,30 @@ This is the difference between a tool and a companion. A tool waits. A companion
 │  • Adjust lighting? Move servo? Speak? Stay quiet?              │
 │  • Factor in: time of day, user history, current mood,          │
 │    long-term memory, personality                                │
-│  • Execute via SKILL.md → curl to Lumi HTTP API                 │
+│  • Execute via SKILL.md → curl to Lamp HTTP API                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Lumi = senses (cheap, always-on).** **OpenClaw = brain (smart, called when needed).**
+**Lamp = senses (cheap, always-on).** **OpenClaw = brain (smart, called when needed).**
 
 #### Autonomous Behaviors
 
-| Trigger | What Lumi Senses | What Lumi Does | Who Decides |
+| Trigger | What Lamp Senses | What Lamp Does | Who Decides |
 |---|---|---|---|
 | **Arrive** | Camera: person enters frame | Turn on, warm greeting, adjust light to preference | OpenClaw (personality) |
-| **Leave** | Camera: no presence for 15 min | Dim → sleep → off | Lumi (rule-based, configurable) |
-| **Darkness** | Camera: ambient light drops | Gradually increase brightness | Lumi (auto) + OpenClaw (scene choice) |
-| **Focus** | Mic: sustained silence + typing sounds | Hold steady, suppress interruptions | Lumi (detect) → OpenClaw (confirm) |
+| **Leave** | Camera: no presence for 15 min | Dim → sleep → off | Lamp (rule-based, configurable) |
+| **Darkness** | Camera: ambient light drops | Gradually increase brightness | Lamp (auto) + OpenClaw (scene choice) |
+| **Focus** | Mic: sustained silence + typing sounds | Hold steady, suppress interruptions | Lamp (detect) → OpenClaw (confirm) |
 | **Stress** | Mic: sighs, tense voice tone | Shift to warm light, offer break | OpenClaw (empathy, memory) |
-| **Joy** | Mic: laughter | Lumi bounces, warm flash, join the mood | OpenClaw (emotion skill) |
+| **Joy** | Mic: laughter | Lamp bounces, warm flash, join the mood | OpenClaw (emotion skill) |
 | **Late night** | Time: past user's usual bedtime | Reduce blue light, gentle reminder | OpenClaw (memory: knows user schedule) |
-| **Idle** | No interaction for 30+ min | Idle animations — gentle breathing LED, occasional blink | Lumi (built-in, no AI needed) |
-| **Wake up** | Time: morning schedule | Sunrise simulation, gentle chime | Lumi (schedule) + OpenClaw (greeting) |
-| **Video call** | Camera: face centered + screen glow | Auto-optimize face lighting | Lumi (detect) → OpenClaw (adjust) |
+| **Idle** | No interaction for 30+ min | Idle animations — gentle breathing LED, occasional blink | Lamp (built-in, no AI needed) |
+| **Wake up** | Time: morning schedule | Sunrise simulation, gentle chime | Lamp (schedule) + OpenClaw (greeting) |
+| **Video call** | Camera: face centered + screen glow | Auto-optimize face lighting | Lamp (detect) → OpenClaw (adjust) |
 
 #### Sensing Event Types
 
-Lumi Server runs a lightweight sensing loop that emits events:
+Lamp Server runs a lightweight sensing loop that emits events:
 
 | Event | Source | Frequency | Cost | Status |
 |---|---|---|---|---|
@@ -123,12 +123,12 @@ Lumi Server runs a lightweight sensing loop that emits events:
 | `voice` / `voice_command` | Mic (Deepgram STT) | On speech | Medium | ✅ Done — wake word detection |
 | `time.schedule` | OpenClaw cron | Per schedule | None | ✅ Done |
 
-Events are lightweight — no LLM tokens burned. Only when an event is significant enough does Lumi push context to OpenClaw for AI decision-making.
+Events are lightweight — no LLM tokens burned. Only when an event is significant enough does Lamp push context to OpenClaw for AI decision-making.
 
 #### Privacy & Control
 
 - User can disable any sensing channel independently (camera off, mic off, sensors off)
-- "Do Not Disturb" mode: all proactive behaviors paused, Lumi only responds to direct commands
+- "Do Not Disturb" mode: all proactive behaviors paused, Lamp only responds to direct commands
 - All sensing runs **on-device** — no video/audio streamed to cloud for ambient processing
 - Privacy indicator: LED color change when camera/mic actively sensing
 
@@ -197,7 +197,7 @@ The architecture is split into two layers with a clear boundary. This is **NOT M
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                                                                     │
-│                        LUMI SERVER (Go)                             │
+│                        LAMP SERVER (Go)                             │
 │                     (forked from openclaw-lobster)                   │
 │                                                                     │
 │  ┌──────────────────────────┐   ┌────────────────────────────────┐  │
@@ -241,7 +241,7 @@ The architecture is split into two layers with a clear boundary. This is **NOT M
 │   • Multi-channel (Telegram, Slack, Discord)                         │
 │   • Skill auto-discovery (skills.load.watch: true)                   │
 │                                                                      │
-│   LLM reads SKILL.md → understands API → calls Lumi via curl        │
+│   LLM reads SKILL.md → understands API → calls Lamp via curl        │
 │                                                                      │
 └──────────────────────────────────────────────────────────────────────┘
                               │
@@ -253,7 +253,7 @@ The architecture is split into two layers with a clear boundary. This is **NOT M
                     └───────────────────┘
 ```
 
-### Layer 1 — System (Lumi Server, Always Running)
+### Layer 1 — System (Lamp Server, Always Running)
 
 Handles system-critical functions that must work **before and without OpenClaw**.
 
@@ -272,7 +272,7 @@ Handles system-critical functions that must work **before and without OpenClaw**
 
 All user-facing hardware interaction follows a single pattern:
 
-1. **Lumi server** exposes an HTTP endpoint for the hardware component
+1. **Lamp server** exposes an HTTP endpoint for the hardware component
 2. **SKILL.md** file describes that endpoint in natural language
 3. **OpenClaw's LLM** reads the SKILL.md, understands the API, and calls it via `curl`
 
@@ -318,7 +318,7 @@ This is a deliberate decision. OpenClaw's multi-provider LLM, long-term memory, 
 
 ### Inherited from Lobster (openclaw-lobster)
 
-The Lumi server is forked from openclaw-lobster. Approximately 70-80% of Layer 1 code is proven and production-ready:
+The Lamp server is forked from openclaw-lobster. Approximately 70-80% of Layer 1 code is proven and production-ready:
 
 | Component | Lobster Path | Status |
 |---|---|---|
@@ -665,14 +665,14 @@ The Lumi server is forked from openclaw-lobster. Approximately 70-80% of Layer 1
 ### UC-16: Screen Awareness [P2]
 
 **Actor**: User (at desk)
-**Description**: Lumi knows what you're doing on your computer without you explaining it.
+**Description**: Lamp knows what you're doing on your computer without you explaining it.
 
 **Examples**:
-- You copy a text snippet → Lumi proactively asks "Need a translation?"
-- You open Zoom/Meet → Lumi automatically switches to video call lighting
-- You're coding and ask a question → Lumi already has context about what you're working on
+- You copy a text snippet → Lamp proactively asks "Need a translation?"
+- You open Zoom/Meet → Lamp automatically switches to video call lighting
+- You're coding and ask a question → Lamp already has context about what you're working on
 
-**Flow**: Lightweight agent on Mac/Windows (browser extension or desktop app) pushes clipboard + active app context to Lumi → OpenClaw has deeper context for responses
+**Flow**: Lightweight agent on Mac/Windows (browser extension or desktop app) pushes clipboard + active app context to Lamp → OpenClaw has deeper context for responses
 
 **Feel**: The lamp "understands" what you're doing without being told — like someone sitting next to you.
 
@@ -691,18 +691,18 @@ The Lumi server is forked from openclaw-lobster. Approximately 70-80% of Layer 1
 **Status: Implemented** (2026-04)
 
 **Actor**: System (automatic, camera)
-**Description**: Camera analyzes the user's facial expression to detect emotional state — Lumi responds proactively to support the user's wellbeing.
+**Description**: Camera analyzes the user's facial expression to detect emotional state — Lamp responds proactively to support the user's wellbeing.
 
 **Examples**:
-- User looks tense/stressed → Lumi dims light, shifts to warm color, softly offers a break
-- User looks drowsy/fatigued → Lumi increases brightness, plays an energizing chime, suggests a short walk
-- User looks focused and calm → Lumi holds current environment, suppresses all interruptions
+- User looks tense/stressed → Lamp dims light, shifts to warm color, softly offers a break
+- User looks drowsy/fatigued → Lamp increases brightness, plays an energizing chime, suggests a short walk
+- User looks focused and calm → Lamp holds current environment, suppresses all interruptions
 
 **Implementation**:
 - Emotion classifier runs via **dlbackend WebSocket** (remote inference server), not on-device ONNX. LeLamp sends camera frames, receives emotion predictions.
 - `lelamp/service/sensing/perceptions/emotion.py` — `RemoteEmotionChecker` connects to dlbackend, fires `emotion.detected` sensing event with detected emotion (Angry, Disgust, Fear, Happy, Sad, Surprise, Neutral).
-- Lumi `user-emotion-detection/SKILL.md` maps detected facial emotion → mood signal via `POST /api/mood/log`.
-- Lumi `mood/SKILL.md` fuses signals (camera emotion, conversation context, voice tone) into mood decisions.
+- Lamp `user-emotion-detection/SKILL.md` maps detected facial emotion → mood signal via `POST /api/mood/log`.
+- Lamp `mood/SKILL.md` fuses signals (camera emotion, conversation context, voice tone) into mood decisions.
 - Mood decisions trigger downstream actions: `music-suggestion` (proactive music), `wellbeing` (break/hydration nudges), `emotion` (lamp expression).
 - Configurable confidence threshold via `EMOTION_CONFIDENCE_THRESHOLD` in LeLamp config.
 
@@ -717,10 +717,10 @@ The Lumi server is forked from openclaw-lobster. Approximately 70-80% of Layer 1
 **Status: Implemented** (2026-04)
 
 **Actor**: System (automatic, sensing-driven)
-**Description**: Lumi autonomously tracks sedentary activity and proactively reminds users to stand up, drink water, or take a break — without the user having to ask.
+**Description**: Lamp autonomously tracks sedentary activity and proactively reminds users to stand up, drink water, or take a break — without the user having to ask.
 
 **Examples**:
-- User has been at desk for 45 minutes → Lumi gently says "You've been sitting for a while — maybe stretch?"
+- User has been at desk for 45 minutes → Lamp gently says "You've been sitting for a while — maybe stretch?"
 - User has been at desk for 2 hours with no water nearby → "Don't forget to hydrate"
 
 **Implementation**:
@@ -729,7 +729,7 @@ The Lumi server is forked from openclaw-lobster. Approximately 70-80% of Layer 1
 - Each activity is logged to per-user JSONL timeline via `POST /api/openclaw/wellbeing/log`.
 - On each event, skill reads recent history, computes time since last hydration/break reset, and nudges if thresholds exceeded.
 - Per-user tracking: `current_user` from sensing context tag, strangers share `"unknown"` timeline.
-- `lumi/resources/openclaw-skills/wellbeing/SKILL.md` — full workflow with threshold logic, dedup rules, and cooldowns.
+- `lamp/resources/openclaw-skills/wellbeing/SKILL.md` — full workflow with threshold logic, dedup rules, and cooldowns.
 
 **Resolved questions**:
 - [x] Reminder intervals → AI-driven thresholds computed from activity log (not fixed timers).
@@ -742,15 +742,15 @@ The Lumi server is forked from openclaw-lobster. Approximately 70-80% of Layer 1
 **Status: Implemented** (2026-04)
 
 **Actor**: System (automatic, mood + sensing-driven)
-**Description**: Lumi proactively suggests music based on detected mood, sedentary activity, and listening history — without the user requesting it.
+**Description**: Lamp proactively suggests music based on detected mood, sedentary activity, and listening history — without the user requesting it.
 
 **Examples**:
-- User detected as stressed (facial emotion + conversation) → Lumi suggests calm piano
-- User doing sedentary work for a while → Lumi offers lo-fi/study beats
-- User detected as happy/excited → Lumi suggests upbeat music
+- User detected as stressed (facial emotion + conversation) → Lamp suggests calm piano
+- User doing sedentary work for a while → Lamp offers lo-fi/study beats
+- User detected as happy/excited → Lamp suggests upbeat music
 
 **Implementation**:
-- `lumi/resources/openclaw-skills/music-suggestion/SKILL.md` — dedicated proactive skill (separate from reactive `music/SKILL.md`).
+- `lamp/resources/openclaw-skills/music-suggestion/SKILL.md` — dedicated proactive skill (separate from reactive `music/SKILL.md`).
 - **Two triggers**:
   1. **Mood-driven**: After `mood/SKILL.md` logs a mood decision (sad, stressed, tired, excited, happy, bored) → music-suggestion fires.
   2. **Sedentary-driven**: `motion.activity` with sedentary labels (using computer, writing, etc.) → direct suggestion trigger.
@@ -788,11 +788,11 @@ The Lumi server is forked from openclaw-lobster. Approximately 70-80% of Layer 1
 
 **Status: Implemented** (2026-04) — not in original marketing proposal but a significant feature.
 
-**Description**: Lumi recognizes who is speaking by voice. Mic transcripts are prefixed with the speaker's name (`Leo:`) or `Unknown:`. Users can self-enroll their voice by introducing themselves.
+**Description**: Lamp recognizes who is speaking by voice. Mic transcripts are prefixed with the speaker's name (`Leo:`) or `Unknown:`. Users can self-enroll their voice by introducing themselves.
 
 **Implementation**:
 - `lelamp/speaker_recognizer.py` + `lelamp/service/voice/speaker_recognizer/speaker_recognizer.py` — voice embedding model, profile storage, real-time matching.
-- `lumi/resources/openclaw-skills/speaker-recognizer/SKILL.md` — self-enrollment skill (mic intro, Telegram voice note, two-turn enrollment).
+- `lamp/resources/openclaw-skills/speaker-recognizer/SKILL.md` — self-enrollment skill (mic intro, Telegram voice note, two-turn enrollment).
 - Voice profiles stored per-user alongside face data in `/root/local/users/{name}/`.
 - Telegram identity linked during voice enrollment for DM targeting.
 
@@ -855,8 +855,8 @@ The Lumi server is forked from openclaw-lobster. Approximately 70-80% of Layer 1
 ### Architecture — All Resolved ✅
 
 - [x] **Camera processing**: LeLamp Python runs on-device OpenCV for face detection/recognition (InsightFace). Heavy inference (emotion, action recognition) offloaded to self-hosted dlbackend via WebSocket. Camera snapshots forwarded to OpenClaw LLM for vision understanding.
-- [x] **Audio input ownership**: LeLamp owns mic. Local VAD (Silero) gates Deepgram STT connection (cost saving). Wake word "Hey Lumi" detected in transcript → `voice_command` event. No wake word → `voice` (ambient sensing).
-- [x] **LeLamp driver integration**: HTTP proxy. LeLamp FastAPI on `127.0.0.1:5001`, Lumi Go server proxies from port `5000`. Simple, debuggable, no shared state.
+- [x] **Audio input ownership**: LeLamp owns mic. Local VAD (Silero) gates Deepgram STT connection (cost saving). Wake word "Hey Lamp" detected in transcript → `voice_command` event. No wake word → `voice` (ambient sensing).
+- [x] **LeLamp driver integration**: HTTP proxy. LeLamp FastAPI on `127.0.0.1:5001`, Lamp Go server proxies from port `5000`. Simple, debuggable, no shared state.
 
 ### Hardware — Mostly Resolved
 
@@ -867,7 +867,7 @@ The Lumi server is forked from openclaw-lobster. Approximately 70-80% of Layer 1
 
 ### Product — Mostly Resolved
 
-- [x] **Wake word**: "Hey Lumi" (and variants: "Lumi", "này Lumi", "ê Lumi", "Lumi ơi"). Detected in Deepgram transcript. Dynamic — agent can rename itself via IDENTITY.md.
+- [x] **Wake word**: "Hey Lamp" (and variants: "Lamp", "này Lamp", "ê Lamp", "Lamp ơi"). Detected in Deepgram transcript. Dynamic — agent can rename itself via IDENTITY.md.
 - [x] **Personality defaults**: Defined in SOUL.md — warm, curious, expressive companion. Not an assistant. Evolves with user via long-term memory.
 - [ ] **Privacy indicators**: Display eyes close when camera off. LED indicator TBD.
 - [ ] **Form factor / Industrial design**: Current prototype uses LeLamp hardware body. Production design TBD.
