@@ -71,7 +71,7 @@ type AgentHandler struct {
 	interleavedDMByRunID map[string]string
 
 	// cronFireRuns tracks runs initiated by an OpenClaw scheduled cron fire.
-	// Populated when a lifecycle_start (UUID runId, no lumi- prefix) arrives
+	// Populated when a lifecycle_start (UUID runId, no lamp- prefix) arrives
 	// shortly after an event:"cron" (action:"started") — OpenClaw's cron
 	// event omits sessionKey for sessionTarget="main" jobs, so we can't
 	// correlate by session and instead consume from a FIFO timestamp queue.

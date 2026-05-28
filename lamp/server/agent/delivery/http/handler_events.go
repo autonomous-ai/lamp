@@ -166,7 +166,7 @@ func (h *AgentHandler) HandleEvent(ctx context.Context, evt domain.WSEvent) erro
 			// the cron event lacks the upcoming runId AND (for sessionTarget=
 			// "main" jobs) lacks sessionKey too, so we consume the oldest
 			// timestamp within cronFireWindowMs. Restricted to UUID runIds
-			// (no lumi- prefix) so chat.send/sensing turns can't accidentally
+			// (no lamp- prefix) so chat.send/sensing turns can't accidentally
 			// claim a queued cron slot.
 			if payload.Data.Phase == "start" && payload.RunID != "" && !isLampOutboundChatRunID(payload.RunID) {
 				now := time.Now().UnixMilli()
