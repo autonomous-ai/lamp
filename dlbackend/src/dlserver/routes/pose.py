@@ -97,11 +97,17 @@ async def pose_estimate(req: PoseEstimateRequest):
     if pose_model is None or not pose_model.is_ready():
         raise HTTPException(status_code=503, detail="Pose model not loaded")
 
-    frame = decode_image(req.image_b64)
-    session = await pose_model.create_session()
-    result = await session.update(frame)
-    if result is None:
-        raise HTTPException(status_code=500, detail="Pose estimation failed")
+    try:
+        frame = decode_image(req.image_b64)
+        session = await pose_model.create_session()
+        result = await session.update(frame)
+        if result is None:
+            raise HTTPException(status_code=500, detail="Pose estimation failed")
 
-    logger.info("[Pose] Estimated %d joints", len(result.pose_2d.joints))
-    return PoseEstimateResponse.from_pose_detection(result)
+        logger.info("[Pose] Estimated %d joints", len(result.pose_2d.joints))
+        return PoseEstimateResponse.from_pose_detection(result)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Error processing pose estimation HTTP message")
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -41,9 +41,7 @@ logger = logging.getLogger("lbserver")
 # ---------------------------------------------------------------------------
 
 INTERNAL_PREFIX: str = settings.lb.internal_prefix
-BACKENDS: list[str] = [
-    b.strip().rstrip("/") for b in settings.lb.backends.split(",") if b.strip()
-]
+BACKENDS: list[str] = [b.strip().rstrip("/") for b in settings.lb.backends.split(",") if b.strip()]
 
 if not BACKENDS:
     logger.warning("No backends configured — set LB__BACKENDS=http://127.0.0.1:8888")
@@ -88,7 +86,8 @@ async def proxy_http(request: Request, path: str) -> Response:
     url: str = f"{backend}{INTERNAL_PREFIX}/{path}"
 
     headers: dict[str, str] = {
-        k: v for k, v in request.headers.items()
+        k: v
+        for k, v in request.headers.items()
         if k.lower() not in ("host", "transfer-encoding", "content-length")
     }
 
@@ -98,8 +97,6 @@ async def proxy_http(request: Request, path: str) -> Response:
     # Decrypt if encrypted
     if request.method in ("POST", "PUT", "PATCH") and body:
         body, encrypted_key = try_decrypt_http_body(body)
-
-    logger.info("[HTTP] %s /%s → %s (encrypted=%s)", request.method, path, url, encrypted_key is not None)
 
     try:
         resp = await _client.request(
@@ -115,6 +112,15 @@ async def proxy_http(request: Request, path: str) -> Response:
 
     content = resp.content
     resp_headers = dict(resp.headers)
+
+    logger.info(
+        "[HTTP] %s /%s → %s (encrypted=%s): %s",
+        request.method,
+        path,
+        url,
+        encrypted_key is not None,
+        resp.text[:100],
+    )
 
     # Encrypt response if request was encrypted
     if encrypted_key is not None:
@@ -162,7 +168,7 @@ async def proxy_ws(client_ws: WebSocket, path: str) -> None:
                 key_req = WSKeyExchangeRequest.model_validate_json(first_msg)
                 session = crypto.create_session(key_req.to_raw_key())
                 await client_ws.send_json({"status": "key_exchange_ok"})
-                logger.info("[WS] Session established for /%s", path)
+                logger.info("[WS] Encrypted session established for /%s", path)
                 first_msg = None  # consumed
             except ValidationError:
                 if settings.crypto.require_encryption:
@@ -180,7 +186,6 @@ async def proxy_ws(client_ws: WebSocket, path: str) -> None:
 
     try:
         async with websockets.connect(ws_url, additional_headers=extra_headers) as backend_ws:
-
             # Forward the first message if it wasn't a key exchange
             if first_msg is not None:
                 await backend_ws.send(first_msg)
@@ -201,7 +206,7 @@ async def proxy_ws(client_ws: WebSocket, path: str) -> None:
                             except (InvalidTag, ValueError) as e:
                                 logger.error("[WS] Decrypt failed: %s", e)
                                 continue
-
+                        logger.info("[WS] /%s → %s: %s", path, ws_url, data[:100])
                         await backend_ws.send(data)
                 except WebSocketDisconnect:
                     await backend_ws.close()
@@ -211,11 +216,21 @@ async def proxy_ws(client_ws: WebSocket, path: str) -> None:
                     async for msg in backend_ws:
                         if isinstance(msg, str):
                             if session is not None:
-                                encrypted = session.encrypt(AESGCMPlainPayload(plain_data=msg.encode()))
+                                encrypted = session.encrypt(
+                                    AESGCMPlainPayload(plain_data=msg.encode())
+                                )
                                 msg = WSCipherMessage.from_raw_payload(encrypted).model_dump_json()
+                            logger.info("[WS] %s → /%s: %s", ws_url, path, msg[:100])
                             await client_ws.send_text(msg)
                         else:
-                            await client_ws.send_bytes(msg)
+                            if session is not None:
+                                encrypted = session.encrypt(AESGCMPlainPayload(plain_data=msg))
+                                msg = WSCipherMessage.from_raw_payload(encrypted).model_dump_json()
+                                logger.info("[WS] %s → /%s: %s", ws_url, path, msg[:100])
+                                await client_ws.send_text(msg)
+                            else:
+                                logger.info("[WS] %s → /%s: %s", ws_url, path, msg[:100].decode())
+                                await client_ws.send_bytes(msg)
                 except websockets.exceptions.ConnectionClosed:
                     pass
 
@@ -255,9 +270,7 @@ def _setup_logging(log_dir: str | None) -> None:
             log_path.rename(log_path.with_suffix(".log.bak"))
         for old in Path(log_dir).glob("lbserver.log.*"):
             old.rename(Path(str(old) + ".bak"))
-        handler = RotatingFileHandler(
-            str(log_path), maxBytes=1_048_576, backupCount=3
-        )
+        handler = RotatingFileHandler(str(log_path), maxBytes=1_048_576, backupCount=3)
         handler.setFormatter(logging.Formatter(LOG_FORMAT))
         logging.basicConfig(level=logging.INFO, handlers=[handler])
     else:
