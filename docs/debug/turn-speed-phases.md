@@ -100,7 +100,7 @@ Pattern y nguyên wellbeing, áp dụng cho 3-skill chain (`user-emotion-detecti
 1. **commit 1/4** — Phase 2 pre-inject. Backend `BuildEmotionContext(detectedEmotion, user)` trong `lib/skillcontext/emotion.go` → digest `[emotion_context: {mapped_mood, recent_signals, prior_decision, is_decision_stale, audio_playing, last_suggestion_age_min, audio_recent, music_pattern_for_hour, suggestion_worthy}]`. 3 SKILL.md đổi "What to read" → use context block với fallback bash batch. Decision rules vẫn ở agent (5 rules synthesis, threshold cooldown, genre pick, phrasing).
 2. **commit 2/4** — Phase 3a HW route. `handler_hw.go` extend prefix list từ chỉ `/wellbeing/` → `/wellbeing/`, `/mood/`, `/music-suggestion/`. Thêm flow event types `hw_mood`, `hw_music_suggestion`. Backend-only no-op.
 3. **commit 3/4** — Phase 3b SKILL.md HW marker. `mood/SKILL.md` (signal + decision đều dùng `[HW:/mood/log:{...}]`, kind trong body), `music-suggestion/SKILL.md` (`[HW:/music-suggestion/log:{...}]`), `user-emotion-detection/SKILL.md` (signal cũng dùng HW marker với `mapped_mood` từ context). Curl POST giữ làm fallback nếu marker regex bị reject (notes/reasoning chứa `}`).
-4. **commit 4/4** — UI flow events. `types.ts` + `helpers.ts` + `FlowDiagram.tsx` add `hw_mood`, `hw_music_suggestion` (stack với hw_wellbeing ở Lumi-side column).
+4. **commit 4/4** — UI flow events. `types.ts` + `helpers.ts` + `FlowDiagram.tsx` add `hw_mood`, `hw_music_suggestion` (stack với hw_wellbeing ở Lamp-side column).
 
 **Estimated speedup emotion turn:**
 

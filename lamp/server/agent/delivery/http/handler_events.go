@@ -92,7 +92,7 @@ func (h *AgentHandler) HandleEvent(ctx context.Context, evt domain.WSEvent) erro
 		// sessions have independent runs that must NOT be merged into sensing traces.
 		//
 		// Two paths depending on payload.RunID format:
-		//   • Lumi-format (lamp-chat-*): OpenClaw 5.4+ echoes the idempotencyKey as
+		//   • Lamp-format (lamp-chat-*): OpenClaw 5.4+ echoes the idempotencyKey as
 		//     the runId — already IS the device trace. Just remove from pending.
 		//   • UUID: produced when OpenClaw drains its followup queue (the
 		//     FollowupRun type does not carry idempotencyKey, so
@@ -312,7 +312,7 @@ func (h *AgentHandler) HandleEvent(ctx context.Context, evt domain.WSEvent) erro
 			}
 
 			// Track busy state so passive sensing events can be suppressed during active turns.
-			// Only gate on lifecycles that belong to a Lumi-initiated turn — these are
+			// Only gate on lifecycles that belong to a Lamp-initiated turn — these are
 			// the only ones whose `end` is reliably round-tripped through SSE.
 			// Heartbeat (target:"none"), channel turns merged by steer mode, and other
 			// OpenClaw self-trigger lifecycles can drop their `end` SSE (per the
@@ -320,12 +320,12 @@ func (h *AgentHandler) HandleEvent(ctx context.Context, evt domain.WSEvent) erro
 			// for up to 5 minutes — every Lamp sensing event in that window queues
 			// instead of forwarding.
 			//
-			// External turns don't NEED Lumi-side gating: with messages.queue.mode=steer
+			// External turns don't NEED Lamp-side gating: with messages.queue.mode=steer
 			// (pinned in onboarding), concurrent sensing events arriving during a
 			// channel/cron turn are batched into the active turn at the next model
 			// boundary by OpenClaw itself — no need for Lamp to pre-suppress them.
 			//
-			// Lumi-initiated turns also flip activeTurn=true at chat.send time
+			// Lamp-initiated turns also flip activeTurn=true at chat.send time
 			// (service_chat.go), so a missed lifecycle.start here is harmless.
 			// LED is managed by the agent via /emotion skill calls — do not override here.
 			if payload.Data.Phase == "start" {
@@ -1179,7 +1179,7 @@ func (h *AgentHandler) HandleEvent(ctx context.Context, evt domain.WSEvent) erro
 		}
 
 		// Factual detection: OpenClaw sent a `state:"final"` chat event with
-		// empty Message for a Lumi-format runId, and Lamp never opened a
+		// empty Message for a Lamp-format runId, and Lamp never opened a
 		// lifecycle for that runId (pendingChatTrace entry still present —
 		// lifecycle_start would have removed it; see ~line 84).
 		//

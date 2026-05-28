@@ -290,7 +290,7 @@ func (h *SensingHandler) PostEvent(c *gin.Context) {
 	// posture JSONL — the habit skill's Flow A reads those rows to
 	// derive peak_hour / side_bias / typical_risk. Without this bridge
 	// the habit-skill posture extension stays starved (agent only logs
-	// nudge/praise; the raw alert signal had no Lumi-side writer).
+	// nudge/praise; the raw alert signal had no Lamp-side writer).
 	if req.Type == "motion.activity" {
 		if bid, worst := extractPoseBucketMarkers(req.Message); bid != "" {
 			h.agentGateway.MarkPoseBucketRun(runID, bid, worst)

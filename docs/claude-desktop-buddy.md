@@ -551,7 +551,7 @@ skill from acting on stale prompts.
 
 ---
 
-## 10. Lumi-side coordination
+## 10. Lamp-side coordination
 
 ### Config-change watcher (lamp/server/server.go)
 

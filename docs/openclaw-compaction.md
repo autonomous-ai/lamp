@@ -81,7 +81,7 @@ There are at least three ways a compaction can fire:
 | **Lamp RPC** (`lamp/server/openclaw/delivery/sse/handler_events.go:380-406`) | Lamp sees `u.TotalTokens > 80_000` on a lifecycle event, calls `agentGateway.CompactSession(sessionKey)` | TTS speaks *"Hold on, tidying up a bit."*; 2-minute cooldown via `h.compacting` atomic | unknown — needs verification against OpenClaw source |
 | **Manual / debug** | Someone invokes `sessions.compact` RPC directly (e.g. from a client tool) | — | likely `false` |
 
-**Heuristic to distinguish on UI today:** if a record's `timestamp` is within a few seconds after a `"sessions.compact sent"` log line in Lamp's journal for the same `sessionKey`, it was Lumi-initiated. Otherwise OpenClaw's internal hook.
+**Heuristic to distinguish on UI today:** if a record's `timestamp` is within a few seconds after a `"sessions.compact sent"` log line in Lamp's journal for the same `sessionKey`, it was Lamp-initiated. Otherwise OpenClaw's internal hook.
 
 A future enhancement: the compaction modal could correlate the latest compact's timestamp against Lamp's log to label the trigger.
 
@@ -147,7 +147,7 @@ for l in sys.stdin:
 | File | Role |
 |---|---|
 | `lamp/server/openclaw/delivery/sse/handler_api_compaction.go` | HTTP handler: reads `sessions.json`, scans session `.jsonl` for newest `type:"compaction"`. |
-| `lamp/server/openclaw/delivery/sse/handler_events.go` | Lumi-side RPC trigger (auto-compact when `TotalTokens > 80_000`, TTS notice, 2-min cooldown). |
+| `lamp/server/openclaw/delivery/sse/handler_events.go` | Lamp-side RPC trigger (auto-compact when `TotalTokens > 80_000`, TTS notice, 2-min cooldown). |
 | `lamp/internal/openclaw/service_chat.go` | `CompactSession(sessionKey)` — the `sessions.compact` RPC sender. |
 | `lamp/domain/agent.go` | `AgentGateway.CompactSession` interface. |
 | `lamp/web/src/pages/monitor/FlowSection/CompactionModal.tsx` | UI modal — shows timestamp, summary chars, session file, full summary text; links back to this doc. |

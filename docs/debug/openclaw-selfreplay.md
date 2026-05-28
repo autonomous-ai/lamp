@@ -67,7 +67,7 @@ Or simpler: any run whose `trace_id` is a bare UUID (36 chars, 4 hyphens) with n
 - **Accept the double cost** for passive sensing. Not ideal but functional — mood/wellbeing side effects are idempotent at the data layer (wellbeing JSONL appends, mood appends). The worst case is extra spoken nudges, which we have rarely seen.
 - **Delete session JSONL + restart** when the session context gets poisoned and replay chains grow (≥3 replays per event). Upstream confirmed: restart alone is not enough — the file must go.
 
-### Medium-term (Lumi-side filter)
+### Medium-term (Lamp-side filter)
 
 Detect the UUID replay and drop it before it reaches the agent runtime. Implemented in the Lamp SSE handler:
 
@@ -79,7 +79,7 @@ Trade-off: miss legitimate rapid duplicate events from the agent side. Acceptabl
 
 ### Long-term
 
-Upstream fix on #50956. Bump the OpenClaw pin once the fix lands, then remove the Lumi-side filter.
+Upstream fix on #50956. Bump the OpenClaw pin once the fix lands, then remove the Lamp-side filter.
 
 ## Related issues
 

@@ -231,7 +231,7 @@ If a Telegram user sends a message into the same session between Lamp's `chat.se
 Two ways to close this:
 
 1. **OpenClaw-side**: have `chat.send` response echo the UUID OpenClaw assigned, so Lamp maps `idempotencyKey ↔ UUID` directly without guessing on `lifecycle_start`. Requires upstream change — consider filing against openclaw.
-2. **Lumi-side guard**: enrich `lifecycle_start` mapping with a secondary check (e.g. first `chat_input` event payload), only popping the queue once we've confirmed the turn is Lamp-originated. More complex; defer until Telegram-interleave shifts are seen in practice after this fix ships.
+2. **Lamp-side guard**: enrich `lifecycle_start` mapping with a secondary check (e.g. first `chat_input` event payload), only popping the queue once we've confirmed the turn is Lamp-originated. More complex; defer until Telegram-interleave shifts are seen in practice after this fix ships.
 
 ---
 

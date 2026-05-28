@@ -133,7 +133,7 @@ Content-Type: application/json
 }
 ```
 
-The raw `Speech emotion detected: <Label>.` prefix is the parser anchor for Lumi-side routing. The parenthetical is a hedge clause to stop the LLM from over-committing on noisy SER reads — same pattern as the facial `Emotion detected: …` message.
+The raw `Speech emotion detected: <Label>.` prefix is the parser anchor for Lamp-side routing. The parenthetical is a hedge clause to stop the LLM from over-committing on noisy SER reads — same pattern as the facial `Emotion detected: …` message.
 
 Retry policy: 3 attempts with 2 s back-off on `ConnectionError` or HTTP `503`. Other 4xx/5xx are logged and dropped (the sample is gone — we don't retry-storm Lamp).
 

@@ -69,7 +69,7 @@ Four layers prevent the agent from repeatedly asking "who are you?":
 |-------|-------|------|---------|
 | **Audio duration** | LeLamp `voice_service.py` | `duration_s < SPEAKER_MIN_AUDIO_S` (0.8s) | Skip recognition entirely for very short audio |
 | **Enroll instruction** | LeLamp `_should_request_enroll()` | `≥ 15 words AND ≥ 2s audio` | Don't append full enroll instruction for short utterances (short variant with multi-turn combine hint is still sent) |
-| **Lumi-side nudge cooldown** | Lamp `domain/voice.go` | `5 min since last nudge` | Don't inject SKILL.md instruction more than once per 5 min |
+| **Lamp-side nudge cooldown** | Lamp `domain/voice.go` | `5 min since last nudge` | Don't inject SKILL.md instruction more than once per 5 min |
 | **Per-voiceprint nudge cooldown** | LeLamp `voice_service.py` | `30 min per voiceprint_hash` (`LELAMP_ENROLL_NUDGE_COOLDOWN_S`) | Don't repeat "ask user's name" for the same unknown voice cluster; plain `Unknown Speaker:` message sent instead |
 
 ## Model & Embedding

@@ -127,7 +127,7 @@ for l in sys.stdin:
 | File | Vai trò |
 |---|---|
 | `lamp/server/openclaw/delivery/sse/handler_api_compaction.go` | HTTP handler: đọc `sessions.json`, scan session `.jsonl` tìm `type:"compaction"` mới nhất. |
-| `lamp/server/openclaw/delivery/sse/handler_events.go` | Lumi-side RPC trigger (auto-compact khi `TotalTokens > 80_000`, TTS notice, cooldown 2 phút). |
+| `lamp/server/openclaw/delivery/sse/handler_events.go` | Lamp-side RPC trigger (auto-compact khi `TotalTokens > 80_000`, TTS notice, cooldown 2 phút). |
 | `lamp/internal/openclaw/service_chat.go` | `CompactSession(sessionKey)` — sender của `sessions.compact` RPC. |
 | `lamp/domain/agent.go` | Interface `AgentGateway.CompactSession`. |
 | `lamp/web/src/pages/monitor/FlowSection/CompactionModal.tsx` | UI modal — show timestamp, summary chars, session file, toàn văn summary; link về doc này. |

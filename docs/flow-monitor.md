@@ -95,7 +95,7 @@ sendChat returns idempotencyKey → used as trace_id in flow events
 1. Sensing handler allocates `NextChatRunID()`, then calls `flow.SetTrace(idempotencyKey)` **before** `flow.Start("sensing_input", ...)` so the JSONL `enter` line uses the same `trace_id` as `chat_send` for that POST. (Calling `SetTrace` only after `SendChatMessage` used to leave `enter` tagged with the **previous** turn's id — ghost turns and mismatched Pair exports.)
 2. After `chat.send` succeeds, Lamp pushes the idempotencyKey onto `pendingChatQueue` (FIFO).
 3. On `lifecycle_start` the handler branches on `payload.RunID` format:
-   - **Lumi-format** (`lumi-chat-*`): the runId IS the device trace. Call `RemovePendingChatTraceByRunID(payload.RunID)` to drop the matching queue entry. **No map** is created. Removing (instead of skipping) is critical: a leftover entry would later be FIFO-popped by an unrelated UUID lifecycle and shift every subsequent mapping by one.
+   - **Lamp-format** (`lumi-chat-*`): the runId IS the device trace. Call `RemovePendingChatTraceByRunID(payload.RunID)` to drop the matching queue entry. **No map** is created. Removing (instead of skipping) is critical: a leftover entry would later be FIFO-popped by an unrelated UUID lifecycle and shift every subsequent mapping by one.
    - **UUID** (`a8a51f3c-...`): unknowable from Lamp side. FIFO-pop the oldest queue entry and store mapping `UUID → idempotencyKey`. Stale entries (>2 min) are pruned from the head before popping.
 4. All subsequent **agent-stream** events (`lifecycle`, `tool`, `thinking`, `assistant` deltas, `tts_send`) use `resolveRunID(payload.RunID)` so `trace_id` matches the device key.
 5. **Chat stream** events (`case "chat"`: user/assistant text from the parallel chat feed) also call `resolveRunID` for `flow.Log` and monitor `RunID`. Without this, OpenClaw could emit the **UUID** in chat payloads while JSONL from step 4 used the **device id** — the Monitor would split one turn into two IDs.
@@ -303,13 +303,13 @@ The two badges are meant to be read together: ⚡ is *perceived* latency (what t
 
 ### 1. OpenClaw assigns different run_id
 OpenClaw 5.2 (and rare 5.4 paths) generate a UUID for the embedded run; 5.4 mostly echoes the `idempotencyKey`. Mapping logic must handle both.
-- **Fix**: SSE handler picks path by `payload.RunID` format — Lumi-format → search-and-remove queue entry; UUID → FIFO pop + map. See section above.
+- **Fix**: SSE handler picks path by `payload.RunID` format — Lamp-format → search-and-remove queue entry; UUID → FIFO pop + map. See section above.
 - **Edge case**: If server restarts between `sendChat` and `lifecycle_start`, the global trace is lost and no mapping is created. Frontend stitching handles this as a fallback.
 - **Status**: Fixed for normal operation. Fallback stitching for restart edge case.
 
 ### 1a. Pending-trace orphan misattribution (regression in 0.0.465, fixed in 0.0.468)
-A previous attempt (commit `1897dfee`) skipped the FIFO pop entirely when the runId was Lumi-format, but left the entry in the queue. The next UUID lifecycle then popped that orphan and was misattributed to it — observed pattern: Phase 1 reply + Phase 2 reply both rendered under the Phase 1 chat-N, with Phase 2's content actually belonging to the next chat in the drain.
-- **Trigger**: drain/burst flushes multiple chat.sends; first one returns Phase 1 with Lumi-format runId; the next chat's UUID lifecycle (Phase 2) then pulls the orphan.
+A previous attempt (commit `1897dfee`) skipped the FIFO pop entirely when the runId was Lamp-format, but left the entry in the queue. The next UUID lifecycle then popped that orphan and was misattributed to it — observed pattern: Phase 1 reply + Phase 2 reply both rendered under the Phase 1 chat-N, with Phase 2's content actually belonging to the next chat in the drain.
+- **Trigger**: drain/burst flushes multiple chat.sends; first one returns Phase 1 with Lamp-format runId; the next chat's UUID lifecycle (Phase 2) then pulls the orphan.
 - **Symptom**: assistant turn shows two unrelated replies under one runId; off-by-one cascade for ~2 min until orphan TTL expires.
 - **Fix**: replace skip with `RemovePendingChatTraceByRunID(payload.RunID)` so the matching entry is cleared instead of left as orphan.
 
