@@ -408,12 +408,12 @@ class SpeechEmotionService:
     def _send_to_lamp(self, *, message: str, user: str) -> None:
         """POST sensing event to Lamp with 3x retry on connection error / 503.
 
-        Same shape as voice_service._send_to_lumi but carries `current_user`
+        Same shape as voice_service.send_to_lamp but carries `current_user`
         explicitly so the Lamp sensing handler doesn't have to look it up.
         """
         if not self._lamp_url:
             logger.warning(
-                "[speech_emotion] _send_to_lumi skipped — empty lumi_url"
+                "[speech_emotion] send_to_lamp skipped — empty lumi_url"
             )
             return
         payload = {
