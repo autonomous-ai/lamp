@@ -13,7 +13,7 @@
 #   Phase 1  extract .img, expand to OUT_IMG_SIZE, partprobe, resize2fs
 #   Phase 2  chroot apt install + write systemd units + helper scripts + configs
 #   Phase 3  chroot OTA bake — backend binaries + lelamp + web UI + buddy
-#   Phase 4  install lumi-resize-once.service for first-boot SD-fill expand
+#   Phase 4  install lamp-resize-once.service for first-boot SD-fill expand
 #   Phase 5  unmount + compress → /output/golden-opi.img.xz
 #
 # Run via Makefile (Docker container, --privileged for losetup/mount).
@@ -1022,11 +1022,11 @@ MANIFEST_JSON
 log "Manifest: /output/manifest-opi.json"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Phase 4 — Install lumi-resize-once.service (first-boot SD-fill expand)
+# Phase 4 — Install lamp-resize-once.service (first-boot SD-fill expand)
 # ─────────────────────────────────────────────────────────────────────────────
-log "Phase 4 — lumi-resize-once (first-boot expand)"
+log "Phase 4 — lamp-resize-once (first-boot expand)"
 
-cat > "${MNT}/usr/local/bin/lumi-resize-once" <<'RESIZE_EOF'
+cat > "${MNT}/usr/local/bin/lamp-resize-once" <<'RESIZE_EOF'
 #!/bin/bash
 # Runs ONCE at first boot. Expands root partition + ext4 to fill the SD card,
 # then disables itself. Compares root partition device to deduce the parent
@@ -1053,17 +1053,17 @@ resize2fs "${ROOT_PART}" || { log "WARN resize2fs failed"; }
 log "resize complete"
 
 # Self-disable so this service never runs again, even if image is re-cloned.
-systemctl disable lumi-resize-once.service 2>/dev/null || true
-rm -f /etc/systemd/system/lumi-resize-once.service
-rm -f /etc/systemd/system/multi-user.target.wants/lumi-resize-once.service
-rm -f /usr/local/bin/lumi-resize-once
+systemctl disable lamp-resize-once.service 2>/dev/null || true
+rm -f /etc/systemd/system/lamp-resize-once.service
+rm -f /etc/systemd/system/multi-user.target.wants/lamp-resize-once.service
+rm -f /usr/local/bin/lamp-resize-once
 RESIZE_EOF
-chmod +x "${MNT}/usr/local/bin/lumi-resize-once"
+chmod +x "${MNT}/usr/local/bin/lamp-resize-once"
 
-cat > "${MNT}/etc/systemd/system/lumi-resize-once.service" <<'UNIT'
+cat > "${MNT}/etc/systemd/system/lamp-resize-once.service" <<'UNIT'
 [Unit]
 Description=Expand root filesystem to fill SD card on first boot (self-destructing)
-ConditionPathExists=/usr/local/bin/lumi-resize-once
+ConditionPathExists=/usr/local/bin/lamp-resize-once
 DefaultDependencies=no
 After=local-fs.target systemd-remount-fs.service
 Before=basic.target
@@ -1071,7 +1071,7 @@ Before=basic.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/local/bin/lumi-resize-once
+ExecStart=/usr/local/bin/lamp-resize-once
 
 [Install]
 WantedBy=multi-user.target
@@ -1080,8 +1080,8 @@ UNIT
 # Manually link into wants (systemctl enable inside chroot also works, but we
 # already exited the chroot — symlink is the equivalent + no DBus needed).
 mkdir -p "${MNT}/etc/systemd/system/multi-user.target.wants"
-ln -sf /etc/systemd/system/lumi-resize-once.service \
-  "${MNT}/etc/systemd/system/multi-user.target.wants/lumi-resize-once.service"
+ln -sf /etc/systemd/system/lamp-resize-once.service \
+  "${MNT}/etc/systemd/system/multi-user.target.wants/lamp-resize-once.service"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Phase 5 — Restore resolv.conf, unmount, compress
