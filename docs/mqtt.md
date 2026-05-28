@@ -75,7 +75,7 @@ Lamp uses MQTT to communicate with the backend server (status reporting, OTA com
 **Response (single — telegram/slack/discord):**
 ```json
 {
-  "device": "ai_lumi",
+  "device": "ai_lamp",
   "type": "add_channel",
   "channel": "telegram",
   "status": "success|failure",

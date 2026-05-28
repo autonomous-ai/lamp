@@ -350,7 +350,7 @@ type MQTTInfoResponse struct {
 // NewDeviceMessage creates a base message with required fields populated from config.
 func NewMQTTInfoResponse(cfg *config.Config, msgType string, mac string) MQTTInfoResponse {
 	return MQTTInfoResponse{
-		Device:      "ai_lumi",
+		Device:      "ai_lamp",
 		Type:        msgType,
 		Version:     config.LampVersion,
 		ID:          cfg.DeviceID,

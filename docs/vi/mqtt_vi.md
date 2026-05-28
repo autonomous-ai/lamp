@@ -75,7 +75,7 @@ Lamp sử dụng MQTT để giao tiếp với backend server (báo cáo trạng 
 **Phản hồi (một message — telegram/slack/discord):**
 ```json
 {
-  "device": "ai_lumi",
+  "device": "ai_lamp",
   "type": "add_channel",
   "channel": "telegram",
   "status": "success|failure",
