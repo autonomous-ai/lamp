@@ -10,7 +10,7 @@ The AI Lamp device runs **5 software components** on a Raspberry Pi 4. All compo
 | **Bootstrap Server** | Go binary (ARM64) | Download zip from OTA | `bootstrap.service` | `/usr/local/bin/bootstrap-server` |
 | **Web (Setup SPA)** | React/Vite bundle | Download zip from OTA | nginx serves static | `/usr/share/nginx/html/setup/` |
 | **OpenClaw** | Node.js package | `npm install -g` | `openclaw.service` | Global npm |
-| **LeLamp Runtime** | Python package | Download zip from OTA | `lumi-lelamp.service` | `/opt/lelamp/` |
+| **LeLamp Runtime** | Python package | Download zip from OTA | `lamp-lelamp.service` | `/opt/lelamp/` |
 
 ### Architecture Diagram
 
@@ -145,7 +145,7 @@ stage_install_lelamp() {
     /opt/lelamp/venv/bin/pip install -r /opt/lelamp/requirements.txt
 
     # 5. Create systemd service
-    cat > /etc/systemd/system/lumi-lelamp.service << 'UNIT'
+    cat > /etc/systemd/system/lamp-lelamp.service << 'UNIT'
 [Unit]
 Description=LeLamp Python Runtime — Hardware Drivers
 After=network.target
@@ -165,8 +165,8 @@ WantedBy=multi-user.target
 UNIT
 
     systemctl daemon-reload
-    systemctl enable lumi-lelamp.service
-    systemctl start lumi-lelamp.service
+    systemctl enable lamp-lelamp.service
+    systemctl start lamp-lelamp.service
 
     echo "LeLamp $LELAMP_VERSION installed at /opt/lelamp/"
 }
@@ -179,7 +179,7 @@ UNIT
 | `lamp.service` | `/usr/local/bin/lamp-server` | 5000 | Main HTTP API, always running |
 | `bootstrap.service` | `/usr/local/bin/bootstrap-server` | 8080 | OTA worker, polls for updates. Exposes `POST /force-check` to trigger immediate OTA check |
 | `openclaw.service` | `xvfb-run ... openclaw gateway run` | — | AI brain, memory limit 1500M |
-| `lumi-lelamp.service` | `uvicorn lelamp.server:app --host 127.0.0.1 --port 5001` | 5001 | Hardware drivers (servo, LED, camera, audio) |
+| `lamp-lelamp.service` | `uvicorn lelamp.server:app --host 127.0.0.1 --port 5001` | 5001 | Hardware drivers (servo, LED, camera, audio) |
 | nginx | `nginx` | 80 | Setup SPA + reverse proxy (`/api/` → Lamp 5000, `/hw/` → LeLamp 5001) |
 
 ### Service Dependency Order
@@ -188,7 +188,7 @@ UNIT
 boot
   → lamp.service      (system layer, LED boot animation)
   → bootstrap.service   (starts polling for updates)
-  → lumi-lelamp.service      (hardware drivers ready)
+  → lamp-lelamp.service      (hardware drivers ready)
   → openclaw.service    (AI brain, connects to lamp via HTTP)
   → nginx               (web UI for setup)
 ```
@@ -279,7 +279,7 @@ Bootstrap uses `lib/lelamp` to show update status on LEDs. See [status-led.md](s
 | `bootstrap` | Spawn detached `software-update bootstrap` (self-update, survives restart) |
 | `web` | Run `software-update web` |
 | `openclaw` | ~~Run `npm install -g openclaw@{version}` → `systemctl restart openclaw`~~ (temporarily disabled) |
-| `lelamp` | Run `software-update lelamp` → `systemctl restart lumi-lelamp` |
+| `lelamp` | Run `software-update lelamp` → `systemctl restart lamp-lelamp` |
 
 ---
 
@@ -297,7 +297,7 @@ Bash script installed by setup.sh. Called by bootstrap worker to apply updates.
     curl -fsSL "$URL" -o /tmp/lelamp-update.zip
 
     # Stop service before updating
-    systemctl stop lumi-lelamp.service
+    systemctl stop lamp-lelamp.service
 
     # Backup current
     cp -r /opt/lelamp /opt/lelamp.bak 2>/dev/null || true
@@ -309,7 +309,7 @@ Bash script installed by setup.sh. Called by bootstrap worker to apply updates.
     /opt/lelamp/venv/bin/pip install -r /opt/lelamp/requirements.txt --quiet
 
     # Restart
-    systemctl start lumi-lelamp.service
+    systemctl start lamp-lelamp.service
 
     # Cleanup
     rm -f /tmp/lelamp-update.zip
@@ -533,7 +533,7 @@ LeLamp version is a plain text `VERSION` file in the package root. Read by boots
 | Components | 4 (lamp, bootstrap, web, openclaw) | **5** (+ lelamp) |
 | OTA keys | lamp, bootstrap, web, openclaw | + **lelamp** |
 | Setup stages | 7 (stages -1 to 4) | **8** (+ stage 2b: LeLamp) |
-| Systemd services | 4 | **5** (+ lumi-lelamp.service) |
+| Systemd services | 4 | **5** (+ lamp-lelamp.service) |
 | Python runtime | None | **LeLamp** at /opt/lelamp/ with venv |
 | Hardware bridge | N/A | Lamp HTTP → LeLamp HTTP (localhost proxy) |
 | SPI usage | LED only | LED + **Display (GC9A01)** |

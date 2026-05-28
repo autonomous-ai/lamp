@@ -306,7 +306,7 @@ SyslogIdentifier=bootstrap
 WantedBy=multi-user.target
 UNIT
 
-cat > /etc/systemd/system/lumi-lelamp.service <<'UNIT'
+cat > /etc/systemd/system/lamp-lelamp.service <<'UNIT'
 [Unit]
 Description=Lumi LeLamp Hardware Runtime
 After=network.target
@@ -322,7 +322,7 @@ Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=lumi-lelamp
+SyslogIdentifier=lamp-lelamp
 
 [Install]
 WantedBy=multi-user.target
@@ -825,7 +825,7 @@ systemctl mask orangepi-firstrun-config.service 2>/dev/null || true
 
 # ── enable Lumi services (symlink, since chroot has no running systemd) ──────
 echo "[stage] enable Lumi services"
-for unit in lamp bootstrap lumi-lelamp lumi-wifi-power-save openclaw avahi-daemon bluetooth ssh; do
+for unit in lamp bootstrap lamp-lelamp lumi-wifi-power-save openclaw avahi-daemon bluetooth ssh; do
   systemctl enable "\$unit" 2>/dev/null || true
 done
 

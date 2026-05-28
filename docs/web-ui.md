@@ -359,7 +359,7 @@ make web-build        # tsc + vite build → lamp/web/dist/
 make web-deploy       # web-build + rsync dist/ → /usr/share/nginx/html/setup/
 
 # Deploy LeLamp (when server.py changes)
-make lelamp-deploy    # rsync + pip install + systemctl restart lumi-lelamp.service
+make lelamp-deploy    # rsync + pip install + systemctl restart lamp-lelamp.service
 ```
 
 > Deploy uses `PI_HOST=lamp.local` (mDNS). If it doesn't resolve, use IP directly:

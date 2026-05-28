@@ -40,7 +40,7 @@
 #         - Generate locale
 #         - stage_rpi5_wifi_stability: disable IPv6, power-save service
 #         - stage_enable_spi: dtparam=spi=on in config.txt
-#         - stage_backend_units: systemd services (bootstrap, lamp, lumi-lelamp) + software-update
+#         - stage_backend_units: systemd services (bootstrap, lamp, lamp-lelamp) + software-update
 #         - stage_pulseaudio: PulseAudio echo cancellation (WebRTC AEC for mic/speaker)
 #         - stage_lelamp_uv: install uv (Python package manager for LeLamp)
 #         - stage_nginx: write nginx config with lumi/lelamp/openclaw upstreams
@@ -851,7 +851,7 @@ SyslogIdentifier=lamp
 WantedBy=multi-user.target
 EOF
 
-cat > /etc/systemd/system/lumi-lelamp.service <<'EOF'
+cat > /etc/systemd/system/lamp-lelamp.service <<'EOF'
 [Unit]
 Description=Lumi LeLamp Hardware Runtime
 After=network.target
@@ -866,12 +866,12 @@ Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=lumi-lelamp
+SyslogIdentifier=lamp-lelamp
 
 [Install]
 WantedBy=multi-user.target
 EOF
-systemctl enable bootstrap lamp lumi-lelamp
+systemctl enable bootstrap lamp lamp-lelamp
 
 # software-update: OTA updater for bootstrap, lamp, lelamp, openclaw, and web UI.
 # Usage: software-update <bootstrap|lamp|lelamp|openclaw|web>
@@ -935,7 +935,7 @@ elif [ "\$KIND" = "lelamp" ]; then
   rm -rf "\$LELAMP_DIR/.venv"
   cd "\$LELAMP_DIR" && "\$UV_BIN" sync --python 3.12 --extra hardware || { echo "uv sync failed"; exit 1; }
   cd /
-  systemctl restart lumi-lelamp 2>/dev/null || true
+  systemctl restart lamp-lelamp 2>/dev/null || true
 elif [ "\$KIND" = "openclaw" ]; then
   V="\${VER:-latest}"
   npm install -g "openclaw@\${V}" || { echo "npm install openclaw failed"; exit 1; }
@@ -2068,7 +2068,7 @@ for CFG in /etc/fstab /etc/hostapd/hostapd.conf /etc/nginx/conf.d/lumi.conf \
 done
 
 # Check systemd services are enabled
-for SVC in bootstrap lamp lumi-lelamp nginx openclaw btrfs-resize-once firstrun-wifi; do
+for SVC in bootstrap lamp lamp-lelamp nginx openclaw btrfs-resize-once firstrun-wifi; do
   if [ -L "${MNT}/etc/systemd/system/multi-user.target.wants/${SVC}.service" ] || \
      [ -L "${MNT}/etc/systemd/system/sysinit.target.wants/${SVC}.service" ]; then
     echo "  [OK] ${SVC}.service enabled"
