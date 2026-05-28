@@ -55,7 +55,7 @@ Out-of-scope MVP examples (defer to vision phase):
 ┌─────────────────────────┐         ┌────────────────────────────┐
 │  User                   │         │  Mac (user's computer)     │
 │    │ voice              │         │  ┌──────────────────────┐  │
-│    ▼                    │         │  │ lumi-buddy.app       │  │
+│    ▼                    │         │  │ lamp-buddy.app       │  │
 │  ┌─────────────────┐    │         │  │ (Swift, menu bar)    │  │
 │  │ Lamp (Pi)       │    │         │  │                      │  │
 │  │                 │    │         │  │  ┌────────────────┐  │  │
@@ -85,7 +85,7 @@ Out-of-scope MVP examples (defer to vision phase):
    `POST /api/buddy/command {action:"open_app", params:{app:"Google Chrome"}}`
    `POST /api/buddy/command {action:"open_url", params:{url:"https://gmail.com"}}`
 5. Lamp Go's buddy dispatcher looks up the paired buddy in the WS registry, forwards command over the open WS
-6. lumi-buddy decodes JSON, dispatches to executor (NSWorkspace, CGEvent, etc.), executes
+6. lamp-buddy decodes JSON, dispatches to executor (NSWorkspace, CGEvent, etc.), executes
 7. Buddy returns `{ok:true}` over the same WS
 8. Skill receives result, returns TTS-friendly confirmation
 9. lelamp speaks: "Đã mở Gmail trên máy của bạn rồi"
@@ -108,7 +108,7 @@ Out-of-scope MVP examples (defer to vision phase):
 
 ## 4. Components
 
-### 4.1 `lumi-buddy` (Swift macOS app)
+### 4.1 `lamp-buddy` (Swift macOS app)
 
 - `NSStatusItem` in menu bar (no Dock icon; `setActivationPolicy(.accessory)`)
 - Menu: pairing state, connection state, last command, "Pause", "Revoke pairing", "Quit"

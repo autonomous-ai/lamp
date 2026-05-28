@@ -3,7 +3,7 @@
 This is the handover doc for whoever owns the Apple Developer enrolment. Once the one-time setup is done, every release boils down to:
 
 ```bash
-cd lumi-buddy
+cd lamp-buddy
 export DEV_ID_APP="Developer ID Application: <Your Org> (<TEAMID>)"
 export NOTARY_PROFILE=lamp-notary
 make dmg-signed
@@ -86,7 +86,7 @@ Empty history is fine — it means auth works.
 ## Per-release flow
 
 ```bash
-cd lumi-buddy
+cd lamp-buddy
 
 # Persist these in your shell rc once, or export per session.
 export DEV_ID_APP="Developer ID Application: Autonomous Inc (ABCDE12345)"

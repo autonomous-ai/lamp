@@ -55,7 +55,7 @@ Use case MVP KHÔNG hỗ trợ (chờ phase vision):
 ┌─────────────────────────┐         ┌────────────────────────────┐
 │  User                   │         │  Mac (máy người dùng)      │
 │    │ voice              │         │  ┌──────────────────────┐  │
-│    ▼                    │         │  │ lumi-buddy.app       │  │
+│    ▼                    │         │  │ lamp-buddy.app       │  │
 │  ┌─────────────────┐    │         │  │ (Swift, menu bar)    │  │
 │  │ Lamp (Pi)       │    │         │  │                      │  │
 │  │                 │    │         │  │  ┌────────────────┐  │  │
@@ -85,7 +85,7 @@ Use case MVP KHÔNG hỗ trợ (chờ phase vision):
    `POST /api/buddy/command {action:"open_app", params:{app:"Google Chrome"}}`
    `POST /api/buddy/command {action:"open_url", params:{url:"https://gmail.com"}}`
 5. Buddy dispatcher của Lamp Go tra cứu buddy đã pair trong registry WS, gửi command qua WS đang mở
-6. lumi-buddy decode JSON, dispatch cho executor (NSWorkspace, CGEvent, …), thực thi
+6. lamp-buddy decode JSON, dispatch cho executor (NSWorkspace, CGEvent, …), thực thi
 7. Buddy trả về `{ok:true}` qua cùng WS
 8. Skill nhận kết quả, trả về câu confirm TTS-friendly
 9. lelamp đọc: "Đã mở Gmail trên máy của bạn rồi"
@@ -108,7 +108,7 @@ Use case MVP KHÔNG hỗ trợ (chờ phase vision):
 
 ## 4. Component
 
-### 4.1 `lumi-buddy` (app Swift macOS)
+### 4.1 `lamp-buddy` (app Swift macOS)
 
 - `NSStatusItem` trên menu bar (không có Dock icon; `setActivationPolicy(.accessory)`)
 - Menu: trạng thái pair, trạng thái kết nối, command gần nhất, "Pause", "Revoke pairing", "Quit"
@@ -327,7 +327,7 @@ Page mới `Paired Computers`:
 | Logging | **OSLog (unified)** | Native, xem được trong Console.app |
 | Test framework | **XCTest** | Chuẩn |
 | Go side | **Pattern hiện có** (Gin, Wire, internal/) | Theo `internal/openclaw/`, `server/<domain>/delivery/http/` |
-| Vị trí folder lumi-buddy | **Root repo** cạnh `lumi/`, `lelamp/` | Self-contained, build độc lập |
+| Vị trí folder lamp-buddy | **Root repo** cạnh `lumi/`, `lelamp/` | Self-contained, build độc lập |
 
 ---
 

@@ -3,7 +3,7 @@
 Doc handover cho dev sẽ làm Apple Developer enrolment. Sau khi setup 1 lần xong, mỗi release chỉ cần:
 
 ```bash
-cd lumi-buddy
+cd lamp-buddy
 export DEV_ID_APP="Developer ID Application: <Your Org> (<TEAMID>)"
 export NOTARY_PROFILE=lamp-notary
 make dmg-signed
@@ -86,7 +86,7 @@ History rỗng OK — nghĩa là auth chạy đúng.
 ## Flow mỗi release
 
 ```bash
-cd lumi-buddy
+cd lamp-buddy
 
 # Lưu vào shell rc 1 lần, hoặc export mỗi session.
 export DEV_ID_APP="Developer ID Application: Autonomous Inc (ABCDE12345)"

@@ -1,12 +1,12 @@
 # mock-lamp
 
-Tiny Go server that mocks the Lamp's buddy contract. Use it to test the macOS `lumi-buddy` app end-to-end **without** running the real Lamp Go server.
+Tiny Go server that mocks the Lamp's buddy contract. Use it to test the macOS `lamp-buddy` app end-to-end **without** running the real Lamp Go server.
 
 It doubles as a **reference implementation** for the eventual Lamp-side work: the file structure, types, and dispatch loop here mirror what `lumi/internal/buddy/` and `lumi/server/buddy/delivery/http/` will end up looking like.
 
 ## Run
 
-From `lumi-buddy/`:
+From `lamp-buddy/`:
 
 ```bash
 make mock
