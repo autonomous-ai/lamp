@@ -169,7 +169,7 @@ async def proxy_ws(client_ws: WebSocket, path: str) -> None:
                 key_req = WSKeyExchangeRequest.model_validate_json(first_msg)
                 session = crypto.create_session(key_req.to_raw_key())
                 await client_ws.send_json({"status": "key_exchange_ok"})
-                logger.info("[WS] Encrypted session established for /%s", path)
+                logger.info("[WS] /%s → %s: Encrypted session established", path, ws_url)
                 first_msg = None  # consumed
             except ValidationError:
                 if settings.crypto.require_encryption:
@@ -181,7 +181,7 @@ async def proxy_ws(client_ws: WebSocket, path: str) -> None:
                 return
             first_msg = None
         except (ValueError, InvalidTag) as e:
-            logger.error("[WS] Key exchange failed: %s", e)
+            logger.error("[WS] /%s → %s: Key exchange failed: %s", path, ws_url, e)
             await client_ws.close(code=1011, reason=f"Key exchange failed: {e}")
             return
 
@@ -202,10 +202,12 @@ async def proxy_ws(client_ws: WebSocket, path: str) -> None:
                                 result = session.decrypt(enc_msg.to_raw_payload())
                                 data = result.plain_data.decode()
                             except ValidationError:
-                                logger.warning("[WS] Rejecting unencrypted message")
+                                logger.warning(
+                                    "[WS] /%s → %s: Rejecting unencrypted message", path, ws_url
+                                )
                                 continue
                             except (InvalidTag, ValueError) as e:
-                                logger.error("[WS] Decrypt failed: %s", e)
+                                logger.error("[WS] /%s → %s: Decrypt failed: %s", path, ws_url, e)
                                 continue
                         logger.info("[WS] /%s → %s: %s", path, ws_url, data[:100])
                         await backend_ws.send(data)
