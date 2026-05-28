@@ -3,10 +3,10 @@ import { getApiToken, withApiToken } from "@/lib/api";
 import { S } from "./styles";
 import { API } from "./types";
 
-type LogSource = "lelamp" | "lumi" | "openclaw" | "openclaw-service" | "buddy";
+type LogSource = "lelamp" | "lamp" | "openclaw" | "openclaw-service" | "buddy";
 const LOG_SOURCES: { id: LogSource; label: string; color: string }[] = [
   { id: "lelamp",           label: "LeLamp",     color: "var(--lm-green)" },
-  { id: "lumi",             label: "Lamp",       color: "var(--lm-amber)" },
+  { id: "lamp",             label: "Lamp",       color: "var(--lm-amber)" },
   { id: "openclaw",         label: "OpenClaw",   color: "var(--lm-blue)" },
   { id: "openclaw-service", label: "OC Service", color: "var(--lm-purple)" },
   { id: "buddy",            label: "Buddy",      color: "var(--lm-cyan)" },
