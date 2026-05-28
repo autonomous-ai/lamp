@@ -567,10 +567,6 @@ OTA_METADATA_URL="\${OTA_METADATA_URL:-https://storage.googleapis.com/s3-autonom
 [ "\$(id -u)" -ne 0 ] && { echo "Run as root."; exit 1; }
 [ \$# -ne 1 ] && { echo "Usage: software-update <lamp|openclaw|bootstrap|web|lelamp|claude-desktop-buddy>"; exit 1; }
 APP="\$1"
-# Back-compat: legacy \`lumi\`, \`lumi-buddy\`, \`lamp-buddy\` aliases still resolve.
-[ "\$APP" = "lumi" ] && APP="lamp"
-[ "\$APP" = "lumi-buddy" ] && APP="claude-desktop-buddy"
-[ "\$APP" = "lamp-buddy" ] && APP="claude-desktop-buddy"
 case "\$APP" in
   lamp|openclaw|bootstrap|web|lelamp|claude-desktop-buddy) ;;
   *) echo "Unknown app: \$APP"; exit 1 ;;

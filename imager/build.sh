@@ -877,8 +877,6 @@ for i in \$(seq 1 10); do
   sleep 2
 done
 KIND="\$1"
-# Back-compat: \`software-update lumi\` still works during the brand rename window.
-[ "\$KIND" = "lumi" ] && KIND="lamp"
 case "\$KIND" in bootstrap|lamp|lelamp|openclaw|web) ;; *) echo "Unknown: \$KIND (bootstrap, lamp, lelamp, openclaw, web)"; exit 1 ;; esac
 META="\$(mktemp)"
 retry "curl -fsSL -H 'Cache-Control: no-cache' -o '\$META' '\$OTA_METADATA_URL'" 5
