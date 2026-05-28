@@ -19,7 +19,7 @@ else
   LELAMP_SVC="/etc/systemd/system/lumi-lelamp.service"
   LELAMP_UNIT="lumi-lelamp"
 fi
-NGINX_CONF="/etc/nginx/conf.d/lumi.conf"
+NGINX_CONF="/etc/nginx/conf.d/lamp.conf"
 
 # Hash watched files before patching so the end-of-script restart only fires
 # when something actually changed. Idempotent re-runs (everything already

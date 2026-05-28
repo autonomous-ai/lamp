@@ -7,7 +7,7 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-CONF="/etc/nginx/conf.d/lumi.conf"
+CONF="/etc/nginx/conf.d/lamp.conf"
 
 if [ ! -f "$CONF" ]; then
   echo "Error: $CONF not found"

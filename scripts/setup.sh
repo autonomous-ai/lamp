@@ -653,7 +653,7 @@ stage_nginx() {
   unzip -o -q /tmp/setup.zip -d /usr/share/nginx/html/setup
   rm -f /tmp/setup.zip
 
-  cat >/etc/nginx/conf.d/lumi.conf <<EOF
+  cat >/etc/nginx/conf.d/lamp.conf <<EOF
 upstream backend  { server 127.0.0.1:5000; }
 upstream lelamp   { server 127.0.0.1:5001; }
 upstream openclaw { server 127.0.0.1:18789; }
@@ -1319,6 +1319,9 @@ systemctl stop lumi-buddy.service 2>/dev/null || true
 systemctl disable lumi-buddy.service 2>/dev/null || true
 rm -f /etc/systemd/system/lumi-buddy.service
 systemctl daemon-reload 2>/dev/null || true
+# nginx conf renamed to lamp.conf 2026-05-28. Remove old lumi.conf so we don't
+# end up with two configs defining the same upstreams (nginx fails to start).
+rm -f /etc/nginx/conf.d/lumi.conf
 
 run_stage stage_locale
 run_stage stage_prerequisites

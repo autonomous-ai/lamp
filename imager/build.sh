@@ -936,7 +936,7 @@ rm -f /etc/nginx/sites-enabled/default
 mkdir -p /usr/share/nginx/html/setup
 # Web UI download moved to Phase 2 (overlay) — only config is in base
 
-cat > /etc/nginx/conf.d/lumi.conf <<'EOF'
+cat > /etc/nginx/conf.d/lamp.conf <<'EOF'
 upstream backend  { server 127.0.0.1:5000; }
 upstream lelamp   { server 127.0.0.1:5001; }
 upstream openclaw { server 127.0.0.1:18789; }
@@ -2036,7 +2036,7 @@ for BIN in /sbin/init \
 done
 
 # Check critical config files
-for CFG in /etc/fstab /etc/hostapd/hostapd.conf /etc/nginx/conf.d/lumi.conf \
+for CFG in /etc/fstab /etc/hostapd/hostapd.conf /etc/nginx/conf.d/lamp.conf \
            /boot/firmware/cmdline.txt; do
   if [ -f "${MNT}${CFG}" ]; then
     echo "  [OK] $CFG"

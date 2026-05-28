@@ -101,7 +101,7 @@ _All cleared 2026-05-19 (F6 + F7b skipped + F8)._
 
 ### Patch script idempotency note
 
-`scripts/patch-security.sh` now hashes `lumi.conf` + `lamp-lelamp.service` before patching and only `nginx -s reload` / `systemctl restart` when those hashes change. Earlier behavior was an unconditional restart at the end → re-running an already-patched device caused a ~5s 502 window. Safe to re-run repeatedly now.
+`scripts/patch-security.sh` now hashes `lamp.conf` + `lamp-lelamp.service` before patching and only `nginx -s reload` / `systemctl restart` when those hashes change. Earlier behavior was an unconditional restart at the end → re-running an already-patched device caused a ~5s 502 window. Safe to re-run repeatedly now.
 
 ---
 
