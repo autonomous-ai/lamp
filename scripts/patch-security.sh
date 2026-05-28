@@ -10,7 +10,15 @@
 
 set -euo pipefail
 
-LELAMP_SVC="/etc/systemd/system/lumi-lelamp.service"
+# Prefer the renamed lamp-lelamp.service; fall back to legacy lumi-lelamp.service
+# on devices still on the pre-rename layout.
+if [ -f "/etc/systemd/system/lamp-lelamp.service" ]; then
+  LELAMP_SVC="/etc/systemd/system/lamp-lelamp.service"
+  LELAMP_UNIT="lamp-lelamp"
+else
+  LELAMP_SVC="/etc/systemd/system/lumi-lelamp.service"
+  LELAMP_UNIT="lumi-lelamp"
+fi
 NGINX_CONF="/etc/nginx/conf.d/lumi.conf"
 
 # Hash watched files before patching so the end-of-script restart only fires
@@ -27,9 +35,9 @@ echo "[patch] Starting security patch..."
 if grep -q "\-\-host 0.0.0.0" "$LELAMP_SVC" 2>/dev/null; then
   sed -i 's/--host 0\.0\.0\.0/--host 127.0.0.1/' "$LELAMP_SVC"
   systemctl daemon-reload
-  echo "[patch] lumi-lelamp: bind changed to 127.0.0.1"
+  echo "[patch] ${LELAMP_UNIT}: bind changed to 127.0.0.1"
 else
-  echo "[patch] lumi-lelamp: already on 127.0.0.1, skipping"
+  echo "[patch] ${LELAMP_UNIT}: already on 127.0.0.1, skipping"
 fi
 
 # 2. nginx /hw/: add allow/deny if missing
@@ -329,13 +337,13 @@ else
   echo "[patch] LELAMP_MODE=production added to .env"
 fi
 
-# 5. Add EnvironmentFile to lumi-lelamp.service if missing
+# 5. Add EnvironmentFile to lelamp unit if missing
 if ! grep -q "^EnvironmentFile=" "$LELAMP_SVC" 2>/dev/null; then
   sed -i '/^\[Service\]/a EnvironmentFile=\/opt\/lelamp\/.env' "$LELAMP_SVC"
   systemctl daemon-reload
-  echo "[patch] lumi-lelamp.service: EnvironmentFile added"
+  echo "[patch] ${LELAMP_UNIT}.service: EnvironmentFile added"
 else
-  echo "[patch] lumi-lelamp.service: EnvironmentFile already present, skipping"
+  echo "[patch] ${LELAMP_UNIT}.service: EnvironmentFile already present, skipping"
 fi
 
 # 6. Bind lamp-server to 127.0.0.1 (defense-in-depth: port 5000 unreachable from LAN
@@ -377,10 +385,10 @@ if [ "$LELAMP_HASH_BEFORE" != "$LELAMP_HASH_AFTER" ]; then
   # Restart the renamed `lamp` service; fall back to legacy `lumi` on older devices.
   LAMP_UNIT="lamp"
   systemctl list-unit-files lamp.service >/dev/null 2>&1 || LAMP_UNIT="lumi"
-  echo "[patch] lumi-lelamp.service changed → restarting lumi-lelamp + ${LAMP_UNIT}"
-  systemctl restart lumi-lelamp "$LAMP_UNIT"
+  echo "[patch] ${LELAMP_UNIT}.service changed → restarting ${LELAMP_UNIT} + ${LAMP_UNIT}"
+  systemctl restart "$LELAMP_UNIT" "$LAMP_UNIT"
 else
-  echo "[patch] lumi-lelamp.service unchanged, skipping service restart"
+  echo "[patch] ${LELAMP_UNIT}.service unchanged, skipping service restart"
 fi
 
 echo "[patch] Done. Device is patched."

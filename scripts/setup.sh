@@ -339,16 +339,16 @@ set-default-sink aec_sink
 PULSE_EOF
   fi
 
-  # Anonymous unix socket so the root-owned lumi-lelamp service can reach the
+  # Anonymous unix socket so the root-owned lamp-lelamp service can reach the
   # uid-1000 PulseAudio daemon (libpulse rejects cookie auth when the socket
   # owner differs from the connecting uid). Pairs with the PULSE_SERVER env
-  # added to the lumi-lelamp.service unit below. Required for Bluetooth
+  # added to the lamp-lelamp.service unit below. Required for Bluetooth
   # headset routing (pactl set-default-sink to a bluez sink).
   if [ -f "$PULSE_CONF" ] && ! grep -q "pulse-anon-lumi" "$PULSE_CONF"; then
     echo "[stage] Configuring PulseAudio anonymous socket for root access"
     cat >> "$PULSE_CONF" <<'PULSE_EOF'
 
-### Anonymous unix socket so root-owned lumi-lelamp can reach this PA daemon
+### Anonymous unix socket so root-owned lamp-lelamp can reach this PA daemon
 load-module module-native-protocol-unix auth-anonymous=1 socket=/tmp/pulse-anon-lumi
 PULSE_EOF
   fi
@@ -424,7 +424,7 @@ WEBRTCVAD_EOF
   grep -q "^LELAMP_MODE=" "$LELAMP_DIR/.env" \
     || echo "LELAMP_MODE=production" >> "$LELAMP_DIR/.env"
 
-  cat >/etc/systemd/system/lumi-lelamp.service <<EOF
+  cat >/etc/systemd/system/lamp-lelamp.service <<EOF
 [Unit]
 Description=Lamp LeLamp Hardware Runtime
 After=network.target
@@ -443,15 +443,15 @@ Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=lumi-lelamp
+SyslogIdentifier=lamp-lelamp
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
   systemctl daemon-reload
-  systemctl enable lumi-lelamp
-  systemctl restart lumi-lelamp
+  systemctl enable lamp-lelamp
+  systemctl restart lamp-lelamp
 }
 
 # ----------------------------------------------------------
@@ -1308,7 +1308,7 @@ elif [ "$APP" = "lelamp" ]; then
   find /root/.cache/uv -name "lerobot.egg-info" -type d 2>/dev/null | xargs rm -rf
   cd "$LELAMP_DIR" && "$UV_BIN" sync --python 3.12 --extra hardware || { echo "uv sync failed"; exit 1; }
   cd /
-  systemctl restart lumi-lelamp
+  systemctl restart lamp-lelamp
   echo "lelamp updated to $VERSION"
 elif [ "$APP" = "lamp-buddy" ]; then
   [ -z "$URL" ] && { echo "Metadata has no url for claude-desktop-buddy"; exit 1; }
@@ -1337,11 +1337,15 @@ SOFTWAREUPDATE
 ensure_root
 
 # Stop lamp if running from a previous setup — it switches to AP mode when unconfigured, killing internet.
-# Also stop the legacy lumi.service unit on devices upgraded from the pre-rename layout.
+# Also stop the legacy lumi.service / lumi-lelamp.service units on devices upgraded from the pre-rename layout.
 systemctl stop lamp.service 2>/dev/null || true
 systemctl disable lamp.service 2>/dev/null || true
 systemctl stop lumi.service 2>/dev/null || true
 systemctl disable lumi.service 2>/dev/null || true
+systemctl stop lumi-lelamp.service 2>/dev/null || true
+systemctl disable lumi-lelamp.service 2>/dev/null || true
+rm -f /etc/systemd/system/lumi-lelamp.service
+systemctl daemon-reload 2>/dev/null || true
 
 run_stage stage_locale
 run_stage stage_prerequisites
@@ -1365,7 +1369,7 @@ echo "======================================"
 echo "Setup complete!"
 echo "AP SSID: Lamp-XXXX (actual: ${AP_SSID:-unknown — stage_ap may have failed})"
 echo "Setup page: http://192.168.100.1 (AP) — or http://${LAMP_HOSTNAME:-lamp-xxxx}.local once on home Wi-Fi"
-echo "Backends: systemctl status bootstrap lamp lumi-lelamp lumi-buddy"
+echo "Backends: systemctl status bootstrap lamp lamp-lelamp lumi-buddy"
 echo "Updates:  software-update <bootstrap|lamp|openclaw|lelamp|lamp-buddy|web>"
 if [ -n "$FAILED_STAGES" ]; then
   echo ""
