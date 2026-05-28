@@ -4,6 +4,8 @@ from pathlib import Path
 import numpy as np
 import onnxruntime as ort
 
+from config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,34 +31,36 @@ def prepare_ort_session(
     providers: list[str | tuple[str, dict]] = []
 
     if "TensorrtExecutionProvider" in available:
-        from config import settings
-
         trt_cache: str = str(settings.cache_dir / "trt_engines")
         Path(trt_cache).mkdir(parents=True, exist_ok=True)
-        providers.append((
-            "TensorrtExecutionProvider",
-            {
-                "device_id": 0,
-                "trt_fp16_enable": True,
-                "trt_engine_cache_enable": True,
-                "trt_engine_cache_path": trt_cache,
-                "trt_timing_cache_enable": True,
-                "trt_timing_cache_path": trt_cache,
-                "trt_builder_optimization_level": 3,
-                "trt_max_workspace_size": 1 << 30,
-                "trt_layer_norm_fp32_fallback": True,
-            },
-        ))
+        providers.append(
+            (
+                "TensorrtExecutionProvider",
+                {
+                    "device_id": 0,
+                    "trt_fp16_enable": True,
+                    "trt_engine_cache_enable": True,
+                    "trt_engine_cache_path": trt_cache,
+                    "trt_timing_cache_enable": True,
+                    "trt_timing_cache_path": trt_cache,
+                    "trt_builder_optimization_level": 3,
+                    "trt_max_workspace_size": 1 << 30,
+                    "trt_layer_norm_fp32_fallback": True,
+                },
+            )
+        )
 
     if "CUDAExecutionProvider" in available:
-        providers.append((
-            "CUDAExecutionProvider",
-            {
-                "arena_extend_strategy": "kSameAsRequested",
-                "cudnn_conv_algo_search": "DEFAULT",
-                "do_copy_in_default_stream": True,
-            },
-        ))
+        providers.append(
+            (
+                "CUDAExecutionProvider",
+                {
+                    "arena_extend_strategy": "kSameAsRequested",
+                    "cudnn_conv_algo_search": "DEFAULT",
+                    "do_copy_in_default_stream": True,
+                },
+            )
+        )
 
     providers.append("CPUExecutionProvider")
 
