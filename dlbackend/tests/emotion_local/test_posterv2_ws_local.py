@@ -87,14 +87,14 @@ class TestHealthEndpoint:
         assert resp.status_code == 200
         body = resp.json()
         assert body["status"] == "ok"
-        assert body["emotion_model"] is True
+        assert body["models"]["emotion"] is True
 
     def test_health_emotion_not_loaded(self, client):
 
         saved = get_emotion_model()
         set_emotion_model(None)
         resp = client.get("/lelamp/api/dl/health", headers=AUTH_HEADERS)
-        assert resp.json()["emotion_model"] is False
+        assert resp.json()["models"]["emotion"] is False
         set_emotion_model(saved)
 
 
