@@ -26,16 +26,13 @@ import pytest
 from .test_benchmark_api import (
     ALL_ENDPOINTS,
     EndpointSpec,
-    RequestResult,
     _fire_request,
-    _headers,
     _probe_endpoint,
     _url,
 )
 from .test_benchmark_ws import (
     ALL_WS_ENDPOINTS,
     WSEndpointSpec,
-    WSResult,
     _probe_ws,
     _ws_send_n_frames,
 )

@@ -49,7 +49,9 @@ def create_object_detector(
     elif model_name == ObjectDetectorEnum.OWLV2:
         from core.perception.object.predictors.owlv2 import OWLv2Detector as detector_cls
     elif model_name == ObjectDetectorEnum.GROUNDING_DINO:
-        from core.perception.object.predictors.grounding_dino import GroundingDINODetector as detector_cls
+        from core.perception.object.predictors.grounding_dino import (
+            GroundingDINODetector as detector_cls,
+        )
     else:
         raise ValueError(f"Unknown object detector: {model_name}")
 

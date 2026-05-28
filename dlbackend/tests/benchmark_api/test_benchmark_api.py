@@ -140,12 +140,6 @@ def _object_detect_payload() -> dict[str, Any]:
 
 ALL_ENDPOINTS: list[EndpointSpec] = [
     EndpointSpec(
-        name="pose",
-        method="POST",
-        path="/lelamp/api/dl/pose-estimate",
-        payload_fn=_pose_payload,
-    ),
-    EndpointSpec(
         name="fer",
         method="POST",
         path="/lelamp/api/dl/emotion-recognize",
