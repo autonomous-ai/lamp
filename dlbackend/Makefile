@@ -13,7 +13,7 @@
        test-audio test-audio-api test-audio-local \
        test-crypto test-crypto-api test-crypto-local \
        test-lb test-lb-local \
-       test-benchmark test-benchmark-http test-benchmark-ws \
+       test-benchmark test-benchmark-http test-benchmark-ws test-benchmark-mixed \
        lint
 
 # ---------------------------------------------------------------------------
@@ -295,13 +295,16 @@ test-lb: test-lb-local
 test-lb-local:
 	python -m pytest tests/lb_local/ -v
 
-test-benchmark: test-benchmark-http test-benchmark-ws
+test-benchmark: test-benchmark-http test-benchmark-ws test-benchmark-mixed
 
 test-benchmark-http:
 	python -m pytest tests/benchmark_api/test_benchmark_api.py -v -s
 
 test-benchmark-ws:
 	python -m pytest tests/benchmark_api/test_benchmark_ws.py -v -s
+
+test-benchmark-mixed:
+	python -m pytest tests/benchmark_api/test_benchmark_mixed.py -v -s
 
 lint:
 	ruff check src/ tests/
