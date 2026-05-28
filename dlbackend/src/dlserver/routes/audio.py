@@ -8,6 +8,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 
 from core.models.media import Audio
+from core.perception.audio.processors.exceptions import PreprocessRejected
 from dlserver.models.audio import (
     EmbedAudioRequest,
     EmbedAudioResponse,
@@ -35,8 +36,8 @@ async def embed_audio(req: EmbedAudioRequest):
         for item in req.audios_b64:
             try:
                 audios.append(decode_b64_wav(item))
-            except Exception as exc:
-                raise ValueError(f"invalid base64 payload: {exc}") from exc
+            except Exception as e:
+                raise ValueError(f"invalid base64 payload: {e}") from e
 
         if not audios:
             raise ValueError("no audio extracted from inputs")
@@ -45,6 +46,9 @@ async def embed_audio(req: EmbedAudioRequest):
         return EmbedAudioResponse.from_raw_embedding(results[0], return_chunks=req.return_chunks)
     except HTTPException:
         raise
-    except Exception as exc:
+    except PreprocessRejected as e:
+        logger.info("Rejecting audio recognition embedding HTTP message")
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
         logger.exception("Error processing audio recognition embedding HTTP message")
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=str(e)) from e

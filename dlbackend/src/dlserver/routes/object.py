@@ -108,7 +108,7 @@ async def object_detect(detector_name: str, req: ObjectDetectRequest):
         raise
     except Exception as exc:
         logger.exception("Error processing object detection HTTP message")
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @http_router.post("/{detector_name}", response_model=list[ObjectDetectionItemResponse])
@@ -135,7 +135,7 @@ async def object_detect_compat(detector_name: str, req: ObjectDetectRequest):
         raise
     except Exception as exc:
         logger.exception("Error processing object detection HTTP message")
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @http_router.get("/object-detect/models")

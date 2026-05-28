@@ -46,6 +46,12 @@ class EmotionPerception(PerceptionBase[EmotionPerceptionSession]):
         self._face_detector: FaceDetector | None = None
         self._running: bool = False
 
+    @property
+    def labels(self) -> list[str]:
+        if self._emotion_recognizer is None:
+            return []
+        return self._emotion_recognizer.class_names
+
     @override
     async def start(self) -> None:
         if self._running:

@@ -28,7 +28,6 @@ from dlserver.routes.facial_emotion import ws_router as emotion_ws_router
 from dlserver.routes.health import router as health_router
 from dlserver.routes.object import http_router as object_http_router
 from dlserver.routes.object import ws_router as object_ws_router
-from dlserver.routes.pose import http_router as pose_http_router
 from dlserver.routes.pose import ws_router as pose_ws_router
 from dlserver.utils.state import (
     get_action_model,
@@ -179,7 +178,7 @@ app.include_router(
 )
 app.include_router(audio_emotion_router, prefix="/lelamp/api/dl", dependencies=[Depends(verify_api_key)])
 app.include_router(pose_ws_router, prefix="/lelamp/api/dl")
-app.include_router(pose_http_router, prefix="/lelamp/api/dl", dependencies=[Depends(verify_api_key)])
+
 
 # Object detection — /api/dl/ prefix (backward-compatible with go2)
 app.include_router(object_ws_router, prefix="/api/dl")

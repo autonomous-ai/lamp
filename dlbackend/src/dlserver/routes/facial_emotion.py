@@ -88,6 +88,15 @@ async def emotion_analysis_ws(websocket: WebSocket):
         logger.info("Facial emotion analysis WebSocket disconnected")
 
 
+@http_router.get("/emotion-labels")
+async def list_fer_labels():
+    """Return the ordered label list for the active facial emotion model."""
+    emotion_model = get_emotion_model()
+    if emotion_model is None or not emotion_model.is_ready():
+        raise HTTPException(status_code=503, detail="Facial emotion model not loaded")
+    return {"labels": emotion_model.labels}
+
+
 @http_router.post("/emotion-recognize", response_model=EmotionRecognizeResponse)
 async def emotion_recognize(req: EmotionRecognizeRequest):
     """Single-shot emotion recognition from a pre-cropped face image."""
@@ -119,4 +128,4 @@ async def emotion_recognize(req: EmotionRecognizeRequest):
         raise
     except Exception as exc:
         logger.exception("Error processing facial emotion HTTP message")
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

@@ -34,7 +34,7 @@ async def recognize_emotion(req: RecognizeEmotionRequest):
         raise
     except Exception as exc:
         logger.exception("Error processing audio emotion HTTP message")
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/ser/labels", response_model=LabelsResponse)
