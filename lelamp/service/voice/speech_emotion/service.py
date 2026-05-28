@@ -132,7 +132,7 @@ class SpeechEmotionService:
         flush_s: float = _FLUSH_S,
         dedup_window_s: float = _DEDUP_WINDOW_S,
         min_audio_s: float = _MIN_AUDIO_S,
-        lumi_url: str = _LAMP_URL,
+        lamp_url: str = _LAMP_URL,
         queue_maxsize: int = DEFAULT_QUEUE_MAXSIZE,
     ):
         self._recognizer: BaseSpeechEmotionRecognizer = (
@@ -141,7 +141,7 @@ class SpeechEmotionService:
         self._flush_s: float = flush_s
         self._dedup_window_s: float = dedup_window_s
         self._min_audio_s: float = min_audio_s
-        self._lumi_url: str = lumi_url
+        self._lamp_url: str = lamp_url
 
         # mutable state — guarded by _lock
         self._lock: threading.RLock = threading.RLock()
@@ -162,7 +162,7 @@ class SpeechEmotionService:
                 "lumi_url=%s recognizer=%s",
                 flush_s, dedup_window_s, min_audio_s,
                 CONFIDENCE_THRESHOLD_BY_LABEL, DEFAULT_CONFIDENCE_THRESHOLD,
-                self._lumi_url, type(self._recognizer).__name__,
+                self._lamp_url, type(self._recognizer).__name__,
             )
         else:
             logger.warning(
@@ -411,7 +411,7 @@ class SpeechEmotionService:
         Same shape as voice_service._send_to_lumi but carries `current_user`
         explicitly so the Lamp sensing handler doesn't have to look it up.
         """
-        if not self._lumi_url:
+        if not self._lamp_url:
             logger.warning(
                 "[speech_emotion] _send_to_lumi skipped — empty lumi_url"
             )
@@ -423,12 +423,12 @@ class SpeechEmotionService:
         }
         logger.info(
             "[speech_emotion] POST -> %s payload.user=%r payload.type=%s",
-            self._lumi_url, user, SENSING_EVENT_TYPE,
+            self._lamp_url, user, SENSING_EVENT_TYPE,
         )
         max_retries = 3
         for attempt in range(1, max_retries + 1):
             try:
-                resp = requests.post(self._lumi_url, json=payload, timeout=5)
+                resp = requests.post(self._lamp_url, json=payload, timeout=5)
             except requests.ConnectionError as e:
                 if attempt < max_retries:
                     logger.warning(
