@@ -21,7 +21,7 @@
 - `livekit-agents`, `openai` dependencies — replaced by OpenClaw
 - `calibrate.py`, `record.py`, `replay.py` — CLI tools, not imported by server
 
-## What we changed (Lumi-only additions to animation_service.py)
+## What we changed (Lamp-only additions to animation_service.py)
 
 - `bus_lock` — camera + servo share serial bus, need serialization
 - `freeze/unfreeze` — pause servo writes during camera capture
@@ -38,7 +38,7 @@
 2. **Do NOT add software joint limits** — servo firmware + calibration handle range safety at hardware level
 3. **Do NOT regenerate upstream recordings** — teleop recordings are natural, math-generated ones are worse
 4. **Do NOT add per-frame processing** (clamp, transform) to the playback loop — send CSV values directly
-5. **Only add code Lumi actually needs** — bus_lock, freeze, move_to. Don't touch motion core logic
+5. **Only add code Lamp actually needs** — bus_lock, freeze, move_to. Don't touch motion core logic
 
 ## How to sync
 

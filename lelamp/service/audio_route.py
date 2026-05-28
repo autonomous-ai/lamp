@@ -167,7 +167,7 @@ def route_to_bluetooth_pa(
             _swap_voice(pulse_sd_index, None)
         else:
             # A2DP-only headset → keep the lamp mic for STT so the user can
-            # still talk to Lumi while listening through the headset.
+            # still talk to Lamp while listening through the headset.
             _swap_voice(_LAMP_IN_IDX, _LAMP_ALSA_IN)
         _current_label = f"bt:{mac}"
 

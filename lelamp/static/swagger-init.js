@@ -1,9 +1,9 @@
 // External Swagger UI initializer. Lives outside the HTML so the response
-// body has no inline <script>, letting Lumi nginx keep `script-src 'self'`
+// body has no inline <script>, letting Lamp nginx keep `script-src 'self'`
 // without `'unsafe-inline'`.
 //
 // Relative paths so the page works in two contexts:
-//   - via Lumi proxy iframe (/api/hardware/docs) → fetches ./openapi.json
+//   - via Lamp proxy iframe (/api/hardware/docs) → fetches ./openapi.json
 //     which resolves to /api/hardware/openapi.json
 //   - direct LeLamp loopback (/docs via SSH tunnel) → fetches ./openapi.json
 //     which resolves to /openapi.json on LeLamp
