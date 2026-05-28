@@ -207,7 +207,7 @@ func (s *Service) runWSConn(ctx context.Context, handler domain.AgentEventHandle
 			slog.Info("session key from connect", "component", "openclaw", "sessionKey", sk)
 		}
 		// Compute the OpenClaw process start time so the monitor UI can show the
-		// gateway's true age, not Lumi's WS connection age. Try both known
+		// gateway's true age, not Lamp's WS connection age. Try both known
 		// locations of uptimeMs in the hello-ok payload.
 		upMs := connectResult.Payload.UptimeMs
 		if upMs <= 0 {
@@ -270,7 +270,7 @@ func (s *Service) runWSConn(ctx context.Context, handler domain.AgentEventHandle
 	}
 
 	// Subscribe to session events so we receive tool events for all turns
-	// (including Telegram-initiated turns where Lumi didn't call chat.send).
+	// (including Telegram-initiated turns where Lamp didn't call chat.send).
 	subReq := map[string]interface{}{
 		"type":   "req",
 		"id":     fmt.Sprintf("sub-%d", s.reqCounter.Add(1)),

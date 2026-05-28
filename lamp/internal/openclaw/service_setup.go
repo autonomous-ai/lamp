@@ -551,7 +551,7 @@ func (s *Service) RefreshModelsConfig() error {
 	// Conditionally sync agents.defaults.model.primary. Only overwrite it when
 	// the current provider is autonomous — if the user switched OpenClaw to a
 	// non-autonomous provider (e.g. openai/gpt-4) externally, we must not
-	// silently reset it back to the Lumi-managed model.
+	// silently reset it back to the Lamp-managed model.
 	currentPrimary := extractPrimaryModel(configData)
 	prov, _, _ := splitProviderModel(currentPrimary)
 	var flagPrimary string // value written into the Lumi-write flag

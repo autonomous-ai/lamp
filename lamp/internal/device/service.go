@@ -365,7 +365,7 @@ func (s *Service) VerifyAdminPassword(password string) error {
 // UpdateConfig saves updated config fields. All fields are optional; empty strings are skipped.
 // Side effects per field cluster: wifi → connect-wifi (wpa_supplicant reload),
 // llm_model/thinking → openclaw, stt_language → openclaw NewSession + lelamp,
-// voice-pipeline fields → lelamp. Other fields persist only; restart Lumi for full effect.
+// voice-pipeline fields → lelamp. Other fields persist only; restart Lamp for full effect.
 func (s *Service) UpdateConfig(data domain.UpdateConfigRequest) error {
 	// bcrypt is CPU-intensive; compute before acquiring the config lock.
 	var adminHash string
@@ -555,7 +555,7 @@ func (s *Service) UpdateConfig(data domain.UpdateConfigRequest) error {
 			}
 		}()
 	}
-	// Sync primary model into openclaw.json (Lumi → OpenClaw direction).
+	// Sync primary model into openclaw.json (Lamp → OpenClaw direction).
 	// config.mu is released by WithLockSave above; openclaw calls now acquire
 	// primarySyncMu without risk of deadlock (consistent lock order).
 	// When thinking also changed, RefreshModelsConfig handles primary update +

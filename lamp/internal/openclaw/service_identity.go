@@ -117,7 +117,7 @@ func (s *Service) WatchIdentity(ctx context.Context) {
 func parseIdentityName(content string) string {
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
-		// Match: - **Name:** Lumi  or  **Name:** Lumi
+		// Match: - **Name:** Lamp  or  **Name:** Lamp
 		lower := strings.ToLower(line)
 		idx := strings.Index(lower, "**name:**")
 		if idx < 0 {
