@@ -24,9 +24,14 @@ const (
 	skillsBaseURL = "https://storage.googleapis.com/s3-autonomous-upgrade-3/lumi/skills"
 	hooksBaseURL  = "https://storage.googleapis.com/s3-autonomous-upgrade-3/lumi/hooks"
 
-	lumiMandatoryMarker = "<!-- LUMI DO NOT REMOVE -->"
+	lampMandatoryMarker = "<!-- LAMP DO NOT REMOVE -->"
+	// legacyLumiMarker is the previous marker. Kept so devices that ran
+	// onboarding before the rebrand still get their old block stripped on the
+	// next boot (otherwise the new LAMP block gets injected alongside the old
+	// LUMI block, leaving a junk duplicate in AGENTS.md / SOUL.md / HEARTBEAT.md).
+	legacyLumiMarker = "<!-- LUMI DO NOT REMOVE -->"
 
-	agentsMDBlock = `<!-- LUMI DO NOT REMOVE -->
+	agentsMDBlock = `<!-- LAMP DO NOT REMOVE -->
 **Hooks** under ` + "`hooks/`" + ` are runtime triggers (handler.ts) that fire automatically on ` + "`message:preprocessed`" + ` before your turn begins. Their HOOK.md files are docstrings describing already-executed handlers — do NOT read them. Skipping HOOK.md reads removes one round-trip per turn with zero behavior change (turn-gate sets busy state, emotion-acknowledge fires the thinking emotion — both server-side, both unconditional).
 
 **MANDATORY (skills):** Before any skill-driven action, determine the skill scope without doing broad filesystem scans. For ordinary chat, simple Q&A, or meta discussion with no action/event/hardware behavior, do NOT read a SKILL.md — answer normally.
@@ -55,7 +60,7 @@ Follow the instructions in whichever file you read.
 
 ---`
 
-	heartbeatMDBlock = `<!-- LUMI DO NOT REMOVE -->
+	heartbeatMDBlock = `<!-- LAMP DO NOT REMOVE -->
 **Knowledge synthesis (once daily at 21:00):** If current time is >= 21:00 AND you have NOT already done this today (check ` + "`KNOWLEDGE.md`" + ` for today's date header), read today's ` + "`memory/YYYY-MM-DD.md`" + `, extract important insights, and append them to ` + "`KNOWLEDGE.md`" + ` under a ` + "`## YYYY-MM-DD`" + ` header. Only write new learnings — do not repeat what is already there. If already done today or before 21:00, skip silently.
 
 ---`
@@ -298,7 +303,7 @@ func (s *Service) ensureAgentsMDBlock() (bool, error) {
 	}
 
 	// Remove old block (with or without marker) before injecting current version
-	if strings.Contains(text, lumiMandatoryMarker) {
+	if strings.Contains(text, lampMandatoryMarker) || strings.Contains(text, legacyLumiMarker) {
 		text = stripMarkedBlock(text)
 	} else {
 		text = stripLegacyMandatoryBlock(text)
@@ -343,7 +348,7 @@ func (s *Service) ensureSoulMDBlock() (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("read embedded SOUL.md: %w", err)
 	}
-	soulMDBlock := lumiMandatoryMarker + "\n" + strings.TrimSpace(string(coreContent)) + "\n---"
+	soulMDBlock := lampMandatoryMarker + "\n" + strings.TrimSpace(string(coreContent)) + "\n---"
 
 	content, err := os.ReadFile(soulFile)
 	if err != nil && !os.IsNotExist(err) {
@@ -361,7 +366,7 @@ func (s *Service) ensureSoulMDBlock() (bool, error) {
 
 	// Strip any prior marker block first so the legacy-seed heuristic below
 	// only sees whatever was below the closing `---`.
-	if strings.Contains(text, lumiMandatoryMarker) {
+	if strings.Contains(text, lampMandatoryMarker) || strings.Contains(text, legacyLumiMarker) {
 		text = stripMarkedBlock(text)
 	}
 
@@ -429,7 +434,7 @@ func (s *Service) ensureHeartbeatMDBlock() (bool, error) {
 	}
 
 	// Remove old block if marker exists, then inject current version
-	if strings.Contains(text, lumiMandatoryMarker) {
+	if strings.Contains(text, lampMandatoryMarker) || strings.Contains(text, legacyLumiMarker) {
 		text = stripMarkedBlock(text)
 	}
 
@@ -443,14 +448,15 @@ func (s *Service) ensureHeartbeatMDBlock() (bool, error) {
 	return true, nil
 }
 
-// stripMarkedBlock removes the block between <!-- LUMI DO NOT REMOVE --> and the next --- separator.
+// stripMarkedBlock removes the block between the marker (<!-- LAMP DO NOT REMOVE -->
+// or the legacy <!-- LUMI DO NOT REMOVE -->) and the next --- separator.
 func stripMarkedBlock(text string) string {
 	lines := strings.Split(text, "\n")
 	var cleaned []string
 	skip := false
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if trimmed == lumiMandatoryMarker {
+		if trimmed == lampMandatoryMarker || trimmed == legacyLumiMarker {
 			skip = true
 			continue
 		}
@@ -467,7 +473,7 @@ func stripMarkedBlock(text string) string {
 }
 
 // stripLegacyMandatoryBlock removes the old MANDATORY block that was injected
-// before the <!-- LUMI DO NOT REMOVE --> marker was introduced.
+// before any marker (<!-- LAMP DO NOT REMOVE -->, formerly <!-- LUMI DO NOT REMOVE -->) was introduced.
 func stripLegacyMandatoryBlock(text string) string {
 	lines := strings.Split(text, "\n")
 	var cleaned []string
