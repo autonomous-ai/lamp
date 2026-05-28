@@ -127,9 +127,8 @@ func labelForLumiInternal(text string) string {
 }
 
 // isChannelOriginatedRun returns true only when any of the given runIDs was
-// synthesised by Lumi from a real external channel user message — currently
-// "tg-<msgID>" created in the session.message handler when OpenClaw forwards
-// a Telegram user turn (see handler_events.go ~line 1157).
+// synthesised by Lumi from a real external channel user message — "tg-<msgID>"
+// for Telegram and "discord-<msgID>" for Discord turns.
 //
 // This is the positive-evidence signal for "real channel user", replacing the
 // older "anything NOT lumi-chat-*" default which mis-classified UUID runs
@@ -141,7 +140,7 @@ func labelForLumiInternal(text string) string {
 // runID before this helper recognises it.
 func isChannelOriginatedRun(runIDs ...string) bool {
 	for _, r := range runIDs {
-		if strings.HasPrefix(r, "tg-") {
+		if strings.HasPrefix(r, "tg-") || strings.HasPrefix(r, "discord-") {
 			return true
 		}
 	}

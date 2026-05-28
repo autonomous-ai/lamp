@@ -1325,7 +1325,12 @@ func (h *AgentHandler) HandleEvent(ctx context.Context, evt domain.WSEvent) erro
 		isTelegramChannel := strings.HasPrefix(sm.SessionKey, "agent:main:telegram:") ||
 			sm.Session.Origin.Provider == "telegram" ||
 			sm.Session.DeliveryContext.Channel == "telegram"
-		if !isTelegramChannel {
+		// Discord uses session key prefix "agent:main:discord:" and origin.provider "discord".
+		// OpenClaw delivers Discord replies itself (no Lumi workaround needed); lamp still
+		// needs to process the turn to fire HW markers and clear the busy flag.
+		isDiscordChannel := strings.HasPrefix(sm.SessionKey, "agent:main:discord:") ||
+			sm.Session.Origin.Provider == "discord"
+		if !isTelegramChannel && !isDiscordChannel {
 			break
 		}
 		// Skip if the agent path is already handling this session — cron
@@ -1417,9 +1422,17 @@ func (h *AgentHandler) HandleEvent(ctx context.Context, evt domain.WSEvent) erro
 		text := extractMessageContentText(sm.Message.Content)
 
 		if sm.Message.Role == "user" {
-			runID := "tg-" + sm.MessageID
-			if runID == "tg-" {
-				runID = fmt.Sprintf("tg-%s-%d", sm.SessionID, sm.MessageSeq)
+			var runID string
+			if isDiscordChannel {
+				runID = "discord-" + sm.MessageID
+				if runID == "discord-" {
+					runID = fmt.Sprintf("discord-%s-%d", sm.SessionID, sm.MessageSeq)
+				}
+			} else {
+				runID = "tg-" + sm.MessageID
+				if runID == "tg-" {
+					runID = fmt.Sprintf("tg-%s-%d", sm.SessionID, sm.MessageSeq)
+				}
 			}
 			senderLabel := sm.Session.DisplayName
 			if senderLabel == "" {
@@ -1432,9 +1445,13 @@ func (h *AgentHandler) HandleEvent(ctx context.Context, evt domain.WSEvent) erro
 			// signals tried in order: conversation metadata block injected
 			// into content (most reliable when present), then senderLabel
 			// regex (always available since OpenClaw populates session info).
-			telegramID := extractTelegramChatID(text)
-			if telegramID == "" {
-				telegramID = extractTelegramIDFromSenderLabel(senderLabel)
+			// Discord: OpenClaw handles delivery itself — no telegramID needed.
+			var telegramID string
+			if isTelegramChannel {
+				telegramID = extractTelegramChatID(text)
+				if telegramID == "" {
+					telegramID = extractTelegramIDFromSenderLabel(senderLabel)
+				}
 			}
 			h.channelTurnMu.Lock()
 			h.channelTurns[sm.SessionKey] = &channelTurnState{
@@ -1607,9 +1624,13 @@ func (h *AgentHandler) HandleEvent(ctx context.Context, evt domain.WSEvent) erro
 					"telegram_id": telegramID,
 					"source":      "channel_turn",
 				}, runID)
-			} else {
+			} else if isTelegramChannel {
 				slog.Warn("channel turn has no telegram_id — reply not delivered",
 					"component", "agent", "run_id", runID, "sender_label", "elided")
+			} else {
+				// Discord (and future channels): OpenClaw delivers the reply itself.
+				slog.Info("channel turn reply delivered by OpenClaw", "component", "agent",
+					"run_id", runID, "channel", sm.Session.Origin.Provider)
 			}
 		}
 		// Drop the channelRuns marker — turn is finished.
