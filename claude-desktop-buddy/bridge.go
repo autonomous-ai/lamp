@@ -13,17 +13,17 @@ import (
 // buddy state LED cues so the lamp visibly speaks "Claude".
 var claudeBrand = [3]int{193, 95, 60}
 
-// Bridge maps buddy state changes to LeLamp and Lumi HTTP calls.
+// Bridge maps buddy state changes to LeLamp and Lamp HTTP calls.
 type Bridge struct {
 	lelampURL string
-	lumiURL   string
+	lampURL   string
 	client    *http.Client
 }
 
-func NewBridge(lelampURL, lumiURL string) *Bridge {
+func NewBridge(lelampURL, lampURL string) *Bridge {
 	return &Bridge{
 		lelampURL: lelampURL,
-		lumiURL:   lumiURL,
+		lampURL:   lampURL,
 		client:    &http.Client{Timeout: 5 * time.Second},
 	}
 }
@@ -136,9 +136,9 @@ func (b *Bridge) displayEyesMode() {
 	b.post(b.lelampURL+"/display/eyes-mode", nil)
 }
 
-// --- Lumi calls (port 5000) ---
+// --- Lamp calls (port 5000) ---
 
-// postBuddyState sends buddy state to Lumi monitor bus.
+// postBuddyState sends buddy state to Lamp monitor bus.
 func (b *Bridge) postBuddyState(state BuddyState, hb *Heartbeat) {
 	detail := map[string]interface{}{
 		"state": string(state),
@@ -148,16 +148,16 @@ func (b *Bridge) postBuddyState(state BuddyState, hb *Heartbeat) {
 		detail["hint"] = hb.Prompt.Hint
 	}
 
-	b.post(b.lumiURL+"/api/monitor/event", map[string]interface{}{
+	b.post(b.lampURL+"/api/monitor/event", map[string]interface{}{
 		"type":    "buddy_state",
 		"summary": fmt.Sprintf("buddy: %s", state),
 		"detail":  detail,
 	})
 }
 
-// postSensingEvent sends approval event to Lumi sensing pipeline.
+// postSensingEvent sends approval event to Lamp sensing pipeline.
 func (b *Bridge) postSensingEvent(prompt *Prompt) {
-	b.post(b.lumiURL+"/api/sensing/event", map[string]interface{}{
+	b.post(b.lampURL+"/api/sensing/event", map[string]interface{}{
 		"type":    "buddy_approval",
 		"message": fmt.Sprintf("Claude Desktop needs approval: %s on %s [prompt_id:%s]", prompt.Tool, prompt.Hint, prompt.ID),
 	})
@@ -213,7 +213,7 @@ func (b *Bridge) speakTTS(text string) {
 	})
 }
 
-// OnEvent forwards a parsed Event (chat turn etc.) to Lumi so use cases
+// OnEvent forwards a parsed Event (chat turn etc.) to Lamp so use cases
 // like "speak Claude's reply" or "show recent message on display" can
 // subscribe to /api/monitor/event with type=buddy_event. The bridge is
 // purely fire-and-forget; downstream consumers decide whether to do
@@ -222,7 +222,7 @@ func (b *Bridge) OnEvent(evt *Event) {
 	if evt == nil {
 		return
 	}
-	b.post(b.lumiURL+"/api/monitor/event", map[string]interface{}{
+	b.post(b.lampURL+"/api/monitor/event", map[string]interface{}{
 		"type":    "buddy_event",
 		"summary": fmt.Sprintf("buddy %s %s", evt.Evt, evt.Role),
 		"detail": map[string]interface{}{
