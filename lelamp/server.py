@@ -317,12 +317,12 @@ async def lifespan(app: FastAPI):
     lumi_config_path = LAMP_CONFIG_PATH
     try:
         with open(lumi_config_path) as f:
-            lumi_cfg = json.load(f)
-        dgk = lumi_cfg.get("deepgram_api_key", "")
-        llm_key = lumi_cfg.get("llm_api_key", "")
-        llm_url = lumi_cfg.get("llm_base_url", "")
-        voice = lumi_cfg.get("tts_voice", "") or TTS_VOICE
-        tts_provider = lumi_cfg.get("tts_provider", PROVIDER_OPENAI)
+            lamp_cfg = json.load(f)
+        dgk = lamp_cfg.get("deepgram_api_key", "")
+        llm_key = lamp_cfg.get("llm_api_key", "")
+        llm_url = lamp_cfg.get("llm_base_url", "")
+        voice = lamp_cfg.get("tts_voice", "") or TTS_VOICE
+        tts_provider = lamp_cfg.get("tts_provider", PROVIDER_OPENAI)
         if llm_key and llm_url and TTSService and not state.tts_service:
             state.tts_service = TTSService(
                 api_key=llm_key,
@@ -332,7 +332,7 @@ async def lifespan(app: FastAPI):
                 output_device=state.audio_output_device,
                 voice=voice,
                 speed=TTS_SPEED,
-                instructions=lumi_cfg.get("tts_instructions", "") or TTS_INSTRUCTIONS or None,
+                instructions=lamp_cfg.get("tts_instructions", "") or TTS_INSTRUCTIONS or None,
                 on_speak_start=state._on_tts_speak_start,
                 on_speak_end=state._on_tts_speak_end,
                 provider=tts_provider,
@@ -344,7 +344,7 @@ async def lifespan(app: FastAPI):
                 state.tts_service.available,
             )
         if VoiceService and not state.voice_service:
-            agent_name = state._read_agent_name(lumi_cfg)
+            agent_name = state._read_agent_name(lamp_cfg)
             wake_words = state._build_wake_words(agent_name)
             stt_provider = None
             logger.info("STT selection: deepgram_key=%s, DeepgramSTT=%s, AutonomousSTT=%s, agent=%s",
@@ -355,8 +355,8 @@ async def lifespan(app: FastAPI):
                     dg_keywords.append(" ".join(agent_name) + ":2")
                 stt_provider = DeepgramSTT(api_key=dgk, keywords=dg_keywords)
             elif llm_key and llm_url and AutonomousSTT:
-                stt_model = (lumi_cfg.get("stt_model") or "").strip() or None
-                stt_language = (lumi_cfg.get("stt_language") or "").strip() or None
+                stt_model = (lamp_cfg.get("stt_model") or "").strip() or None
+                stt_language = (lamp_cfg.get("stt_language") or "").strip() or None
                 stt_kwargs = {}
                 if stt_model:
                     stt_kwargs["model"] = stt_model
