@@ -261,7 +261,7 @@ func (s *Service) SetupAgent(data domain.SetupRequest) error {
 	slog.Debug("ensuring logging defaults", "component", "openclaw")
 	loggingMap := ensureMap(configData, "logging")
 	loggingMap["consoleStyle"] = "pretty"
-	loggingMap["file"] = "/var/log/openclaw/lumi.log"
+	loggingMap["file"] = "/var/log/openclaw/lamp.log"
 	loggingMap["level"] = "debug"
 	loggingMap["consoleLevel"] = "debug"
 	configData["logging"] = loggingMap

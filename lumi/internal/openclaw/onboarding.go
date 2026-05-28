@@ -519,7 +519,7 @@ func (s *Service) ensureLoggingConfig() (bool, error) {
 
 	configData["logging"] = map[string]interface{}{
 		"consoleStyle": "pretty",
-		"file":         "/var/log/openclaw/lumi.log",
+		"file":         "/var/log/openclaw/lamp.log",
 		"level":        "debug",
 		"consoleLevel": "debug",
 	}
