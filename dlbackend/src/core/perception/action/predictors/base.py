@@ -20,6 +20,7 @@ from core.perception.action.constants import RESOURCES_DIR
 from core.perception.base import PredictorBase
 from core.utils.common import get_or_default
 from core.utils.compute import softmax
+from core.utils.files import ensure_downloaded
 from core.utils.runtime import prepare_ort_session
 
 
@@ -27,6 +28,7 @@ class HumanActionRecognizer(PredictorBase[Video, RawHumanActionDetection]):
     """Base interface for all action recognition ONNX models."""
 
     DEFAULT_MODEL_PATH: Path | None = None
+    DEFAULT_REMOTE_URL: str | None = None
     DEFAULT_CLASSES_PATH: Path = RESOURCES_DIR / "kinect_classes.txt"
     DEFAULT_WHITELIST_PATH: Path | None = RESOURCES_DIR / "white_list.txt"
 
@@ -39,6 +41,7 @@ class HumanActionRecognizer(PredictorBase[Video, RawHumanActionDetection]):
     def __init__(
         self,
         model_path: Path | None = None,
+        remote_url: str | None = None,
         classes_path: Path | None = None,
         whitelist_path: Path | None = None,
         max_frames: int | None = None,
@@ -51,6 +54,7 @@ class HumanActionRecognizer(PredictorBase[Video, RawHumanActionDetection]):
             raise RuntimeError("model_path are not allowed to be None")
 
         self._model_path: Path = model_path
+        self._remote_url: str | None = get_or_default(remote_url, self.DEFAULT_REMOTE_URL)
         self._classes_path: Path = get_or_default(classes_path, self.DEFAULT_CLASSES_PATH)
         self._whitelist_path: Path | None = get_or_default(
             whitelist_path, self.DEFAULT_WHITELIST_PATH
@@ -99,6 +103,7 @@ class HumanActionRecognizer(PredictorBase[Video, RawHumanActionDetection]):
             self._logger.info("Already running")
             return
 
+        self._model_path = ensure_downloaded(self._model_path, remote=self._remote_url)
         self._logger.info("Loading model from %s", self._model_path)
         self._session = prepare_ort_session(self._model_path)
         self._class_names, self._default_class_mask = self._load_classes(

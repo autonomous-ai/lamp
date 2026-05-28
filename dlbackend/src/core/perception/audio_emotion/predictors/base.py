@@ -23,6 +23,7 @@ from core.perception.audio.processors.utils import AudioProcessorFactory
 from core.perception.base import PredictorBase
 from core.utils.common import get_or_default
 from core.utils.compute import softmax
+from core.utils.files import ensure_downloaded
 from core.utils.runtime import prepare_ort_session
 
 
@@ -34,6 +35,7 @@ class AudioEmotionRecognizer(PredictorBase[Audio, RawAudioEmotionDetection]):
     """
 
     DEFAULT_MODEL_PATH: Path | None = None
+    DEFAULT_REMOTE_URL: str | None = None
     DEFAULT_LABELS_PATH: Path | None = None
     DEFAULT_SAMPLE_RATE: int = 16000
     DEFAULT_PROCESSOR_FACTORY: AudioProcessorFactory = AudioProcessorFactory(
@@ -50,6 +52,7 @@ class AudioEmotionRecognizer(PredictorBase[Audio, RawAudioEmotionDetection]):
     def __init__(
         self,
         model_path: Path | None = None,
+        remote_url: str | None = None,
         labels_path: Path | None = None,
         processor_factory: AudioProcessorFactory | None = None,
         sample_rate: int | None = None,
@@ -65,6 +68,7 @@ class AudioEmotionRecognizer(PredictorBase[Audio, RawAudioEmotionDetection]):
             raise RuntimeError("labels_path must not be None")
 
         self._model_path: Path = model_path
+        self._remote_url: str | None = get_or_default(remote_url, self.DEFAULT_REMOTE_URL)
         self._labels_path: Path = labels_path
         self._processor_factory: AudioProcessorFactory = get_or_default(
             processor_factory, self.DEFAULT_PROCESSOR_FACTORY
@@ -90,6 +94,7 @@ class AudioEmotionRecognizer(PredictorBase[Audio, RawAudioEmotionDetection]):
             self._logger.info("Already running")
             return
 
+        self._model_path = ensure_downloaded(self._model_path, remote=self._remote_url)
         self._processor = self._processor_factory.create()
         self._processor.start()
         self._logger.info("Loading model from %s", self._model_path)

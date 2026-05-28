@@ -1,6 +1,6 @@
 # Web UI — Lumi Monitor Dashboard
 
-## Last updated: 2026-05-06
+## Last updated: 2026-05-27
 
 ---
 
@@ -339,7 +339,17 @@ def get_led_color():
 
 ---
 
-## 8. Build & Deploy
+## 8. Global Source Footer (GPL v3 §6 Compliance)
+
+`lumi/web/src/components/SourceFooter.tsx` is a tiny `position: fixed` link mounted at the App root (`App.tsx`, outside `<Routes>`), so it appears on every page — Setup, Login, Monitor, EditConfig, GwConfig.
+
+Renders at `bottom: 6px, right: 8px` with monospace 10px text and opacity `0.7` — visible to anyone who looks for it without blocking form action buttons (Back / Next / Setup / Save) or scroll. Link target: `https://github.com/autonomous-ai/ai-lamp-lumi`.
+
+Reason it exists: LeLamp Python (`lelamp/`) ships GPL v3, baked into the board image. GPL §6 requires recipients of the binary to be informed where corresponding source lives. The footer satisfies the "written offer" alternative by exposing the public repo URL on the device itself. See also `scripts/tag-release.sh` + `Makefile:tag-release` for the version → commit traceability piece.
+
+---
+
+## 9. Build & Deploy
 
 ```bash
 # Build production

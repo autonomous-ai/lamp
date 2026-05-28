@@ -11,11 +11,11 @@
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
-    <string>network.autonomous.ai.lumi-buddy</string>
+    <string>network.autonomous.ai.lamp-buddy</string>
     <key>CFBundleName</key>
-    <string>Lumi Buddy</string>
+    <string>Lamp Buddy</string>
     <key>CFBundleDisplayName</key>
-    <string>Lumi Buddy</string>
+    <string>Lamp Buddy</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>
@@ -27,7 +27,7 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Lumi Buddy uses Apple Events to quit applications when your Lumi lamp issues a close-app command.</string>
+    <string>Lamp Buddy uses Apple Events to quit applications when your Lamp issues a close-app command.</string>
     <key>NSHumanReadableCopyright</key>
     <string>© Autonomous</string>
 </dict>

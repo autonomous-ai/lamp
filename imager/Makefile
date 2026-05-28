@@ -1,12 +1,42 @@
+# =============================================================================
+# imager Makefile
+# =============================================================================
+# Targets:
+#   make build                 — OrangePi (Armbian) golden image (default, skeleton)
+#   make TARGET=rpi build      — Raspberry Pi 5 (RPi OS) golden image
+#   make sd-card-list          — list disks for flashing
+#   make sd-card-test DISK=N   — test SD card with 100 MB dd
+#   make sd-card-flash DISK=N  — flash the default-target image to /dev/diskN
+#   make sd-card-flash TARGET=rpi DISK=N — flash RPi image instead
+# =============================================================================
+
+TARGET ?= opi
+BUILD_SCRIPT_rpi := build.sh
+BUILD_SCRIPT_opi := build-orangepi.sh
+BUILD_SCRIPT := $(BUILD_SCRIPT_$(TARGET))
+
+ifndef BUILD_SCRIPT
+$(error Unknown TARGET=$(TARGET). Supported: rpi, opi)
+endif
+
+# Image filename per target so RPi + OPi builds don't clobber each other.
+# OPi build produces .img.xz (compressed); RPi build produces raw .img.
+IMG_FILE_rpi := golden.img
+IMG_FILE_opi := golden-opi.img.xz
+IMG_FILE := $(IMG_FILE_$(TARGET))
+
 build:
-	# Build the Docker build environment
+	# Build the Docker build environment (shared for both targets)
 	docker build -t pi-builder .
 
-	# Run it — needs --privileged for losetup/mount
+	# Run it — needs --privileged for losetup/mount.
+	# BUILD_SCRIPT controls which builder runs inside the container.
 	docker run --rm \
 	--privileged \
 	-v ./output:/output \
-	pi-builder
+	-v ./input:/input \
+	-e BUILD_SCRIPT=$(BUILD_SCRIPT) \
+	pi-builder /work/$(BUILD_SCRIPT)
 
 sd-card-list:
 	diskutil list
@@ -29,9 +59,125 @@ sd-card-flash:
 ifndef DISK
 	$(error DISK is required. Usage: make sd-card-flash DISK=4)
 endif
-	@echo "==> Flashing golden.img to /dev/disk$(DISK)..."
+	@echo "==> Flashing ./output/$(IMG_FILE) to /dev/disk$(DISK)..."
 	diskutil unmountDisk force /dev/disk$(DISK)
-	sudo dd if=./output/golden.img of=/dev/disk$(DISK) bs=64m conv=fsync status=progress
+	@# Compressed (.xz) images decompress on the fly; raw .img dd directly.
+	@if [ "$(suffix $(IMG_FILE))" = ".xz" ]; then \
+		xz -dc ./output/$(IMG_FILE) | sudo dd of=/dev/disk$(DISK) bs=64m conv=fsync status=progress; \
+	else \
+		sudo dd if=./output/$(IMG_FILE) of=/dev/disk$(DISK) bs=64m conv=fsync status=progress; \
+	fi
 	sync
 	diskutil eject /dev/disk$(DISK) 2>/dev/null || true
 	@echo "==> Flash complete"
+
+# ── upload — push built image + release note to GCS, version-stamped ─────
+# Versioned filename: golden-<target>-<UTC-timestamp>-<git-sha>.img.xz
+# Bucket + path mirror the OTA artifact layout (s3-autonomous-upgrade-3/lumi/).
+GCS_BUCKET := s3-autonomous-upgrade-3
+GCS_PATH   := lumi/imager/output
+GCS_LEDGER := lumi/imager/RELEASES.md
+VERSION    := $(shell date -u +%Y%m%d-%H%M%S)-$(shell git -C .. rev-parse --short HEAD 2>/dev/null || echo nogit)
+TARGET_PREFIX_rpi := golden-rpi
+TARGET_PREFIX_opi := golden-opi
+TARGET_PREFIX := $(TARGET_PREFIX_$(TARGET))
+VERSIONED_BASE := $(TARGET_PREFIX)-$(VERSION)
+VERSIONED_IMG  := $(VERSIONED_BASE)$(if $(filter %.xz,$(IMG_FILE)),.img.xz,.img)
+RELEASE_NOTE   := output/$(VERSIONED_BASE).release.txt
+MANIFEST_FILE  := output/manifest-$(TARGET).json
+
+upload: $(RELEASE_NOTE)
+	@command -v gcloud >/dev/null 2>&1 || { echo "ERROR: gcloud not installed. brew install --cask gcloud-cli"; exit 1; }
+	@echo "==> Uploading image → gs://$(GCS_BUCKET)/$(GCS_PATH)/$(VERSIONED_IMG)"
+	gcloud storage cp output/$(IMG_FILE) gs://$(GCS_BUCKET)/$(GCS_PATH)/$(VERSIONED_IMG)
+	@echo "==> Uploading release note → gs://$(GCS_BUCKET)/$(GCS_PATH)/$(VERSIONED_BASE).release.txt"
+	gcloud storage cp $(RELEASE_NOTE) gs://$(GCS_BUCKET)/$(GCS_PATH)/$(VERSIONED_BASE).release.txt
+	@echo "==> Updating cumulative ledger gs://$(GCS_BUCKET)/$(GCS_LEDGER)"
+	@TMP=$$(mktemp); \
+	if gcloud storage cp gs://$(GCS_BUCKET)/$(GCS_LEDGER) $$TMP 2>/dev/null; then \
+		echo "    (existing ledger fetched, prepending new entry)"; \
+	else \
+		printf "# Lumi Imager Releases\n\nAppend-only history of built images. Newest first.\n\n" > $$TMP; \
+	fi; \
+	NEW=$$(mktemp); \
+	{ awk '/^# Lumi Imager Releases/,/^$$/' $$TMP; cat $(RELEASE_NOTE); echo ""; echo "---"; echo ""; awk 'BEGIN{p=0} /^## /{p=1} p' $$TMP; } > $$NEW; \
+	gcloud storage cp $$NEW gs://$(GCS_BUCKET)/$(GCS_LEDGER); \
+	rm -f $$TMP $$NEW
+	@echo ""
+	@echo "==> DONE. Public URLs:"
+	@echo "    Image:   https://storage.googleapis.com/$(GCS_BUCKET)/$(GCS_PATH)/$(VERSIONED_IMG)"
+	@echo "    Release: https://storage.googleapis.com/$(GCS_BUCKET)/$(GCS_PATH)/$(VERSIONED_BASE).release.txt"
+	@echo "    Ledger:  https://storage.googleapis.com/$(GCS_BUCKET)/$(GCS_LEDGER)"
+	@echo ""
+	@echo "==> Cleaning output/ (set KEEP_OUTPUT=1 to skip)"
+	@if [ -z "$$KEEP_OUTPUT" ]; then \
+		rm -f output/$(IMG_FILE) $(RELEASE_NOTE) $(MANIFEST_FILE); \
+		echo "    Removed: output/$(IMG_FILE)"; \
+		echo "    Removed: $(RELEASE_NOTE)"; \
+		echo "    Removed: $(MANIFEST_FILE)"; \
+	else \
+		echo "    KEEP_OUTPUT set — leaving output/ alone"; \
+	fi
+
+# Release note generated from manifest + image checksums at upload time.
+$(RELEASE_NOTE):
+	@[ -f output/$(IMG_FILE) ] || { echo "ERROR: output/$(IMG_FILE) not found. Run 'make build' first."; exit 1; }
+	@mkdir -p output
+	@echo "==> Generating release note $(RELEASE_NOTE)"
+	@IMG_SHA=$$(shasum -a 256 output/$(IMG_FILE) | awk '{print $$1}'); \
+	IMG_BYTES=$$(stat -f %z output/$(IMG_FILE) 2>/dev/null || stat -c %s output/$(IMG_FILE)); \
+	IMG_SIZE=$$(du -h output/$(IMG_FILE) | awk '{print $$1}'); \
+	GIT_SHA_LONG=$$(git -C .. rev-parse HEAD 2>/dev/null || echo unknown); \
+	GIT_BRANCH=$$(git -C .. rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown); \
+	BUILT_AT=$$(date -u +%Y-%m-%dT%H:%M:%SZ); \
+	{ \
+		echo "## $(VERSIONED_BASE)"; \
+		echo ""; \
+		echo "- Target:        $(TARGET)"; \
+		echo "- Built (UTC):   $$BUILT_AT"; \
+		echo "- Git branch:    $$GIT_BRANCH"; \
+		echo "- Git commit:    $$GIT_SHA_LONG"; \
+		echo "- Image size:    $$IMG_SIZE ($$IMG_BYTES bytes)"; \
+		echo "- sha256:        $$IMG_SHA"; \
+		echo "- Output name:   $(VERSIONED_IMG)"; \
+		echo "- Download:      https://storage.googleapis.com/$(GCS_BUCKET)/$(GCS_PATH)/$(VERSIONED_IMG)"; \
+		if [ -f $(MANIFEST_FILE) ]; then \
+			echo ""; \
+			echo "OTA versions baked at build time:"; \
+			jq -r '.ota_versions | to_entries[] | "- \(.key): \(.value)"' $(MANIFEST_FILE) 2>/dev/null || echo "(could not parse manifest)"; \
+			echo ""; \
+			echo "Source image:"; \
+			jq -r '.source_image | "- file_id: \(.file_id)\n- name:    \(.name)\n- sha256:  \(.sha256)"' $(MANIFEST_FILE) 2>/dev/null || true; \
+			echo ""; \
+			echo "Build config:"; \
+			jq -r '"- openclaw: \(.openclaw_version)\n- out_size: \(.out_img_size)\n- ota_url:  \(.ota_metadata_url)"' $(MANIFEST_FILE) 2>/dev/null || true; \
+		else \
+			echo ""; \
+			echo "(no $(MANIFEST_FILE) — OTA versions not captured this build)"; \
+		fi; \
+	} > $(RELEASE_NOTE)
+	@echo "==> Release note written:"
+	@cat $(RELEASE_NOTE)
+
+upload-source:
+	@[ -f input/orangepi.7z ] || { echo "ERROR: input/orangepi.7z not found"; exit 1; }
+	@command -v gcloud >/dev/null 2>&1 || { echo "ERROR: gcloud not installed"; exit 1; }
+	@echo "==> Mirroring input/orangepi.7z → gs://$(GCS_BUCKET)/lumi/imager/source/$(OPI_FILE_NAME)"
+	gcloud storage cp input/orangepi.7z gs://$(GCS_BUCKET)/lumi/imager/source/$(OPI_FILE_NAME)
+	@echo "==> Public URL (use as OPI_SOURCE_URL):"
+	@echo "    https://storage.googleapis.com/$(GCS_BUCKET)/lumi/imager/source/$(OPI_FILE_NAME)"
+
+OPI_FILE_NAME := Orangepi4pro_1.0.6_debian_bookworm_server_linux5.15.147.7z
+
+# ── housekeeping ───────────────────────────────────────────────────────────
+# `make clean` wipes output/ entirely (built images, release notes, manifest,
+# any leftover raw .img). Use after a successful upload to free disk space.
+# Does NOT touch input/ (cached source images stay).
+clean:
+	@echo "==> Wiping output/"
+	rm -rf output/*
+	@echo "    (input/ kept — set 'rm -rf input/*' manually to force fresh source download)"
+
+clean-all: clean
+	@echo "==> Wiping input/ too"
+	rm -rf input/*

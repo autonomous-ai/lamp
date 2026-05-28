@@ -19,6 +19,7 @@ from core.enums.pose import GraphEnum
 from core.models.pose import RawPose2DDetection
 from core.perception.base import PredictorBase
 from core.utils.common import get_or_default
+from core.utils.files import ensure_downloaded
 from core.utils.runtime import prepare_ort_session
 
 
@@ -32,6 +33,7 @@ class PoseEstimator2D(PredictorBase[cv2t.MatLike, RawPose2DDetection]):
     GRAPH_TYPE: GraphEnum
 
     DEFAULT_MODEL_PATH: Path | None = None
+    DEFAULT_REMOTE_URL: str | None = None
     DEFAULT_INPUT_SIZE: tuple[int, int] = (192, 256)
 
     INPUT_MEAN: npt.NDArray[np.float32] = np.array([123.675, 116.28, 103.53], dtype=np.float32)
@@ -40,6 +42,7 @@ class PoseEstimator2D(PredictorBase[cv2t.MatLike, RawPose2DDetection]):
     def __init__(
         self,
         model_path: Path | None = None,
+        remote_url: str | None = None,
         input_size: tuple[int, int] | None = None,
     ) -> None:
         super().__init__()
@@ -49,6 +52,7 @@ class PoseEstimator2D(PredictorBase[cv2t.MatLike, RawPose2DDetection]):
             raise RuntimeError("model_path must not be None")
 
         self._model_path: Path = model_path
+        self._remote_url: str | None = get_or_default(remote_url, self.DEFAULT_REMOTE_URL)
         self._input_size: tuple[int, int] = get_or_default(input_size, self.DEFAULT_INPUT_SIZE)
 
         self._session: ort.InferenceSession | None = None
@@ -63,6 +67,7 @@ class PoseEstimator2D(PredictorBase[cv2t.MatLike, RawPose2DDetection]):
         if self._running:
             self._logger.info("Already running")
             return
+        self._model_path = ensure_downloaded(self._model_path, remote=self._remote_url)
         self._logger.info("Loading model from %s", self._model_path)
         self._session = prepare_ort_session(self._model_path)
         self._running = True

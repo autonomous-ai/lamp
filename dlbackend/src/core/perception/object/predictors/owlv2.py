@@ -22,7 +22,7 @@ class OWLv2Detector(ObjectDetector):
     Text queries are constructed fresh per request. Supports batch processing.
     """
 
-    DEFAULT_MODEL_PATH: Path = Path("google/owlv2-large-patch14-ensemble")
+    DEFAULT_MODEL_PATH: Path | None = Path("google/owlv2-large-patch14-ensemble")
     DEFAULT_THRESHOLD: float = 0.1
 
     def __init__(
