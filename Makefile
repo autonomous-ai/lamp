@@ -185,7 +185,7 @@ tag-release:
 
 clean:
 	rm -f $(LAMP_DIR)/lamp-server $(LAMP_DIR)/bootstrap-server
-	rm -f $(BUDDY_DIR)/buddy-plugin
+	rm -f $(BUDDY_DIR)/buddy-plugin $(BUDDY_DIR)/claude-desktop-buddy
 	rm -f $(TWITCH_DIR)/twitch-irc
 	rm -rf $(LELAMP_DIR)/.venv $(LELAMP_DIR)/__pycache__
 	rm -rf $(WEB_DIR)/dist $(WEB_DIR)/node_modules

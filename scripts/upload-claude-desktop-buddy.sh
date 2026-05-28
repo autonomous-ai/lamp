@@ -37,8 +37,9 @@ rm -f "$ZIP_PATH"
   buddy-plugin \
   config/buddy.json)
 
-# Clean up binary
-rm -f "${BUDDY_DIR}/buddy-plugin"
+# Clean up binary (covers both `-o buddy-plugin` artifact and default
+# `go build` output which uses the module name `claude-desktop-buddy`).
+rm -f "${BUDDY_DIR}/buddy-plugin" "${BUDDY_DIR}/claude-desktop-buddy"
 
 echo "========== Upload ${ZIP_NAME} to Google Cloud Storage (no-cache) =========="
 gsutil -h "Cache-Control:no-cache, no-store, must-revalidate" cp "$ZIP_PATH" "gs://${GCS_BUCKET}/${GCS_PATH}"
