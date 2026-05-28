@@ -370,20 +370,6 @@ function loadConvos(): Conversation[] {
   try {
     const raw = localStorage.getItem(CONVOS_KEY);
     if (!raw) {
-      const oldRaw = localStorage.getItem("lumi_chat_history");
-      if (oldRaw) {
-        const oldMsgs = JSON.parse(oldRaw) as ChatMessage[];
-        if (oldMsgs.length > 0) {
-          const migrated: Conversation = {
-            id: `c-${Date.now()}`,
-            title: titleFromMessages(oldMsgs),
-            createdAt: Date.now(),
-            messages: cleanPending(oldMsgs),
-          };
-          localStorage.removeItem("lumi_chat_history");
-          return [migrated];
-        }
-      }
       return [];
     }
     const parsed = JSON.parse(raw) as Conversation[] | ConvosEnvelope;
@@ -451,7 +437,6 @@ function clearLocalChatHistory() {
   try {
     localStorage.removeItem(CONVOS_KEY);
     localStorage.removeItem(ACTIVE_KEY);
-    localStorage.removeItem("lumi_chat_history"); // legacy key
   } catch {}
 }
 
