@@ -180,8 +180,8 @@ func flowEventToMonitor(fe flow.Event, channelName string) domain.MonitorEvent {
 		if source == "channel" {
 			// Label routing mirrors handler_events.go goroutine:
 			//  1. sender filled → "[telegram:Gray]" (real channel user)
-			//  2. message is Lumi-internal prefix → "[voice]" / "[emotion]"
-			//     / ... (sensing or voice event Lumi posted via chat.send
+			//  2. message is Lamp-internal prefix → "[voice]" / "[emotion]"
+			//     / ... (sensing or voice event Lamp posted via chat.send
 			//     that OpenClaw merged into a UUID host turn via steer)
 			//  3. otherwise fall back to channelName (or "[…]" when no msg
 			//     yet — first emit before chat.history goroutine returns)
@@ -254,7 +254,7 @@ func (h *AgentHandler) FlowLogs(c *gin.Context) {
 		}
 	}
 
-	filename := fmt.Sprintf("lumi_flow_%s.jsonl", date)
+	filename := fmt.Sprintf("lamp_flow_%s.jsonl", date)
 	var out []byte
 	if last > 0 {
 		lines, err := readAllJSONLines(path)
@@ -265,7 +265,7 @@ func (h *AgentHandler) FlowLogs(c *gin.Context) {
 		if len(lines) > last {
 			lines = lines[len(lines)-last:]
 		}
-		filename = fmt.Sprintf("lumi_flow_%s_last%d.jsonl", date, last)
+		filename = fmt.Sprintf("lamp_flow_%s_last%d.jsonl", date, last)
 		out = []byte(strings.Join(lines, "\n"))
 		if len(out) > 0 {
 			out = append(out, '\n')

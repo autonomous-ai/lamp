@@ -216,7 +216,7 @@ func (h *AgentHandler) HandleEvent(ctx context.Context, evt domain.WSEvent) erro
 				// configured channel — the goroutine below will replace this
 				// with the right label ([telegram:Gray] / [voice] / [emotion]
 				// / ...) once chat.history reveals whether it's a real
-				// channel user or a Lumi-internal sensing/voice merge. If
+				// channel user or a Lamp-internal sensing/voice merge. If
 				// the goroutine fails or times out, this generic label
 				// stays — better than mis-attributing to Telegram.
 				flow.Log("chat_input", map[string]any{"run_id": payload.RunID, "source": "channel"}, payload.RunID)
@@ -317,13 +317,13 @@ func (h *AgentHandler) HandleEvent(ctx context.Context, evt domain.WSEvent) erro
 			// Heartbeat (target:"none"), channel turns merged by steer mode, and other
 			// OpenClaw self-trigger lifecycles can drop their `end` SSE (per the
 			// busyTTL comment in service_events.go); gating on them strands activeTurn=true
-			// for up to 5 minutes — every Lumi sensing event in that window queues
+			// for up to 5 minutes — every Lamp sensing event in that window queues
 			// instead of forwarding.
 			//
 			// External turns don't NEED Lumi-side gating: with messages.queue.mode=steer
 			// (pinned in onboarding), concurrent sensing events arriving during a
 			// channel/cron turn are batched into the active turn at the next model
-			// boundary by OpenClaw itself — no need for Lumi to pre-suppress them.
+			// boundary by OpenClaw itself — no need for Lamp to pre-suppress them.
 			//
 			// Lumi-initiated turns also flip activeTurn=true at chat.send time
 			// (service_chat.go), so a missed lifecycle.start here is harmless.
