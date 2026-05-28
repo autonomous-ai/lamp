@@ -92,7 +92,7 @@ _speaker_muted = False
 # --- Snapshot state ---
 
 _SNAPSHOT_DIR = os.environ.get(
-    "LELAMP_SNAPSHOT_DIR", "/root/.openclaw/media/lumi-snapshots"
+    "LELAMP_SNAPSHOT_DIR", "/root/.openclaw/media/lamp-snapshots"
 )
 _SNAPSHOT_MAX = 20
 _snapshot_paths: list = []
