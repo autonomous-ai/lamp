@@ -102,6 +102,19 @@ _LIVE_VAD_HOLD_S = float(os.environ.get("LELAMP_LIVE_VAD_HOLD_S", "1.5"))
 # disable (legacy always-open behaviour).
 _IDLE_CLOSE_S = float(os.environ.get("LELAMP_LIVE_IDLE_CLOSE_S", "90"))
 
+# Phase 1 → Phase 2 gate: number of CONSECUTIVE positive-VAD frames
+# required before opening a new realtime session. A single noise burst
+# (fan, motor servo, breathing-LED hum, brief cough, room reverb) is
+# enough to push one frame past the RMS+WebRTC+Silero chain, so the
+# pre-streak behaviour ("any 1 positive frame opens a session") triggered
+# noise-driven reopens that ran 90s idle then closed — defeating
+# LELAMP_LIVE_IDLE_CLOSE_S. Requiring N consecutive frames (~256 ms at
+# 64 ms frame size, matching the classic voice_service pre-roll) suppresses
+# noise bursts while keeping the open-on-speech latency negligible: the
+# rolling audio buffer pre-rolls into the new session, so no audio is lost.
+# Set 1 to restore legacy single-frame trigger.
+_SPEECH_STREAK_FRAMES = max(1, int(os.environ.get("LELAMP_LIVE_SPEECH_STREAK_FRAMES", "4")))
+
 
 class _ArecordStream:
     """Subprocess wrapper around ALSA arecord — same shape as the one
@@ -592,16 +605,25 @@ class LiveBrainRunner:
 
     def _wait_for_speech(self, mic, frame_size: int) -> Optional[bytes]:
         """Phase 1 loop — keep the mic running but don't open the
-        realtime session until the local VAD says someone is talking.
-        Returns the trigger frame on speech, or ``None`` if the stop
-        event fires first. When no VAD callback is wired (legacy
-        always-on behaviour) the very first frame triggers immediately.
+        realtime session until the local VAD says someone is talking
+        for ``_SPEECH_STREAK_FRAMES`` consecutive frames. Returns the
+        trigger frame on speech, or ``None`` if the stop event fires
+        first. When no VAD callback is wired (legacy always-on
+        behaviour) the very first frame triggers immediately.
 
         The rolling audio buffer keeps filling here so when a session
         opens and the user delegates within the first ~30s, the
         speaker recognizer still has warm audio to chew on. The echo
         gate also runs in this phase so TTS playback from a previous
-        session can't trigger a new session via room reverb."""
+        session can't trigger a new session via room reverb.
+
+        Streak gate rationale: a single positive-VAD frame is too
+        permissive — fan, motor, LED hum, and brief noise bursts each
+        flick one frame past the VAD chain. Requiring N consecutive
+        positive frames matches the classic voice_service pre-roll
+        and suppresses noise without losing audio (the pre-roll lives
+        in ``_audio_buf`` and replays into the new session)."""
+        speech_streak = 0
         while not self._stop_event.is_set():
             try:
                 data, _ = mic.read(frame_size)
@@ -611,6 +633,10 @@ class LiveBrainRunner:
             frame_bytes = data.tobytes()
             self._audio_buf.append(frame_bytes)
             if self._tts_is_speaking():
+                # TTS playback could echo into the mic; don't count
+                # those frames toward the streak. Reset so a noise
+                # burst overlapping a TTS tail doesn't carry over.
+                speech_streak = 0
                 continue
             if self._is_speech_callback is None:
                 # No VAD wired — fall back to legacy behaviour: the
@@ -622,10 +648,23 @@ class LiveBrainRunner:
                 is_speech = bool(self._is_speech_callback(data))
             except Exception as e:
                 logger.debug("is_speech_callback raised in idle: %s", e)
-                is_speech = True  # fail-open: don't sit silent on a VAD bug
+                # Fail-open: don't sit silent on a VAD bug. Count the
+                # exception as a positive frame so persistent VAD
+                # breakage still opens sessions (matches pre-streak
+                # behaviour), but a single transient exception alone
+                # won't trigger an open.
+                is_speech = True
             if is_speech:
-                self._last_speech_frame_ts = time.time()
-                return frame_bytes
+                speech_streak += 1
+                if speech_streak >= _SPEECH_STREAK_FRAMES:
+                    self._last_speech_frame_ts = time.time()
+                    logger.info(
+                        "Live brain speech streak %d frames — opening session",
+                        speech_streak,
+                    )
+                    return frame_bytes
+            else:
+                speech_streak = 0
         return None
 
     # --- callbacks ---------------------------------------------------------
