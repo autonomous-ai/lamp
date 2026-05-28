@@ -112,7 +112,7 @@ func (h *AgentHandler) HandleEvent(ctx context.Context, evt domain.WSEvent) erro
 		lampSession := h.agentGateway.GetSessionKey()
 		isLampSession := lampSession != "" && payload.SessionKey == lampSession
 		if payload.Stream == "lifecycle" && payload.Data.Phase == "start" && payload.RunID != "" && isLampSession {
-			if isLumiOutboundChatRunID(payload.RunID) {
+			if isLampOutboundChatRunID(payload.RunID) {
 				h.agentGateway.RemovePendingChatTraceByRunID(payload.RunID)
 			} else {
 				hist, err := h.agentGateway.FetchChatHistory(payload.SessionKey, 5)
@@ -168,7 +168,7 @@ func (h *AgentHandler) HandleEvent(ctx context.Context, evt domain.WSEvent) erro
 			// timestamp within cronFireWindowMs. Restricted to UUID runIds
 			// (no lumi- prefix) so chat.send/sensing turns can't accidentally
 			// claim a queued cron slot.
-			if payload.Data.Phase == "start" && payload.RunID != "" && !isLumiOutboundChatRunID(payload.RunID) {
+			if payload.Data.Phase == "start" && payload.RunID != "" && !isLampOutboundChatRunID(payload.RunID) {
 				now := time.Now().UnixMilli()
 				cutoff := now - cronFireWindowMs
 				h.cronFireExpectedMu.Lock()
@@ -208,7 +208,7 @@ func (h *AgentHandler) HandleEvent(ctx context.Context, evt domain.WSEvent) erro
 			isCronFireTurn := h.cronFireRuns[payload.RunID]
 			h.cronFireRunsMu.Unlock()
 			isChannelTurn := payload.Data.Phase == "start" && payload.RunID != "" &&
-				!isLumiOutboundChatRunID(payload.RunID) && !isLumiOutboundChatRunID(flowRunID) &&
+				!isLampOutboundChatRunID(payload.RunID) && !isLampOutboundChatRunID(flowRunID) &&
 				!isCronFireTurn
 			if isChannelTurn {
 				// Emit chat_input immediately so UI shows turn-started.
@@ -329,7 +329,7 @@ func (h *AgentHandler) HandleEvent(ctx context.Context, evt domain.WSEvent) erro
 			// (service_chat.go), so a missed lifecycle.start here is harmless.
 			// LED is managed by the agent via /emotion skill calls — do not override here.
 			if payload.Data.Phase == "start" {
-				lampInitiated := isLumiOutboundChatRunID(payload.RunID) || isLumiOutboundChatRunID(flowRunID)
+				lampInitiated := isLampOutboundChatRunID(payload.RunID) || isLampOutboundChatRunID(flowRunID)
 				if lampInitiated {
 					h.agentGateway.SetBusy(true)
 				} else {
@@ -915,7 +915,7 @@ func (h *AgentHandler) HandleEvent(ctx context.Context, evt domain.WSEvent) erro
 					// heartbeat) is NOT a channel run unless explicitly marked
 					// via channelRuns below.
 					//
-					// Previously this defaulted to `!isLumiOutboundChatRunID(...)`,
+					// Previously this defaulted to `!isLampOutboundChatRunID(...)`,
 					// which mis-classified OpenClaw UUID self-fire / cron / heartbeat
 					// runs as Telegram and suppressed their TTS — most visibly,
 					// music-suggestion replies on emotion.detected events when the
@@ -1187,7 +1187,7 @@ func (h *AgentHandler) HandleEvent(ctx context.Context, evt domain.WSEvent) erro
 		// "merged" / "self-reply" — those are downstream interpretations
 		// the operator makes from the timeline (e.g. a UUID lifecycle
 		// arriving later with matching input).
-		isLampOutboundFinal := payload.State == "final" && isLumiOutboundChatRunID(flowRunID)
+		isLampOutboundFinal := payload.State == "final" && isLampOutboundChatRunID(flowRunID)
 		isEmptyFinalNoLifecycle := isLampOutboundFinal &&
 			strings.TrimSpace(payload.Message) == "" &&
 			h.agentGateway.RemovePendingChatTraceByRunID(flowRunID)
@@ -1344,7 +1344,7 @@ func (h *AgentHandler) HandleEvent(ctx context.Context, evt domain.WSEvent) erro
 			// Lamp-issued run (sensing/voice chat.send) is being processed.
 			// OpenClaw injects it into the running turn and the agent's reply
 			// goes back on the Lamp run's stream — its runID is "lumi-chat-*"
-			// so isLumiOutboundChatRunID() is true → isChannelRun=false →
+			// so isLampOutboundChatRunID() is true → isChannelRun=false →
 			// reply ends up on TTS instead of Telegram. Capture the chat_id
 			// here (before the skip) and mark the active run so lifecycle.end
 			// suppresses TTS and routes the reply via DM.

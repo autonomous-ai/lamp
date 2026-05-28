@@ -1029,7 +1029,7 @@ func (s *Server) voicePreview(c *gin.Context) {
 // Entries prefixed with "journal:" use journalctl instead of file reading.
 var allowedLogs = map[string]string{
 	"lelamp":           "/var/log/lelamp/server.log",
-	"lumi":             "/var/log/lamp.log",
+	"lamp":             "/var/log/lamp.log",
 	"openclaw":         "/var/log/openclaw/lamp.log",
 	"openclaw-service": "journal:openclaw.service",
 	"buddy":            "/var/log/claude-desktop-buddy.log",
@@ -1064,9 +1064,9 @@ func resolveLogPaths(pattern string) ([]string, error) {
 }
 
 // logTail returns the last N lines of a whitelisted log file (or merged glob).
-// GET /api/logs/tail?source=lelamp|lumi|openclaw|openclaw-service&lines=200
+// GET /api/logs/tail?source=lelamp|lamp|openclaw|openclaw-service&lines=200
 func (s *Server) logTail(c *gin.Context) {
-	source := c.DefaultQuery("source", "lumi")
+	source := c.DefaultQuery("source", "lamp")
 	pattern, ok := allowedLogs[source]
 	if !ok {
 		c.JSON(http.StatusBadRequest, serializers.ResponseError("unknown log source"))
@@ -1132,9 +1132,9 @@ func (s *Server) logTail(c *gin.Context) {
 }
 
 // logStream streams new log lines via SSE from one or more log files.
-// GET /api/logs/stream?source=lelamp|lumi|openclaw|openclaw-service
+// GET /api/logs/stream?source=lelamp|lamp|openclaw|openclaw-service
 func (s *Server) logStream(c *gin.Context) {
-	source := c.DefaultQuery("source", "lumi")
+	source := c.DefaultQuery("source", "lamp")
 	pattern, ok := allowedLogs[source]
 	if !ok {
 		c.JSON(http.StatusBadRequest, serializers.ResponseError("unknown log source"))

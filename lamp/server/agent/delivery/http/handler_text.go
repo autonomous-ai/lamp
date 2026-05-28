@@ -84,10 +84,10 @@ func extractSayTag(text string) string {
 	return inner
 }
 
-// isLumiOutboundChatRunID is true when runID matches Lamp's chat.send idempotency key
+// isLampOutboundChatRunID is true when runID matches Lamp's chat.send idempotency key
 // (lumi-chat-* current; lumi-sensing-* legacy). Used so traceless lifecycle_start is not
 // mis-tagged as Telegram-only when the turn was initiated from Lamp.
-func isLumiOutboundChatRunID(runID string) bool {
+func isLampOutboundChatRunID(runID string) bool {
 	if runID == "" {
 		return false
 	}
