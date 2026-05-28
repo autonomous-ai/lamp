@@ -12,7 +12,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-const lampWriteFlagName = ".lumi-model-write-flag"
+const lampWriteFlagName = ".lamp-model-write-flag"
 const primarySyncDebounce = 300 * time.Millisecond
 const lampWriteFlagWindow = 3 * time.Second
 const primaryWatchRetryInterval = 5 * time.Second
