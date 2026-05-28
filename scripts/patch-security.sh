@@ -10,15 +10,8 @@
 
 set -euo pipefail
 
-# Prefer the renamed lamp-lelamp.service; fall back to legacy lumi-lelamp.service
-# on devices still on the pre-rename layout.
-if [ -f "/etc/systemd/system/lamp-lelamp.service" ]; then
-  LELAMP_SVC="/etc/systemd/system/lamp-lelamp.service"
-  LELAMP_UNIT="lamp-lelamp"
-else
-  LELAMP_SVC="/etc/systemd/system/lumi-lelamp.service"
-  LELAMP_UNIT="lumi-lelamp"
-fi
+LELAMP_SVC="/etc/systemd/system/lamp-lelamp.service"
+LELAMP_UNIT="lamp-lelamp"
 NGINX_CONF="/etc/nginx/conf.d/lamp.conf"
 
 # Hash watched files before patching so the end-of-script restart only fires
@@ -348,18 +341,8 @@ fi
 
 # 6. Bind lamp-server to 127.0.0.1 (defense-in-depth: port 5000 unreachable from LAN
 #    even if nginx config is wrong). Only needed on devices deployed before 2026-05-19.
-# Prefer the renamed lamp.service / lamp-server paths; fall back to the legacy
-# lumi.service / lumi-server names on devices still on the pre-rename layout.
-if [ -f "/etc/systemd/system/lamp.service" ]; then
-  LAMP_SVC="/etc/systemd/system/lamp.service"
-else
-  LAMP_SVC="/etc/systemd/system/lumi.service"
-fi
-if [ -x "/usr/local/bin/lamp-server" ]; then
-  LAMP_BIN="/usr/local/bin/lamp-server"
-else
-  LAMP_BIN="/usr/local/bin/lumi-server"
-fi
+LAMP_SVC="/etc/systemd/system/lamp.service"
+LAMP_BIN="/usr/local/bin/lamp-server"
 
 # Detect if the installed binary still binds 0.0.0.0 by checking its help/version
 # output — there is no config knob for this; it is baked into the binary.
@@ -382,9 +365,7 @@ else
 fi
 
 if [ "$LELAMP_HASH_BEFORE" != "$LELAMP_HASH_AFTER" ]; then
-  # Restart the renamed `lamp` service; fall back to legacy `lumi` on older devices.
   LAMP_UNIT="lamp"
-  systemctl list-unit-files lamp.service >/dev/null 2>&1 || LAMP_UNIT="lumi"
   echo "[patch] ${LELAMP_UNIT}.service changed → restarting ${LELAMP_UNIT} + ${LAMP_UNIT}"
   systemctl restart "$LELAMP_UNIT" "$LAMP_UNIT"
 else

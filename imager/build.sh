@@ -761,9 +761,7 @@ date -u '+%Y-%m-%d %H:%M:%S' > /etc/fake-hwclock.data
 
 # ── stage: WiFi stability (RPi 5 specific) ───────────────────────────────────
 # Legacy RPi 5 workaround: disable IPv6 globally to avoid duplicate address
-# detection delays. Harmless on OrangePi. The earlier `lumi-wifi-power-save`
-# systemd unit was removed 2026-05-28 — iw/iwconfig aren't installed on
-# OrangePi so the unit was a verified no-op on current hardware.
+# detection delays. Harmless on OrangePi.
 echo "[stage] WiFi stability (IPv6 off)"
 mkdir -p /etc/sysctl.d
 cat > /etc/sysctl.d/99-lamp-wifi.conf <<'EOF'

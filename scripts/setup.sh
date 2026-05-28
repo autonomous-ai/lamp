@@ -1300,31 +1300,8 @@ SOFTWAREUPDATE
 ensure_root
 
 # Stop lamp if running from a previous setup — it switches to AP mode when unconfigured, killing internet.
-# Also stop the legacy lumi.service / lumi-lelamp.service units on devices upgraded from the pre-rename layout.
 systemctl stop lamp.service 2>/dev/null || true
 systemctl disable lamp.service 2>/dev/null || true
-systemctl stop lumi.service 2>/dev/null || true
-systemctl disable lumi.service 2>/dev/null || true
-systemctl stop lumi-lelamp.service 2>/dev/null || true
-systemctl disable lumi-lelamp.service 2>/dev/null || true
-rm -f /etc/systemd/system/lumi-lelamp.service
-# lumi-wifi-power-save.service was a no-op on OrangePi (iw/iwconfig not installed)
-# and was removed 2026-05-28; clean it up on field devices upgraded from older images.
-systemctl stop lumi-wifi-power-save.service 2>/dev/null || true
-systemctl disable lumi-wifi-power-save.service 2>/dev/null || true
-rm -f /etc/systemd/system/lumi-wifi-power-save.service
-# lumi-buddy.service was renamed to claude-desktop-buddy.service 2026-05-28
-# (the unit always ran the claude-desktop-buddy BLE plugin; rename matches the binary).
-systemctl stop lumi-buddy.service 2>/dev/null || true
-systemctl disable lumi-buddy.service 2>/dev/null || true
-rm -f /etc/systemd/system/lumi-buddy.service
-systemctl daemon-reload 2>/dev/null || true
-# nginx conf renamed to lamp.conf 2026-05-28. Remove old lumi.conf so we don't
-# end up with two configs defining the same upstreams (nginx fails to start).
-rm -f /etc/nginx/conf.d/lumi.conf
-# sysctl + dnsmasq config files renamed 2026-05-28. Remove old lumi-prefixed
-# files so dnsmasq doesn't see duplicate `interface=wlan0` directives.
-rm -f /etc/sysctl.d/99-lumi-wifi.conf /etc/dnsmasq.d/99-lumi.conf
 
 run_stage stage_locale
 run_stage stage_prerequisites
