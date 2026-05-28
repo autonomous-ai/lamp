@@ -2,10 +2,10 @@
 
 > **Trạng thái:** Sẵn sàng execute
 > **Cập nhật:** 2026-05-21
-> **Design doc:** [lumi-buddy_vi.md](./lumi-buddy_vi.md)
+> **Design doc:** [lamp-buddy_vi.md](./lamp-buddy_vi.md)
 > **Mục tiêu hoàn thành:** ~2 tuần (1 dev)
 
-Đây là plan action cho **MVP của Lamp Buddy** — app companion macOS cho phép Lamp điều khiển máy tính qua voice. Lý do thiết kế đầy đủ ở [lumi-buddy_vi.md](./lumi-buddy_vi.md). Doc này liệt kê *build cái gì, thứ tự nào, accept ra sao*.
+Đây là plan action cho **MVP của Lamp Buddy** — app companion macOS cho phép Lamp điều khiển máy tính qua voice. Lý do thiết kế đầy đủ ở [lamp-buddy_vi.md](./lamp-buddy_vi.md). Doc này liệt kê *build cái gì, thứ tự nào, accept ra sao*.
 
 ---
 
@@ -207,8 +207,8 @@ Mỗi phase ship & review độc lập được.
 **Status:** ⏳ Deferred — VERSION_BUDDY file, target `build-buddy` trong Makefile root, và check doc drift còn lại. Skip vì Leo đang dev solo; quay lại khi project được share hoặc sắp release.
 
 **Files:**
-- Verify `docs/lumi-buddy.md` match implementation thực (update nếu drift)
-- Verify `docs/vi/lumi-buddy_vi.md` match
+- Verify `docs/lamp-buddy.md` match implementation thực (update nếu drift)
+- Verify `docs/vi/lamp-buddy_vi.md` match
 - Thêm `lumi-buddy/README.md` instruction build
 - Update `CLAUDE.md` root: row doc table cho lumi-buddy
 - Update `Makefile` top-level: target `build-buddy`

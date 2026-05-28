@@ -3,11 +3,11 @@
 > **Trạng thái:** Đang thiết kế — đang scope MVP
 > **Cập nhật:** 2026-05-21
 > **Owner:** Leo
-> **Liên quan:** [Kế hoạch MVP Lamp Buddy](./lumi-buddy-mvp_vi.md)
+> **Liên quan:** [Kế hoạch MVP Lamp Buddy](./lamp-buddy-mvp_vi.md)
 
 Tài liệu này lưu lại toàn bộ thảo luận thiết kế tính năng **Lamp Buddy**: một app native chạy thường trú trên máy tính người dùng, cho phép Lamp điều khiển desktop (mở app, vào web, gõ text, …) — kiểu TeamViewer nhưng được điều khiển bằng giọng nói/AI thông qua đèn.
 
-Kế hoạch implement MVP nằm ở [`lumi-buddy-mvp_vi.md`](./lumi-buddy-mvp_vi.md). Doc này là tham chiếu dài về *lý do tại sao* kiến trúc lại như vậy.
+Kế hoạch implement MVP nằm ở [`lamp-buddy-mvp_vi.md`](./lamp-buddy-mvp_vi.md). Doc này là tham chiếu dài về *lý do tại sao* kiến trúc lại như vậy.
 
 ---
 
