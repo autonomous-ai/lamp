@@ -91,7 +91,7 @@ export default function Setup({ mode = "initial" }: SetupProps = {}) {
   // hide the AI Brain / Channels / Language / TTS menu entries and keep those
   // sections mounted (display:none) so their state still submits with the form.
   // Gated to initial (AP) mode so editing on the LAN IP keeps the full menu.
-  const lumiPushedConfig = mode === "initial" && !!urlParams.llmApiKey;
+  const lampPushedConfig = mode === "initial" && !!urlParams.llmApiKey;
 
   // Language + Lamp's Voice are gated behind ?debug=true: regular operators
   // get the auto-detected language and the "alloy"/openai voice defaults,
@@ -126,9 +126,9 @@ export default function Setup({ mode = "initial" }: SetupProps = {}) {
 
   // When Lamp pushed config, the operator only needs Device + Wi-Fi visible —
   // the rest are filled from URL and submitted silently. Sections remain in
-  // the DOM (see `lumiPushedConfig` display:none wrappers below) so values
+  // the DOM (see `lampPushedConfig` display:none wrappers below) so values
   // still flow through the form; we just hide the menu entries.
-  const visibleSections = lumiPushedConfig
+  const visibleSections = lampPushedConfig
     ? SECTIONS.filter((s) => s.id === "device" || s.id === "wifi")
     : SECTIONS;
 
@@ -825,12 +825,12 @@ export default function Setup({ mode = "initial" }: SetupProps = {}) {
                     uniqueNetworks={uniqueNetworks}
                   />
 
-                  {/* When lumiPushedConfig is on, the four sections below are
+                  {/* When lampPushedConfig is on, the four sections below are
                       kept mounted but visually hidden — their state autofills
                       from URL params and still flows through the form submit. */}
-                  <div style={lumiPushedConfig ? { display: "none" } : undefined}>
+                  <div style={lampPushedConfig ? { display: "none" } : undefined}>
                     <LLMSection
-                      active={lumiPushedConfig || activeSection === "llm"}
+                      active={lampPushedConfig || activeSection === "llm"}
                       llmLoaded={llmLoaded}
                       llmApiKey={llmApiKey} setLlmApiKey={setLlmApiKey}
                       llmUrl={llmUrl} setLlmUrl={setLlmUrl}
@@ -838,7 +838,7 @@ export default function Setup({ mode = "initial" }: SetupProps = {}) {
                     />
 
                     <ChannelSection
-                      active={lumiPushedConfig || activeSection === "channel"}
+                      active={lampPushedConfig || activeSection === "channel"}
                       channel={channel} setChannel={setChannel}
                       channelLoaded={channelLoaded}
                       teleToken={teleToken} setTeleToken={setTeleToken}
@@ -852,12 +852,12 @@ export default function Setup({ mode = "initial" }: SetupProps = {}) {
                     />
 
                     <LanguageSection
-                      active={lumiPushedConfig || activeSection === "language"}
+                      active={lampPushedConfig || activeSection === "language"}
                       sttLanguage={sttLanguage} setSttLanguage={setSttLanguage}
                     />
 
                     <TTSSection
-                      active={lumiPushedConfig || activeSection === "tts"}
+                      active={lampPushedConfig || activeSection === "tts"}
                       isContinue={isContinue}
                       ttsProvider={ttsProvider} setTtsProvider={setTtsProvider}
                       ttsProviders={ttsProviders}
