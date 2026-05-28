@@ -34,20 +34,17 @@ async def embed_audio(req: EmbedAudioRequest):
     try:
         audios: list[Audio] = []
         for item in req.audios_b64:
-            try:
-                audios.append(decode_b64_wav(item))
-            except Exception as e:
-                raise ValueError(f"invalid base64 payload: {e}") from e
+            audios.append(decode_b64_wav(item))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid audio: {exc}") from exc
 
-        if not audios:
-            raise ValueError("no audio extracted from inputs")
+    if not audios:
+        raise HTTPException(status_code=400, detail="No audio extracted from inputs")
 
+    try:
         results = await asyncio.to_thread(embedder.predict, audios)
         return EmbedAudioResponse.from_raw_embedding(results[0], return_chunks=req.return_chunks)
-    except HTTPException:
-        raise
     except PreprocessRejected as e:
-        logger.info("Rejecting audio recognition embedding HTTP message")
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.exception("Error processing audio recognition embedding HTTP message")
