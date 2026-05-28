@@ -216,21 +216,20 @@ async def proxy_ws(client_ws: WebSocket, path: str) -> None:
                 try:
                     async for msg in backend_ws:
                         if isinstance(msg, str):
+                            logger.info("[WS] %s → /%s: %s", ws_url, path, msg[:100])
                             if session is not None:
                                 encrypted = session.encrypt(
                                     AESGCMPlainPayload(plain_data=msg.encode())
                                 )
                                 msg = WSCipherMessage.from_raw_payload(encrypted).model_dump_json()
-                            logger.info("[WS] %s → /%s: %s", ws_url, path, msg[:100])
                             await client_ws.send_text(msg)
                         else:
+                            logger.info("[WS] %s → /%s: %s", ws_url, path, msg[:100].decode())
                             if session is not None:
                                 encrypted = session.encrypt(AESGCMPlainPayload(plain_data=msg))
                                 msg = WSCipherMessage.from_raw_payload(encrypted).model_dump_json()
-                                logger.info("[WS] %s → /%s: %s", ws_url, path, msg[:100])
                                 await client_ws.send_text(msg)
                             else:
-                                logger.info("[WS] %s → /%s: %s", ws_url, path, msg[:100].decode())
                                 await client_ws.send_bytes(msg)
                 except websockets.exceptions.ConnectionClosed:
                     pass
