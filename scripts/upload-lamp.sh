@@ -65,7 +65,6 @@ try:
     data = json.loads(raw) if raw.strip() else {}
 except json.JSONDecodeError:
     data = {}
-data.pop('lumi', None)
 data['lamp'] = {'version': sys.argv[1], 'url': sys.argv[2]}
 print(json.dumps(data, indent=2))
 " "$new_version" "$BACKEND_URL")
