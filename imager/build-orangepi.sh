@@ -565,19 +565,20 @@ cat > /usr/local/bin/software-update <<'EOFSCRIPT'
 set -e
 OTA_METADATA_URL="\${OTA_METADATA_URL:-https://storage.googleapis.com/s3-autonomous-upgrade-3/lamp/ota/metadata.json}"
 [ "\$(id -u)" -ne 0 ] && { echo "Run as root."; exit 1; }
-[ \$# -ne 1 ] && { echo "Usage: software-update <lamp|openclaw|bootstrap|web|lelamp|lumi-buddy>"; exit 1; }
+[ \$# -ne 1 ] && { echo "Usage: software-update <lamp|openclaw|bootstrap|web|lelamp|claude-desktop-buddy>"; exit 1; }
 APP="\$1"
-# Back-compat: \`software-update lumi\` still works during the brand rename window.
+# Back-compat: legacy \`lumi\`, \`lumi-buddy\`, \`lamp-buddy\` aliases still resolve.
 [ "\$APP" = "lumi" ] && APP="lamp"
+[ "\$APP" = "lumi-buddy" ] && APP="claude-desktop-buddy"
+[ "\$APP" = "lamp-buddy" ] && APP="claude-desktop-buddy"
 case "\$APP" in
-  lamp|openclaw|bootstrap|web|lelamp|lumi-buddy) ;;
+  lamp|openclaw|bootstrap|web|lelamp|claude-desktop-buddy) ;;
   *) echo "Unknown app: \$APP"; exit 1 ;;
 esac
 META=\$(mktemp); ZIP=\$(mktemp); DIR=\$(mktemp -d)
 trap 'rm -f "\$META" "\$ZIP"; rm -rf "\$DIR"' EXIT
 curl -fsSL -H "Cache-Control: no-cache" -o "\$META" "\$OTA_METADATA_URL"
 KEY="\$APP"
-[ "\$APP" = "lumi-buddy" ] && KEY="claude-desktop-buddy"
 VERSION=\$(jq -r --arg a "\$KEY" '.[\$a].version // empty' "\$META")
 URL=\$(jq -r --arg a "\$KEY" '.[\$a].url // empty' "\$META")
 [ -z "\$URL" ] && { echo "No URL in metadata for \$APP"; exit 1; }
@@ -943,7 +944,7 @@ if [ -n "\$BUDDY_URL" ]; then
     cp -f /tmp/buddy-extract/config/buddy.json /root/config/buddy.json
   echo "\$BUDDY_VER" > "\$BUDDY_DIR/VERSION_BUDDY"
   rm -rf /tmp/buddy-extract
-  cat > /etc/systemd/system/lumi-buddy.service <<'UNIT'
+  cat > /etc/systemd/system/claude-desktop-buddy.service <<'UNIT'
 [Unit]
 Description=Lumi Claude Desktop Buddy (BLE)
 After=bluetooth.target lamp.service
@@ -958,12 +959,12 @@ Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=lumi-buddy
+SyslogIdentifier=claude-desktop-buddy
 
 [Install]
 WantedBy=multi-user.target
 UNIT
-  systemctl enable lumi-buddy
+  systemctl enable claude-desktop-buddy
 else
   echo "[overlay] no buddy URL — skipping"
 fi

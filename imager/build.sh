@@ -1923,7 +1923,7 @@ rm -f /tmp/web.zip
 # ── stage: Claude Desktop Buddy (BLE plugin, optional) ───────────────────────
 # Optional BLE bridge that pairs the lamp with Claude Desktop. The Mac-side
 # "Lamp Buddy" Swift app is a separate component and is NOT installed here.
-# Service name is lumi-buddy.service for legacy parity with setup.sh.
+# Service name is claude-desktop-buddy.service for legacy parity with setup.sh.
 if [ -n "\$BUDDY_URL" ]; then
   echo "[overlay] Install Claude Desktop Buddy"
   BUDDY_DIR="/opt/claude-desktop-buddy"
@@ -1940,7 +1940,7 @@ if [ -n "\$BUDDY_URL" ]; then
   fi
   echo "\$BUDDY_VER" > "\$BUDDY_DIR/VERSION_BUDDY"
   rm -rf /tmp/buddy-extract
-  cat > /etc/systemd/system/lumi-buddy.service <<UNIT
+  cat > /etc/systemd/system/claude-desktop-buddy.service <<UNIT
 [Unit]
 Description=Lumi Claude Desktop Buddy (BLE)
 After=bluetooth.target lamp.service
@@ -1955,13 +1955,13 @@ Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=lumi-buddy
+SyslogIdentifier=claude-desktop-buddy
 
 [Install]
 WantedBy=multi-user.target
 UNIT
   systemctl daemon-reload
-  systemctl enable lumi-buddy
+  systemctl enable claude-desktop-buddy
 else
   echo "[overlay] WARN: No claude-desktop-buddy URL in OTA metadata, skipping buddy install"
 fi
