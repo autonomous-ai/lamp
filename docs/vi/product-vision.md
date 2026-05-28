@@ -123,7 +123,7 @@ Một chiếc đèn bàn cute mà vô dụng sẽ bị bỏ xó sau 2 tuần. AI
 
 ### Trụ cột 4: "Nó tự hành" — Autonomous Sensing & Proactive Behavior
 
-Hầu hết thiết bị thông minh là **reactive** — chờ lệnh. Lumi là **proactive** — liên tục cảm nhận môi trường và tự hành động mà không cần ai hỏi.
+Hầu hết thiết bị thông minh là **reactive** — chờ lệnh. Lamp là **proactive** — liên tục cảm nhận môi trường và tự hành động mà không cần ai hỏi.
 
 Đây là sự khác biệt giữa công cụ và người bạn. Công cụ thì chờ. Bạn đồng hành thì chú ý.
 
@@ -150,26 +150,26 @@ Hầu hết thiết bị thông minh là **reactive** — chờ lệnh. Lumi là
 │  • Điều chỉnh ánh sáng? Di chuyển servo? Nói? Im lặng?        │
 │  • Kết hợp: thời gian, lịch sử người dùng, mood hiện tại,     │
 │    long-term memory, personality                                │
-│  • Thực thi qua SKILL.md → curl đến Lumi HTTP API              │
+│  • Thực thi qua SKILL.md → curl đến Lamp HTTP API              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Lumi = giác quan (rẻ, chạy liên tục).** **OpenClaw = bộ não (thông minh, gọi khi cần).**
+**Lamp = giác quan (rẻ, chạy liên tục).** **OpenClaw = bộ não (thông minh, gọi khi cần).**
 
 #### Các hành vi tự hành
 
-| Trigger | Lumi cảm nhận | Lumi tự làm | Ai quyết định |
+| Trigger | Lamp cảm nhận | Lamp tự làm | Ai quyết định |
 |---|---|---|---|
 | **Có người** | Camera: người vào khung hình | Bật đèn, chào, adjust ánh sáng | OpenClaw (personality) |
-| **Vắng người** | Camera: không có ai 15 phút | Dim → sleep → tắt | Lumi (rule-based, tuỳ chỉnh) |
-| **Trời tối** | Camera: ánh sáng môi trường giảm | Tăng brightness từ từ | Lumi (auto) + OpenClaw (chọn scene) |
-| **Focus** | Mic: im lặng lâu + tiếng gõ phím | Giữ ổn định, không làm phiền | Lumi (detect) → OpenClaw (confirm) |
+| **Vắng người** | Camera: không có ai 15 phút | Dim → sleep → tắt | Lamp (rule-based, tuỳ chỉnh) |
+| **Trời tối** | Camera: ánh sáng môi trường giảm | Tăng brightness từ từ | Lamp (auto) + OpenClaw (chọn scene) |
+| **Focus** | Mic: im lặng lâu + tiếng gõ phím | Giữ ổn định, không làm phiền | Lamp (detect) → OpenClaw (confirm) |
 | **Stress** | Mic: thở dài, giọng căng | Ánh sáng ấm, gợi ý nghỉ | OpenClaw (empathy, memory) |
-| **Vui** | Mic: tiếng cười | Lumi bounce, flash ấm, vui theo | OpenClaw (emotion skill) |
+| **Vui** | Mic: tiếng cười | Lamp bounce, flash ấm, vui theo | OpenClaw (emotion skill) |
 | **Khuya** | Time: quá giờ ngủ thường ngày | Giảm blue light, nhắc nhẹ | OpenClaw (memory: biết lịch user) |
-| **Idle** | Không tương tác 30+ phút | Idle animation — LED thở nhẹ, nháy mắt | Lumi (built-in, không cần AI) |
-| **Sáng** | Time: lịch buổi sáng | Sunrise simulation, chime nhẹ | Lumi (schedule) + OpenClaw (chào) |
-| **Video call** | Camera: mặt centered + screen glow | Auto tối ưu ánh sáng mặt | Lumi (detect) → OpenClaw (adjust) |
+| **Idle** | Không tương tác 30+ phút | Idle animation — LED thở nhẹ, nháy mắt | Lamp (built-in, không cần AI) |
+| **Sáng** | Time: lịch buổi sáng | Sunrise simulation, chime nhẹ | Lamp (schedule) + OpenClaw (chào) |
+| **Video call** | Camera: mặt centered + screen glow | Auto tối ưu ánh sáng mặt | Lamp (detect) → OpenClaw (adjust) |
 
 #### Loại sự kiện sensing
 
@@ -184,12 +184,12 @@ Hầu hết thiết bị thông minh là **reactive** — chờ lệnh. Lumi là
 | `time.schedule` | Clock (cron-like) | Theo lịch | Không |
 | `sensor.*` | Sensor plug-in (nhiệt độ, độ ẩm) | Tuỳ chỉnh | Thấp |
 
-Events rất nhẹ — không tốn LLM tokens. Chỉ khi sự kiện đủ đáng kể thì Lumi mới đẩy context cho OpenClaw để AI quyết định.
+Events rất nhẹ — không tốn LLM tokens. Chỉ khi sự kiện đủ đáng kể thì Lamp mới đẩy context cho OpenClaw để AI quyết định.
 
 #### Quyền riêng tư & Kiểm soát
 
 - Người dùng có thể tắt riêng từng kênh sensing (camera off, mic off, sensors off)
-- Chế độ "Không làm phiền": tất cả hành vi proactive tạm dừng, Lumi chỉ phản hồi lệnh trực tiếp
+- Chế độ "Không làm phiền": tất cả hành vi proactive tạm dừng, Lamp chỉ phản hồi lệnh trực tiếp
 - Toàn bộ sensing chạy **on-device** — không stream video/audio lên cloud cho ambient processing
 - Privacy indicator: LED đổi màu khi camera/mic đang sensing
 
@@ -616,9 +616,9 @@ Body: {"x": 3, "y": 2, "r": 255, "g": 0, "b": 0}
 | | |
 |---|---|
 | **Ưu tiên** | P2 |
-| **Mô tả** | Lumi biết bạn đang làm gì trên máy tính mà không cần bạn giải thích |
-| **Ví dụ** | Bạn copy một đoạn text → Lumi tự hỏi "Cần dịch không?". Bạn mở Zoom → Lumi tự chuyển sang video call lighting. Bạn đang code → Lumi biết ngữ cảnh khi bạn hỏi câu hỏi |
-| **Luồng** | Agent nhỏ trên Mac/Windows (browser extension hoặc desktop app) push clipboard + active app context lên Lumi → OpenClaw có ngữ cảnh sâu hơn |
+| **Mô tả** | Lamp biết bạn đang làm gì trên máy tính mà không cần bạn giải thích |
+| **Ví dụ** | Bạn copy một đoạn text → Lamp tự hỏi "Cần dịch không?". Bạn mở Zoom → Lamp tự chuyển sang video call lighting. Bạn đang code → Lamp biết ngữ cảnh khi bạn hỏi câu hỏi |
+| **Luồng** | Agent nhỏ trên Mac/Windows (browser extension hoặc desktop app) push clipboard + active app context lên Lamp → OpenClaw có ngữ cảnh sâu hơn |
 | **Cảm giác** | Đèn "hiểu" bạn đang làm gì mà không cần kể — như người ngồi cạnh |
 | **Inspired by** | Loona DeskMate (CES 2026) |
 | **Synergy** | UC-12 (video call lighting) có thể dùng UC-16 để detect Zoom/Meet đang chạy thay vì detect webcam riêng |
@@ -634,18 +634,18 @@ Body: {"x": 3, "y": 2, "r": 255, "g": 0, "b": 0}
 **Trạng thái: Đã triển khai** (2026-04)
 
 **Actor**: Hệ thống (tự động, camera)
-**Mô tả**: Camera phân tích biểu cảm khuôn mặt để phát hiện trạng thái cảm xúc — Lumi phản ứng chủ động hỗ trợ sức khỏe người dùng.
+**Mô tả**: Camera phân tích biểu cảm khuôn mặt để phát hiện trạng thái cảm xúc — Lamp phản ứng chủ động hỗ trợ sức khỏe người dùng.
 
 **Ví dụ**:
-- User có vẻ căng thẳng → Lumi giảm sáng, đổi sang màu ấm, nhẹ nhàng đề nghị nghỉ
-- User có vẻ buồn ngủ/mệt → Lumi tăng sáng, phát chime, gợi ý đi dạo ngắn
-- User tập trung và bình tĩnh → Lumi giữ nguyên environment, suppress mọi interruption
+- User có vẻ căng thẳng → Lamp giảm sáng, đổi sang màu ấm, nhẹ nhàng đề nghị nghỉ
+- User có vẻ buồn ngủ/mệt → Lamp tăng sáng, phát chime, gợi ý đi dạo ngắn
+- User tập trung và bình tĩnh → Lamp giữ nguyên environment, suppress mọi interruption
 
 **Triển khai**:
 - Emotion classifier chạy qua **dlbackend WebSocket** (remote inference server), không phải on-device ONNX. LeLamp gửi camera frames, nhận emotion predictions.
 - `lelamp/service/sensing/perceptions/emotion.py` — `RemoteEmotionChecker` kết nối dlbackend, fire event `emotion.detected` với cảm xúc phát hiện được (Angry, Disgust, Fear, Happy, Sad, Surprise, Neutral).
-- Lumi `user-emotion-detection/SKILL.md` map cảm xúc khuôn mặt → mood signal qua `POST /api/mood/log`.
-- Lumi `mood/SKILL.md` fusion signals (camera emotion, conversation, voice tone) thành mood decisions.
+- Lamp `user-emotion-detection/SKILL.md` map cảm xúc khuôn mặt → mood signal qua `POST /api/mood/log`.
+- Lamp `mood/SKILL.md` fusion signals (camera emotion, conversation, voice tone) thành mood decisions.
 - Mood decisions trigger downstream: `music-suggestion` (nhạc chủ động), `wellbeing` (nhắc uống nước/nghỉ), `emotion` (biểu cảm đèn).
 - Configurable confidence threshold qua `EMOTION_CONFIDENCE_THRESHOLD` trong LeLamp config.
 
@@ -660,10 +660,10 @@ Body: {"x": 3, "y": 2, "r": 255, "g": 0, "b": 0}
 **Trạng thái: Đã triển khai** (2026-04)
 
 **Actor**: Hệ thống (tự động, sensing-driven)
-**Mô tả**: Lumi tự theo dõi hoạt động sedentary và chủ động nhắc đứng dậy, uống nước, hoặc nghỉ ngơi — không cần user yêu cầu.
+**Mô tả**: Lamp tự theo dõi hoạt động sedentary và chủ động nhắc đứng dậy, uống nước, hoặc nghỉ ngơi — không cần user yêu cầu.
 
 **Ví dụ**:
-- User đã ngồi bàn 45 phút → Lumi nhẹ nhàng "Bạn đã ngồi một lúc rồi — nên đứng dậy stretch nhỉ?"
+- User đã ngồi bàn 45 phút → Lamp nhẹ nhàng "Bạn đã ngồi một lúc rồi — nên đứng dậy stretch nhỉ?"
 - User đã ngồi bàn 2 tiếng không có nước → "Đừng quên uống nước nhé"
 
 **Triển khai**:
@@ -685,12 +685,12 @@ Body: {"x": 3, "y": 2, "r": 255, "g": 0, "b": 0}
 **Trạng thái: Đã triển khai** (2026-04)
 
 **Actor**: Hệ thống (tự động, mood + sensing-driven)
-**Mô tả**: Lumi chủ động gợi ý nhạc dựa trên tâm trạng phát hiện được, hoạt động sedentary, và lịch sử nghe — không cần user yêu cầu.
+**Mô tả**: Lamp chủ động gợi ý nhạc dựa trên tâm trạng phát hiện được, hoạt động sedentary, và lịch sử nghe — không cần user yêu cầu.
 
 **Ví dụ**:
-- User detected stressed (facial emotion + conversation) → Lumi gợi ý piano calm
-- User làm việc sedentary lâu → Lumi đề nghị lo-fi/study beats
-- User detected happy/excited → Lumi gợi ý nhạc upbeat
+- User detected stressed (facial emotion + conversation) → Lamp gợi ý piano calm
+- User làm việc sedentary lâu → Lamp đề nghị lo-fi/study beats
+- User detected happy/excited → Lamp gợi ý nhạc upbeat
 
 **Triển khai**:
 - `lamp/resources/openclaw-skills/music-suggestion/SKILL.md` — skill chủ động riêng (tách khỏi reactive `music/SKILL.md`).
@@ -731,7 +731,7 @@ Body: {"x": 3, "y": 2, "r": 255, "g": 0, "b": 0}
 
 **Trạng thái: Đã triển khai** (2026-04) — không nằm trong đề xuất marketing gốc nhưng là tính năng quan trọng.
 
-**Mô tả**: Lumi nhận diện ai đang nói bằng voice embedding. Mic transcripts có prefix tên (`Leo:`) hoặc `Unknown:`. User có thể tự enroll giọng bằng cách giới thiệu bản thân.
+**Mô tả**: Lamp nhận diện ai đang nói bằng voice embedding. Mic transcripts có prefix tên (`Leo:`) hoặc `Unknown:`. User có thể tự enroll giọng bằng cách giới thiệu bản thân.
 
 **Triển khai**:
 - `lelamp/speaker_recognizer.py` + `lelamp/service/voice/speaker_recognizer/speaker_recognizer.py` — voice embedding model, profile storage, real-time matching.
@@ -748,7 +748,7 @@ Body: {"x": 3, "y": 2, "r": 255, "g": 0, "b": 0}
 | UC-M3 | Gợi ý nhạc chủ động | **DONE** | `music-suggestion` skill, mood + sedentary triggers |
 | UC-M4a | Thời gian nhìn màn hình / Eye-care | **CHƯA LÀM** | Cần gaze estimation model |
 | UC-M4b | Cử chỉ sức khỏe | **CHƯA LÀM** | Cần gesture model (MediaPipe) |
-| Bonus | Nhận diện giọng nói | **DONE** | LeLamp voice embeddings + Lumi enrollment skill |
+| Bonus | Nhận diện giọng nói | **DONE** | LeLamp voice embeddings + Lamp enrollment skill |
 
 *Marketing UC-M series đề xuất bởi đội marketing 06-04-2026. Trạng thái cập nhật 21-04-2026.*
 
@@ -866,8 +866,8 @@ Body: {"x": 3, "y": 2, "r": 255, "g": 0, "b": 0}
 |---|---|---|
 | S-01 | OpenClaw chạy đâu? | Trên Pi, local gateway mode, port 18789 |
 | S-02 | LLM default? | Claude Haiku 4.5 (cloud, Anthropic API). Hỗ trợ multi-provider. |
-| S-03 | Wake word engine? | Không dùng engine riêng. "Hey Lumi" detected trong Deepgram STT transcript. Dynamic qua IDENTITY.md. |
-| S-04 | Giao thức Lumi ↔ LeLamp? | HTTP proxy. LeLamp FastAPI `127.0.0.1:5001`, Lumi proxy từ port `5000`. |
+| S-03 | Wake word engine? | Không dùng engine riêng. "Hey Lamp" detected trong Deepgram STT transcript. Dynamic qua IDENTITY.md. |
+| S-04 | Giao thức Lamp ↔ LeLamp? | HTTP proxy. LeLamp FastAPI `127.0.0.1:5001`, Lamp proxy từ port `5000`. |
 
 ### Sản phẩm
 
@@ -875,7 +875,7 @@ Body: {"x": 3, "y": 2, "r": 255, "g": 0, "b": 0}
 |---|---|---|---|
 | P-01 | Kit DIY hay assembled? | Go-to-market | ❌ Chưa quyết định |
 | P-02 | Giá mục tiêu? | Thị trường | ❌ Cần finalize với Pi 5 |
-| P-03 | Tên chính thức? | Branding | ✅ **Lumi** (từ "luminous") |
+| P-03 | Tên chính thức? | Branding | ✅ **Lamp** (đặt theo đúng bản chất — một chiếc đèn) |
 | P-04 | Camera privacy? | UX, trust | ⚠️ Display eyes đóng khi camera off. LED indicator TBD. |
 | P-05 | Mobile app? | Scope | ✅ Không cần — voice + Telegram/Slack/Discord + web UI đủ |
 

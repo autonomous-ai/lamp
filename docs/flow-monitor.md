@@ -16,7 +16,7 @@ LeLamp (Python)                    Lamp Server (Go)                     Web UI (
                             │
                             ├─ flow.Log("lifecycle_*") ──→ JSONL file ──→ /flow-stream (SSE)
                             ├─ flow.Log("tool_call")                         ↓
-                            ├─ flow.Log("tts_send")                    lumi/web/.../Monitor.tsx
+                            ├─ flow.Log("tts_send")                    lamp/web/.../Monitor.tsx
                             └─ monitorBus.Push() ──→ /openclaw/events (SSE)  └─ groupIntoTurns()
 ```
 
@@ -47,11 +47,11 @@ flow.Log("tool_call", data, payload.RunID)      // each event carries its own ID
 
 ### Telegram Detection Heuristic
 
-When `lifecycle_start` arrives without an active device trace (`flow.GetTrace() == ""`), the handler checks if it's a channel-initiated turn (Telegram/Slack). Lumi-originated `chat.send` turns are excluded via `lumi-chat-*` (and legacy `lumi-sensing-*`) so they are not mis-labeled as Telegram when the trace was lost.
+When `lifecycle_start` arrives without an active device trace (`flow.GetTrace() == ""`), the handler checks if it's a channel-initiated turn (Telegram/Slack). Lamp-originated `chat.send` turns are excluded via `lumi-chat-*` (and legacy `lumi-sensing-*`) so they are not mis-labeled as Telegram when the trace was lost.
 
 #### Fetching user message content via `chat.history` RPC
 
-OpenClaw's chat stream **never broadcasts `role:"user"` events** — it only emits `role:"assistant"` (delta/final/error). To get the user message text and sender name, Lumi calls the `chat.history` WebSocket RPC on the same WS connection used for events:
+OpenClaw's chat stream **never broadcasts `role:"user"` events** — it only emits `role:"assistant"` (delta/final/error). To get the user message text and sender name, Lamp calls the `chat.history` WebSocket RPC on the same WS connection used for events:
 
 ```
 →  {"type":"req","id":"history-1","method":"chat.history",
@@ -71,7 +71,7 @@ Implementation details:
 - **Async goroutine**: The fetch runs in a separate goroutine because calling it synchronously inside the WS read loop handler would deadlock (the read loop blocks waiting for the handler to return, but the RPC response can only arrive after the handler returns).
 - **Pending RPC tracking**: `pendingRPC map[string]chan json.RawMessage` in `internal/openclaw/service.go` matches `type:"res"` frames to waiting callers by request ID. `dispatchRPCResponse()` hooks into the read loop before event handling.
 - **Two-phase emit**: First `chat_input` fires immediately with a neutral `[chat]` placeholder (no message yet). After the goroutine gets the history, a second `chat_input` fires with the actual message text and a label chosen by `senderLabel` / message-prefix inspection — the UI picks up the one with content.
-- **Label routing (second emit)**: (1) `senderLabel` non-empty → `[telegram:Gray]` (real channel user). (2) `senderLabel` empty + message matches a Lumi-internal prefix → `[voice]` / `[emotion]` / `[activity]` / `[wellbeing]` / `[music]` / `[sensing]` / `[system]` (sensing or voice event Lumi posted via chat.send that OpenClaw merged into this UUID host turn via steer mode). (3) Otherwise → generic `[chat]`. Previously every UUID channel-turn was unconditionally labelled with the configured channel (`[telegram]`), mis-attributing steer-merged self-fire turns to Telegram.
+- **Label routing (second emit)**: (1) `senderLabel` non-empty → `[telegram:Gray]` (real channel user). (2) `senderLabel` empty + message matches a Lamp-internal prefix → `[voice]` / `[emotion]` / `[activity]` / `[wellbeing]` / `[music]` / `[sensing]` / `[system]` (sensing or voice event Lamp posted via chat.send that OpenClaw merged into this UUID host turn via steer mode). (3) Otherwise → generic `[chat]`. Previously every UUID channel-turn was unconditionally labelled with the configured channel (`[telegram]`), mis-attributing steer-merged self-fire turns to Telegram.
 - **Best-effort**: 3-second timeout. If the fetch fails, the turn stays at the generic `[chat]` placeholder — better than mis-attributing to a specific channel.
 - **Heartbeat noise**: OpenClaw heartbeat cron (every 30m) also triggers `lifecycle_start`. The last `role:"user"` message in those turns will be the heartbeat system prompt (starts with `"System:"`), not a real user message.
 - **Token usage**: `chat.history` is also called on `lifecycle_end` to fetch token usage. OpenClaw `lifecycle_end` events do not include `usage` data. The last `role:"assistant"` message in the history response contains `usage: {input, output, totalTokens, cacheRead, cacheWrite}` for the completed turn. This is emitted as a `token_usage` flow event with `source: "chat_history"`.
@@ -81,22 +81,22 @@ Implementation details:
 ```
 sendChat() generates:
   reqID           = "chat-1"                       (WS message ID, local counter)
-  idempotencyKey  = "lumi-chat-1-1774841927380"    (sent to OpenClaw, globally unique; not "sensing-only" — any outbound chat from Lumi uses this prefix)
+  idempotencyKey  = "lumi-chat-1-1774841927380"    (sent to OpenClaw, globally unique; not "sensing-only" — any outbound chat from Lamp uses this prefix)
 
 sendChat returns idempotencyKey → used as trace_id in flow events
 ```
 
 **OpenClaw run_id behavior depends on version:**
-- **5.2** (and rare paths in 5.4): assigns its own UUID (e.g., `a8a51f3c-b44f-434b-a4c9-cd1a2a1e3c30`) — Lumi must map UUID → idempotencyKey.
+- **5.2** (and rare paths in 5.4): assigns its own UUID (e.g., `a8a51f3c-b44f-434b-a4c9-cd1a2a1e3c30`) — Lamp must map UUID → idempotencyKey.
 - **5.4** (majority): echoes the idempotencyKey directly as the runId (verified in `src/gateway/server-methods/chat.ts:2002`, `clientRunId = p.idempotencyKey`). The lifecycle runId IS already the device trace; no map is needed.
 - **Mixed within one session**: a single chat.send can produce up to two lifecycle phases — Phase 1 with the echoed idempotencyKey, Phase 2 with a fresh UUID for the actual embedded run (drain/burst pattern). Both must be handled.
 
 **Solution: `pendingChatTrace` FIFO + search-and-remove** in the SSE handler:
 1. Sensing handler allocates `NextChatRunID()`, then calls `flow.SetTrace(idempotencyKey)` **before** `flow.Start("sensing_input", ...)` so the JSONL `enter` line uses the same `trace_id` as `chat_send` for that POST. (Calling `SetTrace` only after `SendChatMessage` used to leave `enter` tagged with the **previous** turn's id — ghost turns and mismatched Pair exports.)
-2. After `chat.send` succeeds, Lumi pushes the idempotencyKey onto `pendingChatQueue` (FIFO).
+2. After `chat.send` succeeds, Lamp pushes the idempotencyKey onto `pendingChatQueue` (FIFO).
 3. On `lifecycle_start` the handler branches on `payload.RunID` format:
    - **Lumi-format** (`lumi-chat-*`): the runId IS the device trace. Call `RemovePendingChatTraceByRunID(payload.RunID)` to drop the matching queue entry. **No map** is created. Removing (instead of skipping) is critical: a leftover entry would later be FIFO-popped by an unrelated UUID lifecycle and shift every subsequent mapping by one.
-   - **UUID** (`a8a51f3c-...`): unknowable from Lumi side. FIFO-pop the oldest queue entry and store mapping `UUID → idempotencyKey`. Stale entries (>2 min) are pruned from the head before popping.
+   - **UUID** (`a8a51f3c-...`): unknowable from Lamp side. FIFO-pop the oldest queue entry and store mapping `UUID → idempotencyKey`. Stale entries (>2 min) are pruned from the head before popping.
 4. All subsequent **agent-stream** events (`lifecycle`, `tool`, `thinking`, `assistant` deltas, `tts_send`) use `resolveRunID(payload.RunID)` so `trace_id` matches the device key.
 5. **Chat stream** events (`case "chat"`: user/assistant text from the parallel chat feed) also call `resolveRunID` for `flow.Log` and monitor `RunID`. Without this, OpenClaw could emit the **UUID** in chat payloads while JSONL from step 4 used the **device id** — the Monitor would split one turn into two IDs.
 
@@ -106,7 +106,7 @@ Structured `slog.Info` lines for end-to-end ID alignment (device idempotency key
 
 | `op` | `section` (when set) | When |
 |------|------------------------|------|
-| `ws_chat_send` | `lumi_to_openclaw_ws` | Every `chat.send` from Lumi (`device_run_id` = idempotency key). |
+| `ws_chat_send` | `lumi_to_openclaw_ws` | Every `chat.send` from Lamp (`device_run_id` = idempotency key). |
 | `lelamp_agent_out` | `lelamp_to_openclaw` | Sensing handler after `SetTrace` + `agent_call` (same `device_run_id`). |
 | `openclaw_uuid_map` | `openclaw` | `lifecycle_start`: OpenClaw UUID stored → device id. |
 | `chat_run_resolve` | `openclaw_chat` | Chat stream event where `resolveRunID` changed the id (UUID → device). |
@@ -131,18 +131,18 @@ Structured `slog.Info` lines for end-to-end ID alignment (device idempotency key
 
 ## Turn Pipeline (SVG `FlowDiagram`)
 
-Rendered by `FlowDiagram` in `lumi/web/src/pages/Monitor.tsx`. The diagram is **observational only** (zoom/pan, node highlights from recent events). Three **tinted cluster** regions group nodes:
+Rendered by `FlowDiagram` in `lamp/web/src/pages/Monitor.tsx`. The diagram is **observational only** (zoom/pan, node highlights from recent events). Three **tinted cluster** regions group nodes:
 
 | Region | Color (theme) | Stages |
 |--------|----------------|--------|
-| **Lumi Server** | Teal (`--lm-teal`) | `intent_check`, `local_match`, `schedule_trigger`, `lumi_gate` |
+| **Lamp Server** | Teal (`--lm-teal`) | `intent_check`, `local_match`, `schedule_trigger`, `lumi_gate` |
 | **LeLamp** | Amber (`--lm-amber`) | `mic_input`, `cam_input`, `hw_emotion`, `hw_led`, `hw_servo`, `tts_speak` |
 | **OpenClaw** | Blue (`--lm-blue`) | `agent_call`, `telegram_input`, `tool_exec`, `agent_thinking`, `agent_response`, `tg_out` |
 
-### Lumi Server (top band)
+### Lamp Server (top band)
 
 - **Intent** and **Local** sit on the **same top row** (left to right).
-- **Cron** (`schedule_trigger`) is a **Lumi** stage (timer owned by Lumi, not OpenClaw). It shares the **same top `y`** as Intent / Local but uses **`x` aligned with `agent_call`** so Cron → Agent reads as a **vertical column** in the SVG.
+- **Cron** (`schedule_trigger`) is a **Lamp** stage (timer owned by Lamp, not OpenClaw). It shares the **same top `y`** as Intent / Local but uses **`x` aligned with `agent_call`** so Cron → Agent reads as a **vertical column** in the SVG.
 - Cron is **not** inside the OpenClaw cluster; only the shared `x` is for layout.
 
 ### LeLamp (left column)
@@ -235,7 +235,7 @@ lumi_gate → tts_speak          (Gate passes if not suppressed → LeLamp TTS)
 
 Node info extracted from turn events:
 - `sensing_input` → Sensing node (type + message). Detail: `{ type }`.
-- `chat_send` → outbound `chat.send` from Lumi. Detail: `{ type, run_id, has_session, has_image, image_bytes, message }`. `type` is `"user"` for real user / sensing-driven input, or `"system"` for internal notifications (skill watcher, wake greeting). The WS RPC payload sent to OpenClaw is identical in both cases — `type` only labels the flow event so the UI can distinguish them. Auto-compact does **not** emit a `chat_send`; it calls the `sessions.compact` RPC directly via `CompactSession`.
+- `chat_send` → outbound `chat.send` from Lamp. Detail: `{ type, run_id, has_session, has_image, image_bytes, message }`. `type` is `"user"` for real user / sensing-driven input, or `"system"` for internal notifications (skill watcher, wake greeting). The WS RPC payload sent to OpenClaw is identical in both cases — `type` only labels the flow event so the UI can distinguish them. Auto-compact does **not** emit a `chat_send`; it calls the `sessions.compact` RPC directly via `CompactSession`.
 - `sound_tracker` → pushed by LeLamp Python directly via `POST /api/monitor/event`. Appears alongside `sensing_input` turns to show escalation state:
   - `{ action: "silent", occurrence: 1 }` — forwarded, agent stays silent
   - `{ action: "persistent", occurrence: 3 }` — forwarded, agent will speak

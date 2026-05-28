@@ -9,7 +9,7 @@ This project controls an AI-powered desk lamp built on a Raspberry Pi 4 with art
 The architecture went through several pivots before reaching the final design:
 
 1. **Standalone Go + MCP** — Initially planned as a new Go project using MCP protocol for hardware control. Abandoned when we discovered OpenClaw uses its own native skill system (SKILL.md), not MCP.
-2. **Fork lobster** — Discovered that openclaw-lobster (the Go server for OpenClaw hardware products, now renamed to Lumi) shares ~70-80% of the architecture we need. Decision: fork lobster, one repo per hardware product.
+2. **Fork lobster** — Discovered that openclaw-lobster (the Go server for OpenClaw hardware products, now renamed to Lamp) shares ~70-80% of the architecture we need. Decision: fork lobster, one repo per hardware product.
 3. **LeLamp runtime already exists** — Discovered a Python runtime is ALREADY running on the Pi4 with working hardware drivers for servos (MotorsService), LEDs (RGBService), and audio (amixer). It was previously controlled via LiveKit @function_tool decorators.
 4. **Final decision** — Hybrid architecture. OpenClaw replaces LiveKit + OpenAI entirely. OpenClaw skills call the Lamp HTTP API, which bridges to the existing LeLamp Python services for hardware access.
 
@@ -18,7 +18,7 @@ The architecture went through several pivots before reaching the final design:
 **Fork lobster + Hybrid two-layer architecture + LeLamp Python bridge + Hardware Plugin system.**
 
 - **Layer 1 (System)**: Lamp Server handles system-critical functions that work without OpenClaw.
-- **Layer 2 (Skills)**: OpenClaw's LLM reads SKILL.md files and calls Lumi HTTP endpoints, which bridge to LeLamp's Python hardware drivers.
+- **Layer 2 (Skills)**: OpenClaw's LLM reads SKILL.md files and calls Lamp HTTP endpoints, which bridge to LeLamp's Python hardware drivers.
 
 The LeLamp Python runtime is kept as the hardware driver layer. We do NOT rewrite drivers in Go — we bridge to them.
 
@@ -88,11 +88,11 @@ Works **without OpenClaw**. If the AI is down, the device still boots, shows sta
 | MQTT communication | Auto-reconnect, message dispatch to backend |
 | Internet monitoring | Connectivity check, auto-recovery |
 | **Autonomous sensing** | Lightweight sensing loop: camera (presence, light level), mic (sound level, silence, voice tone), time (schedules), plug-in sensors. Emits events to OpenClaw when significant changes detected. |
-| **Ambient life** | Idle behaviors that make Lumi feel alive: breathing LED (sine-wave brightness), color drift (warm palette rotation), micro-movements (safe servo recordings), TTS self-talk. Auto-pauses on interaction, resumes after 10s quiet. |
+| **Ambient life** | Idle behaviors that make Lamp feel alive: breathing LED (sine-wave brightness), color drift (warm palette rotation), micro-movements (safe servo recordings), TTS self-talk. Auto-pauses on interaction, resumes after 10s quiet. |
 
 ### Autonomous Sensing Loop (Layer 1.5)
 
-Lumi runs a continuous, low-cost sensing loop that does **edge detection** on-device. When a significant event is detected, Lumi pushes context to OpenClaw for AI decision-making. This enables proactive behavior without burning LLM tokens continuously.
+Lamp runs a continuous, low-cost sensing loop that does **edge detection** on-device. When a significant event is detected, Lamp pushes context to OpenClaw for AI decision-making. This enables proactive behavior without burning LLM tokens continuously.
 
 ```
 Sensing Loop (Lamp Server, always running):
@@ -109,7 +109,7 @@ Sensing Loop (Lamp Server, always running):
 **Rule-based actions** (no AI needed): auto-dim on leave, brightness adjust on darkness, idle animations.
 **AI-driven actions** (OpenClaw decides): greetings, mood response, empathetic reactions, schedule-aware suggestions.
 
-Inherited from lobster (now in `lumi/` subdirectory):
+Inherited from lobster (now in `lamp/` subdirectory):
 
 - `server/server.go` — Gin HTTP server on port 5000
 - `server/config/` — JSON config with reload
@@ -397,5 +397,5 @@ User speaks
 - [x] **Go-to-Python bridge**: HTTP proxy. LeLamp runs FastAPI on `127.0.0.1:5001`, Lamp Server proxies requests from port 5000. Simple, debuggable, no tight coupling.
 - [ ] **Camera processing**: Run vision on-device with OpenCV, or offload to OpenClaw's vision capabilities?
 - [ ] **Audio input**: Does OpenClaw handle the microphone directly, or does the Lamp server capture audio and forward it?
-- [x] **LED driver**: LeLamp Python rpi_ws281x driver owns all LED control. Go SPI driver removed from Lumi — this lamp's hardware uses LeLamp's LED driver exclusively.
+- [x] **LED driver**: LeLamp Python rpi_ws281x driver owns all LED control. Go SPI driver removed from Lamp — this lamp's hardware uses LeLamp's LED driver exclusively.
 - [ ] **Generative body language**: How does the LLM generate servo positions for emotions? Predefined emotion presets with randomized parameters, or fully generative coordinates from the LLM?
