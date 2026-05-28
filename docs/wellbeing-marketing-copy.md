@@ -1,25 +1,25 @@
 # Wellbeing Skill — brief cho Marketing chỉnh copy nhắc nhở
 
-> File này tóm tắt skill **wellbeing** (nhắc uống nước / nghỉ ngơi) và phần **habit-aware** (nhắc theo thói quen riêng) để marketing chỉnh lại lời nói của Lumi.
+> File này tóm tắt skill **wellbeing** (nhắc uống nước / nghỉ ngơi) và phần **habit-aware** (nhắc theo thói quen riêng) để marketing chỉnh lại lời nói của Lamp.
 >
 > File gốc cần chỉnh:
-> - `lumi/resources/openclaw-skills/wellbeing/SKILL.md` — bảng copy chính (Step 4)
-> - `lumi/resources/openclaw-skills/habit/SKILL.md` — copy habit-aware (Output Examples)
+> - `lamp/resources/openclaw-skills/wellbeing/SKILL.md` — bảng copy chính (Step 4)
+> - `lamp/resources/openclaw-skills/habit/SKILL.md` — copy habit-aware (Output Examples)
 
 ---
 
 ## 1. Mục đích
 
-Lumi quan sát qua camera/sensor và **nhắc người dùng uống nước hoặc nghỉ ngơi** khi ngồi/làm việc lâu một chỗ. Mỗi lượt chỉ nói **1 câu ngắn**, hoặc im lặng (`NO_REPLY`) nếu chưa đến lúc.
+Lamp quan sát qua camera/sensor và **nhắc người dùng uống nước hoặc nghỉ ngơi** khi ngồi/làm việc lâu một chỗ. Mỗi lượt chỉ nói **1 câu ngắn**, hoặc im lặng (`NO_REPLY`) nếu chưa đến lúc.
 
-## 2. Khi nào Lumi nhắc
+## 2. Khi nào Lamp nhắc
 
-Mỗi lần camera phát hiện hoạt động (`motion.activity`), Lumi tính thời gian từ lần "reset" gần nhất:
+Mỗi lần camera phát hiện hoạt động (`motion.activity`), Lamp tính thời gian từ lần "reset" gần nhất:
 
 | Loại nhắc | Ngưỡng production | Reset khi |
 |---|---|---|
-| **Hydration** (uống nước) | 45 phút | user uống nước, mới vào phòng (`enter`), hoặc Lumi vừa nhắc xong |
-| **Break** (nghỉ ngơi) | 30 phút | user đứng dậy nghỉ, mới vào phòng (`enter`), hoặc Lumi vừa nhắc xong |
+| **Hydration** (uống nước) | 45 phút | user uống nước, mới vào phòng (`enter`), hoặc Lamp vừa nhắc xong |
+| **Break** (nghỉ ngơi) | 30 phút | user đứng dậy nghỉ, mới vào phòng (`enter`), hoặc Lamp vừa nhắc xong |
 
 - Mỗi lượt chỉ nhắc **1 thứ** — hydration ưu tiên trước break.
 - Sau khi đã nhắc, đồng hồ reset → lần sau phải đợi đủ ngưỡng nữa.
@@ -30,7 +30,7 @@ Mỗi lần camera phát hiện hoạt động (`motion.activity`), Lumi tính t
 - **1–2 câu ngắn**, không xuống dòng. Pattern khuyến nghị: 1 câu quan sát + 1 câu rủ hành động (vd: *"You've been at the screen a while. Want some water?"*). 1 câu cũng OK nếu gọn và đủ ấm.
 - Ấm áp, kiểu **bạn bè quan sát** — không phải robot báo động, không "thưa anh/chị".
 - **Phải có dấu hỏi hoặc lời rủ hành động** ("...?", "...for a sec?") — mục tiêu là rủ user uống/nghỉ chứ không phải thông báo.
-- **Bám vào hành động đang thấy** (đang dùng máy tính, đang viết, đang đọc...) cho cảm giác Lumi để ý người dùng thật.
+- **Bám vào hành động đang thấy** (đang dùng máy tính, đang viết, đang đọc...) cho cảm giác Lamp để ý người dùng thật.
 - **Không lặp lại** — mỗi lần phải đổi cách nói. Bảng dưới là **tham khảo tone**, agent không bao giờ được nói y chang một dòng trong bảng.
 - Không emoji, không hashtag.
 
@@ -38,7 +38,7 @@ Mỗi lần camera phát hiện hoạt động (`motion.activity`), Lumi tính t
 
 ## 4. Bảng copy hiện tại — Wellbeing (file `wellbeing/SKILL.md` Step 4)
 
-Lumi chọn câu dựa trên **hoạt động đang quan sát** (raw label từ camera):
+Lamp chọn câu dựa trên **hoạt động đang quan sát** (raw label từ camera):
 
 | Hoạt động đang thấy | Câu nhắc nước (tone, không copy y nguyên) | Câu nhắc nghỉ (tone, không copy y nguyên) |
 |---|---|---|
@@ -60,7 +60,7 @@ Lumi chọn câu dựa trên **hoạt động đang quan sát** (raw label từ 
 
 ## 5. Bảng copy hiện tại — Habit-aware (file `habit/SKILL.md` Output Examples)
 
-Khi Lumi đã học được **thói quen riêng** của user (cần ≥3 ngày dữ liệu), nó có thể chèn ngữ cảnh "thường ngày này..." vào câu nhắc, thay vì câu chung chung.
+Khi Lamp đã học được **thói quen riêng** của user (cần ≥3 ngày dữ liệu), nó có thể chèn ngữ cảnh "thường ngày này..." vào câu nhắc, thay vì câu chung chung.
 
 ### Điều kiện kích hoạt habit-aware
 - User có ≥3 ngày lịch sử wellbeing.
@@ -88,7 +88,7 @@ Phần này dài hơn 1 câu, vì user chủ động hỏi:
 | **Narrative mode** | 2–4 ngày data, chưa đủ thành habit | *"I've only got two real days on Chloe so far — April 28 was an evening at the computer with a lot of water breaks, and April 29 ran late, working past midnight. Not enough days yet to call it a habit, but that's what I've seen."* |
 | **Honest-gap mode** | Data cũ, lâu không gặp user | *"Honestly, I haven't seen Leo much lately — just one short session yesterday. The patterns I have are from two weeks ago, so I'd rather not pretend they're still true."* |
 
-**Tone của Flow E:** trung thực, không phán xét, dám nói "tôi chưa biết đủ để nói chắc". Đây là khác biệt quan trọng so với câu nhắc 1-câu — ở đây Lumi kể lại quan sát.
+**Tone của Flow E:** trung thực, không phán xét, dám nói "tôi chưa biết đủ để nói chắc". Đây là khác biệt quan trọng so với câu nhắc 1-câu — ở đây Lamp kể lại quan sát.
 
 ---
 
@@ -99,9 +99,9 @@ Trước khi merge bản copy mới, kiểm tra:
 - [ ] Mỗi ô trong bảng là **1–2 câu ngắn**, không xuống dòng. Pattern khuyến nghị: quan sát + rủ hành động.
 - [ ] Có dấu hỏi hoặc gợi ý hành động (không phải thông báo trống "Đã đến giờ uống nước.").
 - [ ] Bảng được hiểu là **tham khảo tone** — agent paraphrase mỗi lượt, không copy verbatim.
-- [ ] Ngôi xưng **nhất quán** với các skill khác Lumi đang dùng (hiện: bạn bè, không "anh/chị/quý khách").
+- [ ] Ngôi xưng **nhất quán** với các skill khác Lamp đang dùng (hiện: bạn bè, không "anh/chị/quý khách").
 - [ ] Câu **bám vào hành động** trong cột bên trái (vd cột `writing` không nên copy giống cột `using computer`).
-- [ ] Có **ít nhất 2–3 biến thể** cho mỗi ô để Lumi không lặp.
+- [ ] Có **ít nhất 2–3 biến thể** cho mỗi ô để Lamp không lặp.
 - [ ] Câu habit-aware (mục 5) có yếu tố "you usually..." hoặc tương đương — đó là điểm khác biệt với câu chung.
 - [ ] Nếu làm bản tiếng Việt: thêm cột `vi` ở cả 2 file, **không xoá** cột English (nhiều skill khác đang dùng English làm fallback).
 
@@ -111,8 +111,8 @@ Trước khi merge bản copy mới, kiểm tra:
 
 | Nội dung | File | Vị trí trong file |
 |---|---|---|
-| Bảng copy chính (8 hành động × 2 loại nhắc) | `lumi/resources/openclaw-skills/wellbeing/SKILL.md` | mục **Step 4 — Speak**, dòng ~119–126 |
-| Câu habit-aware enrich nudge | `lumi/resources/openclaw-skills/habit/SKILL.md` | mục **Output Examples → Nudge enrichment** |
-| Câu trả lời khi user hỏi habit (3 mode) | `lumi/resources/openclaw-skills/habit/SKILL.md` | mục **Output Examples → Open habit question** |
+| Bảng copy chính (8 hành động × 2 loại nhắc) | `lamp/resources/openclaw-skills/wellbeing/SKILL.md` | mục **Step 4 — Speak**, dòng ~119–126 |
+| Câu habit-aware enrich nudge | `lamp/resources/openclaw-skills/habit/SKILL.md` | mục **Output Examples → Nudge enrichment** |
+| Câu trả lời khi user hỏi habit (3 mode) | `lamp/resources/openclaw-skills/habit/SKILL.md` | mục **Output Examples → Open habit question** |
 
-Sau khi chỉnh, deploy lại Lumi để Pi load skill mới (hỏi dev để deploy — không tự SSH).
+Sau khi chỉnh, deploy lại Lamp để Pi load skill mới (hỏi dev để deploy — không tự SSH).

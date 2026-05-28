@@ -1,22 +1,22 @@
-# Architecture Overview — Lumi AI Lamp
+# Architecture Overview — Lamp AI Lamp
 
 ## 3-Layer Architecture
 
 ```
-OpenClaw (AI/LLM) → Lumi Server (Go, :5000) → LeLamp Runtime (Python, :5001) → Hardware
+OpenClaw (AI/LLM) → Lamp Server (Go, :5000) → LeLamp Runtime (Python, :5001) → Hardware
 ```
 
 | Layer | Language | Port | Role |
 |-------|----------|------|------|
 | OpenClaw | Go | WS | AI brain, LLM, SKILL.md, memory, channels |
-| Lumi Server | Go | 5000 | System (network, OTA, MQTT, reset), sensing event routing, local intent |
+| Lamp Server | Go | 5000 | System (network, OTA, MQTT, reset), sensing event routing, local intent |
 | LeLamp Runtime | Python | 5001 | Hardware drivers (servo, LED, camera, audio, display), FastAPI |
 
 ## Project Directory
 
 ```
-lumi/
-├── cmd/lamp/main.go              — Lumi Server entry point
+lamp/
+├── cmd/lamp/main.go              — Lamp Server entry point
 ├── cmd/bootstrap/main.go         — OTA bootstrap worker
 ├── server/
 │   ├── server.go                 — Gin HTTP server, route setup
@@ -74,7 +74,7 @@ web/                              — React 19 + Vite + Tailwind CSS 4 SPA
 ```
 Mic (always on) → Local VAD (RMS energy, free)
     → Speech detected → Connect Deepgram STT
-        → "hey lumi, turn off light" → voice_command → local intent → execute
+        → "hey lamp, turn off light" → voice_command → local intent → execute
         → "hey wanna grab lunch?" → voice (ambient) → OpenClaw
     → Silence 3s → Disconnect Deepgram
 ```
@@ -94,7 +94,7 @@ Event has image? (large motion, face enter) → encode frame full-resolution JPE
 Face enter image: original frame annotated with bounding boxes + labels
 
 POST /api/sensing/event {type, message, image?}
-    → Lumi Go:
+    → Lamp Go:
         1. Voice event + local intent match? → execute directly (~50ms)
         2. No match → forward to OpenClaw:
            - Has image → SendChatMessageWithImage (text + vision content block)

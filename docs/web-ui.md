@@ -1,4 +1,4 @@
-# Web UI — Lumi Monitor Dashboard
+# Web UI — Lamp Monitor Dashboard
 
 ## Last updated: 2026-05-27
 
@@ -6,7 +6,7 @@
 
 ## 1. Overview
 
-Lumi's Web UI is a React SPA (Single Page Application) built with **React 19 + TypeScript + Vite + Tailwind CSS 4**, serving two purposes:
+Lamp's Web UI is a React SPA (Single Page Application) built with **React 19 + TypeScript + Vite + Tailwind CSS 4**, serving two purposes:
 
 1. **Setup flow** — WiFi, LLM provider, messaging channel onboarding (`/setup/*` pages)
 2. **Monitor Dashboard** — Real-time device status monitoring (`/monitor`)
@@ -15,23 +15,23 @@ Build output (`dist/`) is served by nginx at root `/` on the device.
 
 ### 1.1 Browser Tab Title
 
-The browser tab title (`document.title`) reflects the focused page/tab so multiple Lumi tabs are distinguishable. Driven by the shared `useDocumentTitle` hook (`lumi/web/src/hooks/useDocumentTitle.ts`); format is `Lumi · <segment>[· <sub-segment>]`.
+The browser tab title (`document.title`) reflects the focused page/tab so multiple Lamp tabs are distinguishable. Driven by the shared `useDocumentTitle` hook (`lamp/web/src/hooks/useDocumentTitle.ts`); format is `Lamp · <segment>[· <sub-segment>]`.
 
 | Route / state | Title |
 |---------------|-------|
-| `/setup` (and `/` when not provisioned) | `Lumi · Setup` |
-| `/monitor` (active section) | `Lumi · <section label>` — e.g. `Lumi · Chat`, `Lumi · Overview`, `Lumi · Info`, `Lumi · Flow`, `Lumi · Users`, `Lumi · Camera`, `Lumi · Sensing`, `Lumi · Analytics`, `Lumi · Servo`, `Lumi · Logs`, `Lumi · CLI` |
-| `/edit` (Settings, active section) | `Lumi · Settings · <section label>` — e.g. `Lumi · Settings · Device`, `Lumi · Settings · Wi-Fi`, `Lumi · Settings · AI Brain`, `Lumi · Settings · Face`, `Lumi · Settings · TTS`, `Lumi · Settings · STT`, `Lumi · Settings · Channels`, `Lumi · Settings · MQTT` |
-| `/gw-config` | `Lumi · GW Config` |
+| `/setup` (and `/` when not provisioned) | `Lamp · Setup` |
+| `/monitor` (active section) | `Lamp · <section label>` — e.g. `Lamp · Chat`, `Lamp · Overview`, `Lamp · Info`, `Lamp · Flow`, `Lamp · Users`, `Lamp · Camera`, `Lamp · Sensing`, `Lamp · Analytics`, `Lamp · Servo`, `Lamp · Logs`, `Lamp · CLI` |
+| `/edit` (Settings, active section) | `Lamp · Settings · <section label>` — e.g. `Lamp · Settings · Device`, `Lamp · Settings · Wi-Fi`, `Lamp · Settings · AI Brain`, `Lamp · Settings · Face`, `Lamp · Settings · TTS`, `Lamp · Settings · STT`, `Lamp · Settings · Channels`, `Lamp · Settings · MQTT` |
+| `/gw-config` | `Lamp · GW Config` |
 
-The static `<title>Lumi Setup</title>` in `index.html` is the pre-mount fallback; the hook overrides it once React mounts and reverts to the previous title on unmount.
+The static `<title>Lamp Setup</title>` in `index.html` is the pre-mount fallback; the hook overrides it once React mounts and reverts to the previous title on unmount.
 
 ---
 
 ## 2. Directory Structure
 
 ```
-lumi/web/
+lamp/web/
 ├── src/
 │   ├── pages/
 │   │   ├── Monitor.tsx        # Dashboard monitor (main file)
@@ -97,20 +97,20 @@ Defined at `.lm-root` in `index.css`:
 
 Monitor polls system/HW APIs every **3 seconds**. Flow uses file-backed hybrid mode: REST seed + live stream.
 
-### 4.1 Lumi Server (Go, port 5000, prefix `/api`)
+### 4.1 Lamp Server (Go, port 5000, prefix `/api`)
 
 | Endpoint | Data |
 |----------|------|
 | `GET /api/system/info` | CPU load, RAM (KB), temperature, uptime, goroutines, version, deviceId |
 | `GET /api/system/network` | SSID, IP, public IP, Tailscale IP, signal (dBm), internet (bool) |
-| `GET /api/openclaw/status` | name, connected (bool), sessionKey (bool), version, emotion, uptime (Lumi WS uptime, secs), agentUptime (OpenClaw process uptime from hello-ok `server.uptimeMs`, secs — survives Lumi restarts) |
+| `GET /api/openclaw/status` | name, connected (bool), sessionKey (bool), version, emotion, uptime (Lamp WS uptime, secs), agentUptime (OpenClaw process uptime from hello-ok `server.uptimeMs`, secs — survives Lamp restarts) |
 | `GET /api/openclaw/recent` | Latest flow events from today's JSONL file (`local/flow_events_<date>.jsonl`) |
 | `GET /api/openclaw/flow-events?date=YYYY-MM-DD&last=500` | File-backed flow events API used for Flow seed/history |
 | `GET /api/openclaw/flow-stream` | File-backed live stream (SSE) for Flow updates when JSONL changes |
 | `GET /api/openclaw/events` | Monitor bus SSE endpoint (kept for compatibility) |
 | `POST /api/system/force-update` | Triggers OTA check via bootstrap worker (proxies to `localhost:8080/force-check`) |
 
-> **Note on format**: Lumi API returns `{ status: 1, data: <payload>, message: null }` on success.
+> **Note on format**: Lamp API returns `{ status: 1, data: <payload>, message: null }` on success.
 
 ### 4.2 LeLamp (Python/FastAPI, port 5001, prefix `/hw`)
 
@@ -186,8 +186,8 @@ Cards included:
 
 Below the nav items and OpenClaw status, the sidebar shows versions for all three repos:
 - **Web** (teal): injected at build time from `package.json` via Vite `define` (`__WEB_VERSION__`)
-- **Lumi** (amber): from `GET /api/system/info` → `version` field (Go ldflags)
-- **LeLamp** (blue): from `GET /api/system/info` → `lelampVersion` field. Lumi calls LeLamp `:5001/version` on the loopback once per minute (cached) and re-exposes it through the lumi API, so the browser doesn't need direct access to `/hw/*` (nginx gates `/hw/` to loopback only).
+- **Lamp** (amber): from `GET /api/system/info` → `version` field (Go ldflags)
+- **LeLamp** (blue): from `GET /api/system/info` → `lelampVersion` field. Lamp calls LeLamp `:5001/version` on the loopback once per minute (cached) and re-exposes it through the lamp API, so the browser doesn't need direct access to `/hw/*` (nginx gates `/hw/` to loopback only).
 - **Force Update** button: triggers `POST /api/system/force-update` → bootstrap OTA check. Shows "Checking…" while busy, then "Triggered"/"Failed" feedback for 3 seconds.
 
 ### 5.2 System Section
@@ -223,7 +223,7 @@ Each event displays: type badge, phase (if any), runId (first 8 chars), timestam
 - Fallback polling (2s) is used only if live stream disconnects.
 - Displayed turns/events are fully derived from JSONL flow logs.
 
-**Turn Pipeline (SVG)** — Implemented by `FlowDiagram` in `lumi/web/src/pages/Monitor.tsx`. Full layout (three clusters: Lumi / LeLamp / OpenClaw, column grid, Cron vs OpenClaw, LeLamp row aligned with Tool, approximate coordinates) is documented in **`docs/flow-monitor.md`**; Vietnamese summary in **`docs/vi/flow-monitor_vi.md`**.
+**Turn Pipeline (SVG)** — Implemented by `FlowDiagram` in `lamp/web/src/pages/Monitor.tsx`. Full layout (three clusters: Lamp / LeLamp / OpenClaw, column grid, Cron vs OpenClaw, LeLamp row aligned with Tool, approximate coordinates) is documented in **`docs/flow-monitor.md`**; Vietnamese summary in **`docs/vi/flow-monitor_vi.md`**.
 
 Turn Pipeline grouping behavior:
 - Turns are still started by input/trigger events (`sensing_input`, `chat_input`, `schedule_trigger`, etc.).
@@ -239,7 +239,7 @@ Turn Pipeline grouping behavior:
 - Temporary fallback: when Telegram text is unavailable, UI displays `Message content from telegram`.
 - Turn badges always render the `IN` row; if input is missing, UI shows `Input not captured`.
 - Flow Panel header actions include **`↓ Bundle`**, **`full day`**, **`🗑 Log`**.
-- **`↓ Bundle`** — one click saves **two files**: (1) server JSONL tail via `fetch` + blob (`GET /api/openclaw/flow-logs?last=500`), (2) UI snapshot JSON (`events` + `groupIntoTurns` → `lumi_flow_ui_snapshot_*.json`).
+- **`↓ Bundle`** — one click saves **two files**: (1) server JSONL tail via `fetch` + blob (`GET /api/openclaw/flow-logs?last=500`), (2) UI snapshot JSON (`events` + `groupIntoTurns` → `lamp_flow_ui_snapshot_*.json`).
 - **`full day`** — `GET /api/openclaw/flow-logs` without `last` (whole day JSONL).
 - `🗑 Log` asks for confirmation and calls `DELETE /api/openclaw/flow-logs` to truncate the server flow log, then clears current Flow UI events.
 - Turn history list shows **all turns** for the day (newest first), derived from the **last 10 000** flow events — covers a full day of typical activity.
@@ -254,7 +254,7 @@ Turn Pipeline grouping behavior:
 
 ### 5.5 Logs Section
 
-- Dedicated runtime log panels for LeLamp, Lumi, and OpenClaw service logs.
+- Dedicated runtime log panels for LeLamp, Lamp, and OpenClaw service logs.
 - Each panel streams via SSE (`GET /api/logs/stream?source=<source>`) with fallback polling.
 - Supports level filtering (ALL/DEBUG/INFO/WARN/ERROR) and text/regex search.
 
@@ -262,7 +262,7 @@ Turn Pipeline grouping behavior:
 
 ### 5.6 Chat Section
 
-Interactive chat interface for communicating with Lumi AI. Layout: sidebar (conversation list) + main chat area.
+Interactive chat interface for communicating with Lamp AI. Layout: sidebar (conversation list) + main chat area.
 
 **Conversations**
 - Multiple conversations stored in localStorage (max 50, 200 messages each)
