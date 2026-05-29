@@ -1107,7 +1107,9 @@ losetup -d "${LOOP_DEV}"; LOOP_DEV=""
 
 log "Compressing ${OUT_IMG} → ${OUT_IMG}.xz (this takes a few minutes)…"
 rm -f "${OUT_IMG}.xz"
-xz -9 --threads=0 "${OUT_IMG}"
+# -k keeps the original .img alongside the .xz so operator can verify/inspect
+# or flash raw before deciding to delete. Manual cleanup: rm -f output/golden-opi.img
+xz -9 -k --threads=0 "${OUT_IMG}"
 
 log "DONE: ${OUT_IMG}.xz ($(du -h "${OUT_IMG}.xz" | cut -f1))"
 log "Flash:  make sd-card-flash DISK=N    (decompresses on the fly via xz | dd)"
