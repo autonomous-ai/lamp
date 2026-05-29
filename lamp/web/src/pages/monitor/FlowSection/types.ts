@@ -3,6 +3,7 @@ import type { DisplayEvent } from "../types";
 // Maps a MonitorEvent type/node to a flow stage ID
 export type FlowStage =
   | "mic_input" | "cam_input" | "button_input" | "channel_input" | "webchat_input" | "intent_check" | "local_match"
+  | "brain_decide"
   | "agent_call" | "agent_thinking" | "tool_exec" | "agent_response" | "tts_speak"
   | "schedule_trigger" | "lamp_gate" | "hw_led" | "hw_servo" | "hw_emotion" | "hw_audio" | "hw_wellbeing" | "hw_mood" | "hw_music_suggestion" | "hw_posture" | "tg_out" | "tg_alert";
 
@@ -86,6 +87,16 @@ export const FLOW_NODES: FlowNodeDef[] = [
       "flow_event:chat_send", "flow_enter:chat_send", "flow_exit:chat_send",
       "flow_event:agent_call",
       "intent_match", "flow_event:intent_match",
+    ] },
+
+  { id: "brain_decide",
+    label: "Brain", short: "BRAIN", icon: "🧠", color: "var(--lm-purple)", path: "fast",
+    shape: "diamond",
+    desc: "Half-cascade brain (Gemini Live / OpenAI Realtime / call mode)\n→ chitchat: speak directly via TTS\n→ delegate: hand off to OpenClaw agent_call",
+    triggers: [
+      "flow_event:brain_input",
+      "flow_event:brain_chitchat",
+      "flow_event:brain_delegate",
     ] },
 
   { id: "local_match",

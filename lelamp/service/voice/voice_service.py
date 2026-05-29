@@ -1123,9 +1123,25 @@ class VoiceService:
                 # Half-cascade brain — when active, the orchestrator
                 # decides chit-chat vs delegate from `final_text` (the
                 # STT transcript without speaker prefix) and speaks the
-                # chit-chat reply via TTS itself. Returns True when it
-                # handled the turn so we skip the Lamp forward.
-                if not self._brain.handle_stt_final(final_text, user, event_type):
+                # chit-chat reply via TTS itself.
+                #
+                # Return contract (see BrainOrchestrator.handle_stt_final):
+                #   True              — brain spoke; skip Lamp forward.
+                #   False             — brain skipped or off; forward with NO
+                #                       runId so Go mints via NextChatRunID.
+                #   (req_id, run_id)  — brain delegated; forward with these ids
+                #                       so Go reuses them → brain row + OpenClaw
+                #                       turn share one Monitor Flow row.
+                _brain_result = self._brain.handle_stt_final(final_text, user, event_type)
+                if _brain_result is True:
+                    pass  # chit-chat handled locally
+                elif isinstance(_brain_result, tuple) and len(_brain_result) == 2:
+                    _req_id, _run_id = _brain_result
+                    self._send_to_lamp(
+                        final_msg, event_type=event_type,
+                        run_id=_run_id, req_id=_req_id,
+                    )
+                else:
                     self._send_to_lamp(final_msg, event_type=event_type)
 
             # 2. Submit SER — uses the UNTRIMMED snapshot so laughter / sighs
@@ -1185,13 +1201,30 @@ class VoiceService:
             return True
         return False
 
-    def _send_to_lamp(self, message: str, event_type: str = "voice"):
+    def _send_to_lamp(
+        self,
+        message: str,
+        event_type: str = "voice",
+        *,
+        run_id: str = "",
+        req_id: str = "",
+    ):
         """Send the final decorated message (speaker prefix + optional audio
         path) to Lamp as a sensing event.
 
         ``message`` is already the output of ``_identify_and_decorate`` — it
         contains ``"<Name>: <text>"`` for a known speaker or
         ``"Unknown Speaker:<text> (audio save at <path>)"`` for an unenrolled one.
+
+        ``run_id`` / ``req_id`` are set ONLY when the half-cascade brain
+        decided to delegate this turn. Including them tells Lamp's
+        ``PostEvent`` to reuse the brain's pre-allocated id instead of
+        minting a new one via ``NextChatRunID`` — the result is one
+        Monitor Flow turn covering MIC → brain → OpenClaw → TTS instead
+        of the brain row + Lamp row split that happens by default.
+        Empty for non-brain paths (brain off, chitchat handled locally,
+        wake-word voice_command, etc.) — Lamp falls back to its normal
+        runId allocation, exact pre-brain behavior.
         """
         # Layer 3: transcript self-filter — drop if it's echo of our own TTS
         if self._is_echo(message):
@@ -1199,6 +1232,10 @@ class VoiceService:
 
         import json as _json
         payload = {"type": event_type, "message": message}
+        if run_id:
+            payload["runId"] = run_id
+        if req_id:
+            payload["reqId"] = req_id
         logger.info("curl -s -X POST %s -H 'Content-Type: application/json' -d '%s'",
                     LAMP_SENSING_URL, _json.dumps(payload))
         max_retries = 3

@@ -622,6 +622,14 @@ func (s *Server) Serve(closeFn func()) error {
 	monitor := api.Group("monitor")
 	monitor.POST("event", sameOriginOrLAN(), s.sensingHandler.PostMonitorEvent)
 
+	// Brain → Flow Monitor bridge. Lets the Python brain
+	// (lelamp/service/brain) surface its decision + latency events
+	// into the same flow_events JSONL the Monitor UI reads.
+	sensing.POST("brain/event", sameOriginOrLAN(), s.sensingHandler.PostBrainFlowEvent)
+	// Brain pre-allocates (reqId, runId) so a delegate turn shares ONE
+	// Monitor row with the eventual OpenClaw turn instead of splitting.
+	sensing.POST("alloc-runid", sameOriginOrLAN(), s.sensingHandler.AllocChatRunID)
+
 	// Lamp Buddy (macOS companion app for remote computer use):
 	//   - /pair/start, /status, /command, DELETE admin-gated
 	//   - /pair/confirm anonymous (code-based)

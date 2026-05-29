@@ -106,13 +106,18 @@ export function FlowDiagram({
     intent_check:      { x: 80, y: 50 },
     local_match:       { x: 200, y: 50 },
     lamp_gate:         { x: 467, y: 795 },
-    // LeLamp — input row (MIC/CAM/BTN)
-    mic_input:         { x: -40, y: 240 },
-    cam_input:         { x: 80, y: 240 },
-    // Button / touch input — physical interaction (GPIO button, TTP223
-    // touchpad). Sits below mic so it doesn't crowd the input row and
-    // its edge to intent_check has a clear path up-right past mic.
-    button_input:      { x: -40, y: 350 },
+    // LeLamp — input rows. Top row at y=240 holds BTN + CAM (compact,
+    // physical/passive inputs). Bottom row at y=350 holds MIC and the
+    // brain_decide node side-by-side, since MIC is the only input that
+    // feeds the half-cascade brain.
+    button_input:      { x: -220, y: 240 },
+    cam_input:         { x: -100, y: 240 },
+    mic_input:         { x: -220, y: 350 },
+    // Half-cascade brain — sits to the right of MIC on the same row.
+    // Lights up on STT-final; routes chitchat down to tts_speak (skips
+    // OpenClaw entirely) or delegate up to intent_check (which then
+    // hands off to agent_call the normal way).
+    brain_decide:      { x: 80, y: 350 },
     // LeLamp — output column (stacked vertically, same x, gap=135)
     hw_emotion:        { x: 200, y: 390 },
     hw_led:            { x: 200, y: 525 },
@@ -150,7 +155,9 @@ export function FlowDiagram({
   };
 
   const edges: [FlowStage, FlowStage][] = [
-    ["mic_input",         "intent_check"],
+    // mic_input → intent_check removed — voice now always flows
+    // through brain_decide (which then routes to tts_speak for
+    // chitchat or intent_check for delegate).
     ["cam_input",         "intent_check"],
     ["button_input",      "intent_check"],
     ["intent_check",      "local_match"],
@@ -159,6 +166,14 @@ export function FlowDiagram({
     ["local_match",       "hw_servo"],
     ["local_match",       "tts_speak"],
     ["intent_check",      "agent_call"],
+    // Brain fast path — STT-final → brain_decide → either TTS
+    // (chitchat) or back into intent_check (delegate; intent_check
+    // then routes to agent_call the same way a normal sensing event
+    // would). Edges light up via visitedStages: brain_chitchat
+    // highlights → tts_speak; brain_delegate highlights → intent_check.
+    ["mic_input",         "brain_decide"],
+    ["brain_decide",      "tts_speak"],
+    ["brain_decide",      "intent_check"],
     ["channel_input",     "agent_call"],
     ["webchat_input",     "agent_call"],
     ["schedule_trigger",  "agent_call"],
@@ -194,6 +209,17 @@ export function FlowDiagram({
   const ttsSuppressed = turnEvents.some((ev) =>
     ev.type === "flow_event" && (ev.detail as Record<string, any>)?.node === "tts_suppressed"
   );
+  // Brain decision branch per turn — used to gate the brain_decide →
+  // tts_speak and brain_decide → intent_check edges so only the path
+  // brain actually took lights up. Without this both edges light up
+  // on delegate (TTS sparks via OpenClaw's tts_send) which makes the
+  // diagram lie about the routing decision.
+  const brainHasChitchat = turnEvents.some((ev) =>
+    ev.type === "flow_event" && (ev.detail as Record<string, any>)?.node === "brain_chitchat"
+  );
+  const brainHasDelegate = turnEvents.some((ev) =>
+    ev.type === "flow_event" && (ev.detail as Record<string, any>)?.node === "brain_delegate"
+  );
 
   function nodeColor(id: FlowStage) {
     if (id === "tts_speak" && ttsSuppressed) return "#ef4444";
@@ -207,14 +233,31 @@ export function FlowDiagram({
     if (visitedStages.has(id)) return 1;
     return 1;
   }
+  // Brain edges: tts_speak fires on chitchat; intent_check fires on
+  // delegate. When a brain decision was made, gate the "wrong" edge
+  // off regardless of whether its endpoints are otherwise lit (delegate
+  // turns also fire tts_send via OpenClaw → would light brain→tts by
+  // default if we only checked endpoints).
+  function brainEdgeActive(from: FlowStage, to: FlowStage): boolean | null {
+    if (from !== "brain_decide") return null;
+    if (to === "tts_speak") return brainHasChitchat;
+    if (to === "intent_check") return brainHasDelegate;
+    return null;
+  }
   function edgeColor(from: FlowStage, to: FlowStage) {
+    const brainGate = brainEdgeActive(from, to);
+    if (brainGate === false) return "var(--lm-border)";
     const fromVisited = visitedStages.has(from) || from === activeStage;
     const toVisited = visitedStages.has(to) || to === activeStage;
+    if (brainGate === true) return nodeColor(to);
     if (fromVisited && toVisited) return nodeColor(to);
     if (fromVisited || toVisited) return "var(--lm-border-hi)";
     return "var(--lm-border)";
   }
   function edgeOpacity(from: FlowStage, to: FlowStage) {
+    const brainGate = brainEdgeActive(from, to);
+    if (brainGate === false) return 0.45;
+    if (brainGate === true) return 0.98;
     const fromVisited = visitedStages.has(from) || from === activeStage;
     const toVisited = visitedStages.has(to) || to === activeStage;
     if (fromVisited && toVisited) return 0.98;
@@ -278,11 +321,11 @@ export function FlowDiagram({
           </text>
         </g>
         <g>
-          <rect x={-100} y={185} width={360} height={805} rx={14}
+          <rect x={-280} y={185} width={540} height={805} rx={14}
             fill="var(--lm-amber)" fillOpacity={0.04} stroke="var(--lm-amber)" strokeWidth={1} opacity={0.3}
             strokeDasharray="4 4"
           />
-          <text x={80} y={175} textAnchor="middle"
+          <text x={-10} y={175} textAnchor="middle"
             fill="var(--lm-amber)" fontSize={11} fontWeight={700}
             fontFamily="monospace" opacity={0.6}
             style={{ letterSpacing: "0.08em" }}>

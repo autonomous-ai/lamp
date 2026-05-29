@@ -64,7 +64,26 @@ export function TurnBadge({ turn, pairTint, onViewPipeline }: { turn: Turn; pair
       (ev.detail as Record<string, any>)?.node === "turn_steered"
     )
   );
-  const pathLabel = turn.path === "agent" ? "OpenClaw" : turn.path === "dropped" ? "dropped" : turn.path === "queued" ? "queued" : turn.path;
+  // Brain half-cascade turn (chitchat or delegate): label as LeLamp
+  // brain regardless of computed path — these turns never touch
+  // OpenClaw on the chitchat path, and on delegate the brain segment
+  // is its own row anyway (OpenClaw opens a separate UUID turn).
+  const hasBrainEvents = turn.events.some((ev) =>
+    ev.type === "flow_event" && (
+      (ev.detail as Record<string, any>)?.node === "brain_input" ||
+      (ev.detail as Record<string, any>)?.node === "brain_chitchat" ||
+      (ev.detail as Record<string, any>)?.node === "brain_delegate"
+    )
+  );
+  const brainIsDelegate = turn.events.some((ev) =>
+    ev.type === "flow_event" && (ev.detail as Record<string, any>)?.node === "brain_delegate"
+  );
+  const pathLabel = hasBrainEvents
+    ? (brainIsDelegate ? "lelamp → delegate" : "lelamp brain")
+    : turn.path === "agent" ? "OpenClaw"
+    : turn.path === "dropped" ? "dropped"
+    : turn.path === "queued" ? "queued"
+    : turn.path;
 
   return (
     <div style={{
@@ -144,9 +163,9 @@ export function TurnBadge({ turn, pairTint, onViewPipeline }: { turn: Turn; pair
       }}>
         {formatTurnTime(turn.startTime)}
       </div>
-      {/* Turn ID for tracing — label by ID origin (Lamp-emitted vs OpenClaw-assigned UUID) */}
+      {/* Turn ID for tracing — label by ID origin (Lamp-emitted vs lelamp-brain vs OpenClaw-assigned UUID) */}
       <div style={{ fontSize: 8, color: "var(--lm-text)", fontFamily: "monospace", marginBottom: 3, opacity: 0.7 }}>
-        {turn.id.startsWith("lamp-") ? "lamp id" : "openclaw uuid"}: {turn.id}
+        {turn.id.startsWith("lamp-") ? "lamp id" : turn.id.startsWith("brain-") ? "brain id" : "openclaw uuid"}: {turn.id}
       </div>
       {/* Row 2: input */}
       <div style={{

@@ -130,6 +130,7 @@ lelamp/service/brain/
   prompts.py         — DECISION_RULES, DELEGATE_TOOL_*, language_hint(), resolve_stt_language()
   context_loader.py  — đọc IDENTITY / USER / MEMORY / KNOWLEDGE / SOUL + OpenClaw session JSONL
   text_router.py     — class TextBrain với 2 backend HTTP `gemini` / `openai`
+  flow_log.py        — POST helper bắn decision + latency event vào Flow Monitor JSONL
 lelamp/test/test_brain.py — unit test cho context loader
 ```
 
@@ -232,3 +233,66 @@ tiếp trả full price; mấy call sau cache lại.
   / KNOWLEDGE / SOUL phải restart lelamp mới ăn vào brain. Luồng
   OpenClaw delegate thì pick-up ngay — chỉ fast path chit-chat ôm
   snapshot.
+- **Brain chưa có local action tool (chỉ có `delegate_to_lamp`)** —
+  _đề xuất, chưa code._ Tool duy nhất của realtime brain là
+  `delegate_to_lamp` (params rỗng) + `wait_for_user`; mọi action
+  device đều đi qua OpenClaw (`POST /api/sensing/event`, ~3–5s). Fast
+  path duy nhất cho action đơn giản là keyword matcher bên Go
+  (`lamp/internal/intent/intent.go`): 19 command rule — LED
+  on/off/color/dim, 6 scene, volume up/down, mute, music-stop,
+  tts-stop, what-time, servo track/stop — cộng 7 chitchat rule. Command
+  rule là **`strings.Contains` chỉ tiếng Anh**, nên câu nói tiếng Việt
+  ("đổi đèn", "bật đèn") không bao giờ match, rớt xuống brain (chitchat
+  là ngoại lệ — vi/en/zh qua i18n). Keyword match cũng brittle với
+  transcript ASR. **Idea:** cấp cho realtime brain một bộ nhỏ
+  **local tool có tham số** — `control_light(state,color?,brightness?)`,
+  `set_scene(name)`, `set_volume(level)` / `stop_audio()`,
+  `track_object(name)` / `stop_tracking()` — kèm callback
+  `on_local_action` gọi thẳng HTTP API LeLamp (đúng endpoint matcher
+  đang dùng, KHÔNG qua OpenClaw delegate). Vừa có NLU hiểu câu nói tự
+  nhiên, vừa latency ~1–2s mà không tốn round-trip OpenClaw. Mục tiêu
+  **hybrid 3 tầng**: câu canonical → Go matcher (~50ms); câu device tự
+  nhiên/mờ → brain local tool (~1–2s); cần memory/skill/external →
+  `delegate_to_lamp` (~3–5s). 19 command rule của matcher chính là
+  inventory "không cần OpenClaw" đã curate sẵn để map sang.
+
+---
+
+## 8. Instrumentation cho Flow Monitor
+
+Để test, brain emit decision + latency event vào cùng
+`local/flow_events_*.jsonl` mà Monitor Flow UI đọc. Brain POST sang 1
+endpoint Go nhỏ wrap `flow.Log` — event hiện live trong Monitor cùng
+hàng với STT/chat.
+
+| Ở đâu | Làm gì |
+|-------|--------|
+| `lelamp/service/brain/flow_log.py` | POST helper fire-and-forget (`brain_flow().log(node, data, run_id)`). Gửi qua daemon thread nên hot path brain không bị block. |
+| `POST /api/sensing/brain/event` (Go) | Nhận `{node, data, runId}`, gọi `flow.Log(...)`. Code trong `lamp/server/sensing/delivery/http/handler.go:PostBrainFlowEvent`. |
+| `lelamp/service/brain/orchestrator.py:handle_stt_final` | Bắn `brain_input` (lúc STT-final) + `brain_decision` (sau khi `_text_brain.decide()` trả về). |
+| `lelamp/service/brain/live/runner.py` | Bắn `brain_input` lúc flush transcript đầu, `brain_decision` lúc chitchat kết thúc hoặc `_on_delegate`. |
+
+**Shape event:**
+
+```json
+{ "node": "brain_decision",
+  "data": {
+    "mode": "call" | "live",
+    "decision": "chitchat" | "delegate" | "error",
+    "user_text": "...",
+    "reply": "..." | null,
+    "elapsed_ms": 1240,
+    "latency_s": 1.24,          // chỉ call mode
+    "total_tokens": 487         // chỉ call mode
+  },
+  "runId": "brain-a1b2c3d4..."
+}
+```
+
+Mỗi brain turn mint riêng `brain-<uuid12>` runID để Monitor group
+input + decision chung 1 hàng. Lamp-side `NextChatRunID` chỉ chạy khi
+brain delegate (sau khi POST `/api/sensing/event`), nên runID brain và
+runID Lamp KHÔNG share. Cross-correlate bằng `user_text` + timestamp.
+
+**Disable:** set `LELAMP_BRAIN_FLOW_LOG=0` trong env lelamp để tắt
+helper POST (zero overhead trên hot path brain).

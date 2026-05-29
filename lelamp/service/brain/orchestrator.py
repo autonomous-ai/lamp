@@ -20,6 +20,8 @@ import threading
 import time
 from typing import Callable, Optional
 
+from lelamp.service.brain.flow_log import alloc_chat_run_id, brain_flow, mint_run_id, now_ms
+
 logger = logging.getLogger("lelamp.brain.orchestrator")
 
 
@@ -126,17 +128,27 @@ class BrainOrchestrator:
 
     def handle_stt_final(
         self, final_text: str, user: str, event_type: str,
-    ) -> bool:
+    ):
         """Half-cascade brain hook — runs after VoiceService gets a
         final STT transcript. Only active in call mode AND only on
         the plain ``voice`` event type (wake-word events have their
         own routing).
 
         Returns:
-            True  — brain handled the turn (chit-chat reply spoken).
-                    Caller MUST NOT also forward to Lamp.
-            False — brain abstained / delegated / errored. Caller
-                    should fall through to the normal Lamp forward.
+            ``True``                      — brain handled the turn (chit-chat
+                                            reply already spoken). Caller MUST
+                                            NOT forward to Lamp.
+            ``False``                     — brain skipped this turn (disabled,
+                                            wrong event_type, empty transcript).
+                                            Caller falls through to the normal
+                                            Lamp forward with NO runId — Go
+                                            mints one via NextChatRunID.
+            ``(req_id, run_id)`` tuple    — brain decided to delegate. Caller
+                                            MUST forward to Lamp AND pass these
+                                            ids so the Go ``PostEvent`` reuses
+                                            them instead of minting a new pair.
+                                            Result: brain row + OpenClaw turn
+                                            share one Monitor Flow row.
         """
         if (
             self._text_brain is None
@@ -147,11 +159,38 @@ class BrainOrchestrator:
             return False
 
         logger.info("brain.input  [%s] %r", user, final_text)
+        # Per-turn run-id so Monitor Flow groups input + decision under
+        # one row. ``voice_pipeline_start`` opens the turn in the UI's
+        # ``groupIntoTurns`` (a hardcoded turn-starter); ``brain_input``
+        # decorates the MIC node; ``brain_chitchat`` / ``brain_delegate``
+        # land at the end and light up the matching downstream edge.
+        #
+        # Pre-allocate from Go (``lamp-chat-N-<ts>`` shape) so a delegate
+        # turn shares ONE Monitor row with the eventual OpenClaw turn.
+        # On failure, falls back to local ``brain-*`` mint — degraded but
+        # never blocks the brain.
+        flow_req_id, flow_run_id = alloc_chat_run_id()
+        brain_flow().log(
+            "voice_pipeline_start",
+            {"mode": "call", "user": user, "source": "brain"},
+            flow_run_id,
+        )
+        brain_flow().log(
+            "brain_input",
+            {
+                "mode": "call",
+                "user_text": final_text,
+                "user": user,
+                "event_type": event_type,
+            },
+            flow_run_id,
+        )
         # t0 for end-to-end timing: the moment the STT transcript is
         # in hand and we hand it to the brain. That's also the moment
         # the user has stopped speaking from the listener's
         # perspective.
         t_voice_final = time.time()
+        t_decide_start_ms = now_ms()
         # Stream each completed sentence straight into the TTS queue
         # so playback starts on the first sentence while the model is
         # still generating the rest of the reply. Skips delegate
@@ -168,6 +207,30 @@ class BrainOrchestrator:
             "(prompt=%d response=%d)",
             user, decision.decision, decision.latency_s,
             decision.total_tokens, decision.prompt_tokens, decision.response_tokens,
+        )
+        # Distinct node name per branch — FE FlowDiagram lights the
+        # brain_decide → tts_speak edge on ``brain_chitchat`` and the
+        # brain_decide → agent_call edge on ``brain_delegate``.
+        _decision_node = {
+            "chitchat": "brain_chitchat",
+            "delegate": "brain_delegate",
+        }.get(decision.decision, "brain_error")
+        brain_flow().log(
+            _decision_node,
+            {
+                "mode": "call",
+                "decision": decision.decision,
+                "user_text": final_text,
+                "user": user,
+                "reply": decision.reply if decision.decision == "chitchat" else None,
+                "elapsed_ms": now_ms() - t_decide_start_ms,
+                "latency_s": decision.latency_s,
+                "prompt_tokens": decision.prompt_tokens,
+                "response_tokens": decision.response_tokens,
+                "total_tokens": decision.total_tokens,
+                "error": decision.error if decision.decision == "error" else None,
+            },
+            flow_run_id,
         )
         if decision.decision == "chitchat" and decision.reply:
             logger.info("brain.chitchat [%s] %r", user, decision.reply)
@@ -188,6 +251,14 @@ class BrainOrchestrator:
             return True
         if decision.decision == "delegate":
             logger.info("brain.delegate [%s] → Lamp", user)
+            # Hand the pre-allocated ids back so voice_service forwards
+            # to Lamp with the SAME runId we stamped on the brain
+            # events. PostEvent reuses → one Monitor Flow row. If alloc
+            # earlier fell back to the local ``brain-*`` mint, the
+            # tuple is still returned but Go will see a non-``lamp-
+            # chat-*`` prefix and mint its own (legacy two-row layout).
+            if flow_run_id.startswith("lamp-chat-"):
+                return flow_req_id, flow_run_id
             return False
         # decision == "error" — log and let it fall through to Lamp
         # (safe default; never silently drop user input).

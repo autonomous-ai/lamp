@@ -134,6 +134,7 @@ lelamp/service/brain/
   prompts.py         — DECISION_RULES, DELEGATE_PREFIX, language_hint(), resolve_stt_language()
   context_loader.py  — reads IDENTITY / USER / MEMORY / KNOWLEDGE / SOUL + OpenClaw session JSONL
   text_router.py     — TextBrain class with `gemini` and `openai` HTTP backends
+  flow_log.py        — POST helper that pipes decision + latency events into Flow Monitor JSONL
 lelamp/test/test_brain.py — context loader unit tests
 ```
 
@@ -248,3 +249,68 @@ the next call pays full price; subsequent calls cache again.
   MEMORY / KNOWLEDGE / SOUL require a lelamp restart to take effect in
   the brain. The OpenClaw delegate path picks up changes immediately —
   only the chit-chat fast path holds the snapshot.
+- **Brain has no local action tools (only `delegate_to_lamp`)** —
+  _proposal, not yet implemented._ The realtime brain's only tools are
+  `delegate_to_lamp` (empty params) + `wait_for_user`; every device
+  action routes through OpenClaw (`POST /api/sensing/event`, ~3–5s).
+  The only fast path for simple device actions is the Go keyword
+  matcher (`lamp/internal/intent/intent.go`): 19 command rules — LED
+  on/off/color/dim, 6 scenes, volume up/down, mute, music-stop,
+  tts-stop, what-time, servo track/stop — plus 7 chitchat rules. The
+  command rules are **English-only `strings.Contains`**, so spoken
+  Vietnamese ("đổi đèn", "bật đèn") never matches and falls through to
+  the brain (chitchat is the exception — it's vi/en/zh via i18n).
+  Keyword matching is also brittle for ASR transcripts. **Idea:** give
+  the realtime brain a small set of **parameterized local tools** —
+  `control_light(state,color?,brightness?)`, `set_scene(name)`,
+  `set_volume(level)` / `stop_audio()`, `track_object(name)` /
+  `stop_tracking()` — backed by an `on_local_action` callback that hits
+  the LeLamp HTTP API directly (same endpoints the matcher uses, NOT
+  the OpenClaw delegate). That buys natural-language NLU + ~1–2s
+  latency without the OpenClaw round-trip. Target a **3-tier hybrid**:
+  canonical phrases → Go matcher (~50ms); natural/fuzzy device
+  commands → brain local tool (~1–2s); anything needing
+  memory/skills/external facts → `delegate_to_lamp` (~3–5s). The
+  matcher's 19 command rules are already the curated inventory of
+  "no-OpenClaw-needed" actions to map from.
+
+---
+
+## 8. Flow Monitor instrumentation
+
+For testing, brain decision + latency events are piped into the same
+`local/flow_events_*.jsonl` the Monitor Flow UI reads. The brain POSTs
+to a small Go endpoint that wraps `flow.Log` — events appear live in
+the Monitor Flow view alongside STT/chat events.
+
+| Where | What |
+|-------|------|
+| `lelamp/service/brain/flow_log.py` | Fire-and-forget POST helper (`brain_flow().log(node, data, run_id)`). Daemon-thread send so brain hot path never blocks. |
+| `POST /api/sensing/brain/event` (Go) | Accepts `{node, data, runId}`, calls `flow.Log(...)`. `lamp/server/sensing/delivery/http/handler.go:PostBrainFlowEvent`. |
+| `lelamp/service/brain/orchestrator.py:handle_stt_final` | Emits `brain_input` (on STT-final) + `brain_decision` (after `_text_brain.decide()`). |
+| `lelamp/service/brain/live/runner.py` | Emits `brain_input` on first-transcript-flush, `brain_decision` at chitchat turn end or `_on_delegate`. |
+
+**Event shape:**
+
+```json
+{ "node": "brain_decision",
+  "data": {
+    "mode": "call" | "live",
+    "decision": "chitchat" | "delegate" | "error",
+    "user_text": "...",
+    "reply": "..." | null,
+    "elapsed_ms": 1240,
+    "latency_s": 1.24,          // call mode only
+    "total_tokens": 487         // call mode only
+  },
+  "runId": "brain-a1b2c3d4..."
+}
+```
+
+Each brain turn mints its own `brain-<uuid12>` runID so Monitor UI
+groups input + decision together. The Lamp-side `NextChatRunID` runs
+only when the brain delegates, so the Lamp-side runID and the brain
+runID don't share. Cross-correlate by `user_text` + timestamp.
+
+**Disable:** set `LELAMP_BRAIN_FLOW_LOG=0` in the lelamp env to silence
+the POST helper entirely (zero overhead on the brain hot path).

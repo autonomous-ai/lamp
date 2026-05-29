@@ -461,7 +461,36 @@ export function groupIntoTurns(events: DisplayEvent[]): Turn[] {
     const evRunId = extractEventRunId(ev);
     const start = isTurnStart(ev);
     if (start) {
-      const shouldForceSplit = Boolean(start.forceNewTurn);
+      let shouldForceSplit = Boolean(start.forceNewTurn);
+      // Brain delegate path: voice_pipeline_start opens the turn on the
+      // brain side (T1); then voice_service.send_to_lamp POSTs sensing
+      // and Go fires another voice sensing_input — which is also a
+      // force-new turn-starter. With pre-allocated runIds the OpenClaw
+      // pipeline carries the SAME runId as the brain segment, so we
+      // suppress the split and let sensing_input attach to the brain
+      // turn. Effect: ONE Monitor row covering MIC → brain → OpenClaw
+      // → TTS. Only fires when (a) current turn already has brain
+      // events and (b) runId matches.
+      if (shouldForceSplit && current && current.runId && evRunId && current.runId === evRunId) {
+        const isSensingStart = ev.type === "sensing_input" ||
+          (ev.type === "flow_enter" && ev.detail?.node === "sensing_input");
+        // Brain marker: voice_pipeline_start is only emitted by the
+        // lelamp brain (see flow_log.py). brain_input / brain_delegate
+        // might race the sensing_input POST in live mode (Python queue
+        // vs main-thread send_to_lamp) so don't require them — the
+        // presence of voice_pipeline_start alone identifies a brain
+        // turn that should absorb the upcoming sensing_input.
+        const currentIsBrainTurn = current.events.some((e) =>
+          e.type === "flow_event" && (
+            e.detail?.node === "voice_pipeline_start" ||
+            e.detail?.node === "brain_input" ||
+            e.detail?.node === "brain_chitchat" ||
+            e.detail?.node === "brain_delegate"
+          ));
+        if (isSensingStart && currentIsBrainTurn) {
+          shouldForceSplit = false;
+        }
+      }
       // Split if current turn is already done — don't append new turn's events to a finished turn.
       const currentDone = current?.status === "done" || current?.status === "error";
       if (!shouldForceSplit && !currentDone && current && current.runId && evRunId && current.runId === evRunId) {
@@ -479,7 +508,7 @@ export function groupIntoTurns(events: DisplayEvent[]): Turn[] {
       if (current) turns.push(current);
       // If another turn already claimed this runId, suffix with seq to keep IDs unique.
       // This prevents duplicate-id bugs in selection (click turn A, turn B stays highlighted).
-      let turnId = evRunId || `turn-${ev._seq}`;
+      let turnId: string = evRunId || `turn-${ev._seq}`;
       if (evRunId && turns.some((t) => t.id === evRunId)) {
         turnId = `${evRunId}:${ev._seq}`;
       }
@@ -594,6 +623,17 @@ export function groupIntoTurns(events: DisplayEvent[]): Turn[] {
       current.endTime = ev.time;
     }
     if (ev.type === "flow_event" && (ev.detail?.node === "tts_send" || ev.detail?.node === "tts_suppressed" || ev.detail?.node === "no_reply")) {
+      current.status = "done";
+      current.endTime = ev.time;
+    }
+    // Half-cascade brain chitchat is terminal — brain spoke the reply
+    // itself, OpenClaw never sees this turn. brain_delegate is NOT
+    // terminal: OpenClaw opens its own follow-up under the SAME pre-
+    // allocated runId, and the sensing_input → agent_call → ... events
+    // attach to this same Monitor row (see the brain-merge override at
+    // the top of the loop). The natural turn close then arrives via
+    // lifecycle_end / tts_send / chat_final_*.
+    if (ev.type === "flow_event" && ev.detail?.node === "brain_chitchat") {
       current.status = "done";
       current.endTime = ev.time;
     }
@@ -734,6 +774,7 @@ export function groupIntoTurns(events: DisplayEvent[]): Turn[] {
 export function extractNodeInfo(events: DisplayEvent[]): NodeInfoMap {
   const info: NodeInfoMap = {
     mic_input: [], cam_input: [], button_input: [], channel_input: [], webchat_input: [], intent_check: [], local_match: [],
+    brain_decide: [],
     agent_call: [], agent_thinking: [], tool_exec: [],
     agent_response: [], tts_speak: [], schedule_trigger: [],
     lamp_gate: [], hw_led: [], hw_servo: [], hw_emotion: [], hw_audio: [], hw_wellbeing: [], hw_mood: [], hw_music_suggestion: [], hw_posture: [], tg_out: [], tg_alert: [],
@@ -919,6 +960,35 @@ export function extractNodeInfo(events: DisplayEvent[]): NodeInfoMap {
     }
     if (ev.type === "flow_event" && ev.detail?.node === "no_reply") {
       pushAgentResponse("🚫 [no reply] — agent decided to do nothing");
+    }
+    // Brain (half-cascade) instrumentation. brain_input decorates the
+    // node with the STT-final text; brain_chitchat / brain_delegate
+    // surface the routing decision + latency.
+    if (ev.type === "flow_event" && ev.detail?.node === "brain_input") {
+      const d = ev.detail as Record<string, any> | undefined;
+      const text = d?.data?.user_text ?? "";
+      const mode = d?.data?.mode ?? "";
+      if (text) pushUnique(info.brain_decide, `🎤 [${mode}] "${text}"`);
+    }
+    if (ev.type === "flow_event" && ev.detail?.node === "brain_chitchat") {
+      const d = ev.detail as Record<string, any> | undefined;
+      const reply = d?.data?.reply ?? "";
+      const elapsed = d?.data?.elapsed_ms;
+      pushUnique(info.brain_decide, `✅ chitchat${elapsed != null ? ` · ${elapsed}ms` : ""}`);
+      if (reply) pushUnique(info.brain_decide, `💬 "${reply}"`);
+      // Surface chitchat reply on the TTS node too so the existing
+      // tts_speak rect shows what the brain spoke (brain bypasses the
+      // Go TTS pipeline so no tts_send fires).
+      if (reply && info.tts_speak.length < 2) {
+        info.tts_speak.push(`🧠 "${reply}"`);
+      }
+    }
+    if (ev.type === "flow_event" && ev.detail?.node === "brain_delegate") {
+      const d = ev.detail as Record<string, any> | undefined;
+      const userText = d?.data?.user_text ?? "";
+      const elapsed = d?.data?.elapsed_ms;
+      pushUnique(info.brain_decide, `↪ delegate${elapsed != null ? ` · ${elapsed}ms` : ""}`);
+      if (userText) pushUnique(info.brain_decide, `📤 "${userText}"`);
     }
     if (ev.type === "chat_response" || (ev.type === "flow_event" && ev.detail?.node === "lifecycle_end")) {
       const d = ev.detail as Record<string, any> | undefined;
@@ -1336,6 +1406,20 @@ export function turnIO(turn: Turn): {
       const d = ev.detail as Record<string, any> | undefined;
       input = d?.name ?? d?.data?.name ?? ev.summary ?? "scheduled task";
     }
+    // Brain half-cascade: STT-final text travels in brain_input.data.user_text.
+    if (!input && ev.type === "flow_event" && ev.detail?.node === "brain_input") {
+      const d = ev.detail as Record<string, any> | undefined;
+      const text = d?.data?.user_text ?? "";
+      if (text) input = text;
+    }
+    // Brain decide may carry the user_text too (delegate doesn't go through
+    // brain_input separately when the live runner fires the tool early).
+    if (!input && ev.type === "flow_event" &&
+        (ev.detail?.node === "brain_chitchat" || ev.detail?.node === "brain_delegate")) {
+      const d = ev.detail as Record<string, any> | undefined;
+      const text = d?.data?.user_text ?? "";
+      if (text) input = text;
+    }
     if (ev.type === "chat_send" || (ev.type === "flow_event" && ev.detail?.node === "chat_send")) {
       const d = ev.detail as Record<string, any> | undefined;
       const raw = (d?.data?.message ?? d?.message ?? ev.summary ?? "").trim();
@@ -1369,6 +1453,13 @@ export function turnIO(turn: Turn): {
     if (!outputFromIntent && sameRun && (ev.type === "tts" || (ev.type === "flow_event" && (ev.detail?.node === "tts_send" || ev.detail?.node === "tts_suppressed")))) {
       const d = ev.detail as Record<string, any> | undefined;
       output = d?.data?.text ?? d?.text ?? ev.summary ?? output;
+    }
+    // Brain chitchat reply — the brain spoke the answer itself via
+    // TTSService.speak_queue, bypassing the Go TTS pipeline so no
+    // tts_send fires for this turn.
+    if (!output && sameRun && ev.type === "flow_event" && ev.detail?.node === "brain_chitchat") {
+      const d = ev.detail as Record<string, any> | undefined;
+      output = d?.data?.reply ?? "";
     }
     if (!output && sameRun && ev.type === "chat_response" && ev.state === "final") {
       const d = ev.detail as Record<string, any> | undefined;

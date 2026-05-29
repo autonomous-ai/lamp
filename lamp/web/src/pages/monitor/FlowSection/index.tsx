@@ -405,6 +405,30 @@ export function FlowSection({
   );
   if (hasTtsSuppressed) visitedStages.add("tts_speak");
 
+  // Brain half-cascade — light up the right downstream edge based on
+  // the decision. brain_decide itself is added via the triggers in
+  // FLOW_NODES; here we light the destination node (tts_speak for
+  // chitchat, agent_call for delegate) and the source mic_input so the
+  // mic→brain edge highlights too. Brain chitchat doesn't go through
+  // the Go TTS pipeline (brain speaks locally) so tts_speak would
+  // otherwise stay dim — manually mark it visited.
+  const hasBrainAny = turnEvents.some((ev) =>
+    ev.type === "flow_event" && (
+      (ev.detail as Record<string, any>)?.node === "brain_input" ||
+      (ev.detail as Record<string, any>)?.node === "brain_chitchat" ||
+      (ev.detail as Record<string, any>)?.node === "brain_delegate"
+    )
+  );
+  if (hasBrainAny) visitedStages.add("mic_input");
+  const hasBrainChitchat = turnEvents.some((ev) =>
+    ev.type === "flow_event" && (ev.detail as Record<string, any>)?.node === "brain_chitchat"
+  );
+  if (hasBrainChitchat) visitedStages.add("tts_speak");
+  const hasBrainDelegate = turnEvents.some((ev) =>
+    ev.type === "flow_event" && (ev.detail as Record<string, any>)?.node === "brain_delegate"
+  );
+  if (hasBrainDelegate) visitedStages.add("intent_check");
+
   // CH OUT: only light up for channel turns with a real response (not no_reply)
   const CHANNEL_TYPES = new Set(["telegram", "discord", "slack", "wechat", "channel"]);
   if (selectedTurn && CHANNEL_TYPES.has(selectedTurn.type) && visitedStages.has("agent_response")) {

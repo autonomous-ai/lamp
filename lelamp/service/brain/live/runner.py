@@ -40,6 +40,7 @@ from typing import Callable, Optional
 
 import requests
 
+from lelamp.service.brain.flow_log import alloc_chat_run_id, brain_flow, mint_run_id, now_ms
 from lelamp.service.brain.live.base import Brain
 
 logger = logging.getLogger("lelamp.brain.live.runner")
@@ -290,6 +291,22 @@ class LiveBrainRunner:
         # natural ordering: hear → think → reply.
         self._user_input_logged = False
 
+        # Per-turn Flow Monitor identifiers. Pre-allocated from Go via
+        # ``alloc_chat_run_id`` at the first user-input moment so a
+        # delegate turn shares ONE Monitor row with the eventual
+        # OpenClaw turn. Reset to None at turn boundaries.
+        # ``_flow_run_id`` is ``lamp-chat-N-<ts>`` on the happy path,
+        # ``brain-<uuid>`` when the alloc endpoint is unreachable
+        # (fallback — delegate row will split as before).
+        # ``_flow_req_id`` is the matching ``chat-N`` (empty on
+        # fallback path).
+        self._flow_run_id: Optional[str] = None
+        self._flow_req_id: str = ""
+        # Timestamp (ms) of the first user-input partial in the active
+        # turn, used to compute end-to-end latency on chitchat /
+        # delegate. None when no turn is in flight.
+        self._flow_turn_t0_ms: Optional[int] = None
+
         # ``brain.tts.start`` log latch — flipped True the first time
         # we hand a sentence to TTSService.speak_queue this turn. The
         # journal then shows when the speaker actually starts kêu
@@ -459,6 +476,9 @@ class LiveBrainRunner:
                 self._restart_after_turn = False
                 self._user_input_logged = False
                 self._tts_start_logged = False
+                self._flow_run_id = None
+                self._flow_req_id = ""
+                self._flow_turn_t0_ms = None
                 # Phase 1 only exits on a real speech frame (or the
                 # no-VAD legacy path), so the current utterance
                 # already has speech.
@@ -743,6 +763,29 @@ class LiveBrainRunner:
             # debug-only, NOT what the model actually saw. See
             # README §"Native multimodal vs side-channel ASR".
             logger.info("brain.transcript [live] %r", user_input_to_log)
+            # Anchor the per-turn flow run-id here — first time we have
+            # a transcript, allocate from Go so a delegate turn collapses
+            # into ONE Monitor row with the eventual OpenClaw turn.
+            # voice_pipeline_start is the FE turn-starter (groupIntoTurns
+            # rule at line ~416); fire once per turn so the brain row
+            # appears in the Monitor Turns list.
+            if self._flow_run_id is None:
+                self._flow_req_id, self._flow_run_id = alloc_chat_run_id()
+                self._flow_turn_t0_ms = now_ms()
+                brain_flow().log(
+                    "voice_pipeline_start",
+                    {"mode": "live", "source": "brain"},
+                    self._flow_run_id,
+                )
+            brain_flow().log(
+                "brain_input",
+                {
+                    "mode": "live",
+                    "user_text": user_input_to_log,
+                    "source": "reply_token_flush",
+                },
+                self._flow_run_id,
+            )
 
         if not is_final:
             return
@@ -757,6 +800,35 @@ class LiveBrainRunner:
         self._tts_start_logged = False
         if full_reply:
             logger.info("brain.chitchat [live] %r", full_reply)
+            # Alloc the per-turn ids + open the turn if no earlier
+            # branch fired this turn (e.g. Gemini Live with empty
+            # transcript before turn_complete).
+            if self._flow_run_id is None:
+                self._flow_req_id, self._flow_run_id = alloc_chat_run_id()
+                brain_flow().log(
+                    "voice_pipeline_start",
+                    {"mode": "live", "source": "brain"},
+                    self._flow_run_id,
+                )
+            brain_flow().log(
+                "brain_chitchat",
+                {
+                    "mode": "live",
+                    "decision": "chitchat",
+                    "user_text": self._last_user_input.strip(),
+                    "reply": full_reply,
+                    "elapsed_ms": (
+                        now_ms() - self._flow_turn_t0_ms
+                        if self._flow_turn_t0_ms is not None
+                        else None
+                    ),
+                },
+                self._flow_run_id,
+            )
+            # Clear so the next turn re-anchors a fresh run-id.
+            self._flow_run_id = None
+            self._flow_req_id = ""
+            self._flow_turn_t0_ms = None
             # Keep one turn back so the next turn's echo check (in
             # _should_skip_response) can compare against it after
             # _reply_log_buf has been cleared.
@@ -871,6 +943,30 @@ class LiveBrainRunner:
             # See note above: "transcript" not "input" — this is the
             # ASR side-channel, not what the live model saw.
             logger.info("brain.transcript [live] %r", final_text)
+            # Anchor the per-turn flow run-id HERE for the OpenAI
+            # Realtime path. Gemini Live takes the parallel path in
+            # ``_on_text``'s flush branch (transcript flushes there on
+            # first reply token). Both must mint the run-id + emit
+            # voice_pipeline_start at the first user-text moment so the
+            # eventual brain_chitchat / brain_delegate sees a real
+            # elapsed time in the UI (endTime − startTime).
+            if self._flow_run_id is None:
+                self._flow_req_id, self._flow_run_id = alloc_chat_run_id()
+                self._flow_turn_t0_ms = now_ms()
+                brain_flow().log(
+                    "voice_pipeline_start",
+                    {"mode": "live", "source": "brain", "provider": "openai"},
+                    self._flow_run_id,
+                )
+            brain_flow().log(
+                "brain_input",
+                {
+                    "mode": "live",
+                    "user_text": final_text,
+                    "source": "user_input_final",
+                },
+                self._flow_run_id,
+            )
 
         # Gate response.create — only fires when:
         #   1. The session supports explicit response.create
@@ -1059,11 +1155,67 @@ class LiveBrainRunner:
             decorated = f"Unknown Speaker: {decorated}"
 
         logger.info("brain.delegate [live] → Lamp: %r", decorated)
+        # Alloc + open the turn if no earlier branch fired (Gemini Live
+        # can call the delegate tool before any partial).
+        if self._flow_run_id is None:
+            self._flow_req_id, self._flow_run_id = alloc_chat_run_id()
+            brain_flow().log(
+                "voice_pipeline_start",
+                {"mode": "live", "source": "brain"},
+                self._flow_run_id,
+            )
+        brain_flow().log(
+            "brain_delegate",
+            {
+                "mode": "live",
+                "decision": "delegate",
+                "user_text": transcript,
+                "decorated": decorated,
+                "elapsed_ms": (
+                    now_ms() - self._flow_turn_t0_ms
+                    if self._flow_turn_t0_ms is not None
+                    else None
+                ),
+            },
+            self._flow_run_id,
+        )
 
         if self._send_to_lamp_callback is not None:
             try:
-                self._send_to_lamp_callback(decorated, "voice")
+                # Pass the pre-allocated ids only when alloc actually
+                # returned a Lamp-format run_id (i.e. /alloc-runid was
+                # reachable). On the fallback ``brain-*`` path, omit
+                # the kwargs so Lamp mints fresh — keeps the delegate
+                # POST working even when alloc is down.
+                _delegate_run_id = self._flow_run_id or ""
+                _delegate_req_id = self._flow_req_id if _delegate_run_id.startswith("lamp-chat-") else ""
+                if _delegate_run_id.startswith("lamp-chat-"):
+                    self._send_to_lamp_callback(
+                        decorated, "voice",
+                        run_id=_delegate_run_id,
+                        req_id=_delegate_req_id,
+                    )
+                else:
+                    self._send_to_lamp_callback(decorated, "voice")
+                # Clear AFTER the callback — we needed the ids above.
+                # The eventual OpenClaw turn is now driven by Go's
+                # SetTrace; brain side is done with this turn.
+                self._flow_run_id = None
+                self._flow_req_id = ""
+                self._flow_turn_t0_ms = None
                 return
+            except TypeError:
+                # Older VoiceService without run_id/req_id kwargs —
+                # back-compat: forward without ids (delegate row splits
+                # into two adjacent Monitor rows like before).
+                try:
+                    self._send_to_lamp_callback(decorated, "voice")
+                    return
+                except Exception as e2:
+                    logger.warning(
+                        "Live send_to_lamp_callback retry failed (%s) — "
+                        "falling back to raw POST", e2,
+                    )
             except Exception as e:
                 logger.warning(
                     "Live send_to_lamp_callback failed (%s) — falling back "

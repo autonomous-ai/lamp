@@ -51,6 +51,16 @@ type SensingEventRequest struct {
 	// event fired while a friend was still present (Lamp would downgrade
 	// mood to "unknown" even though the friend was within forget window).
 	CurrentUser string `json:"current_user,omitempty"`
+	// RunID + ReqID are pre-allocated by the lelamp brain via
+	// /api/sensing/alloc-runid when the brain decides to delegate. Re-using
+	// the brain's runId here keeps the brain decision row and the OpenClaw
+	// turn under ONE Monitor Flow turn (total time = MIC VAD close → TTS
+	// done). Empty in the normal sensing path — Go falls back to
+	// NextChatRunID() exactly like before, so brain-off paths are unchanged.
+	// Only accepted when the prefix matches the Lamp-side format
+	// (``lamp-chat-*``); anything else is treated as missing.
+	RunID string `json:"runId,omitempty"`
+	ReqID string `json:"reqId,omitempty"`
 }
 
 // SensingHandler handles incoming sensing events from LeLamp and forwards them to the agent.
@@ -106,12 +116,21 @@ func (h *SensingHandler) PostEvent(c *gin.Context) {
 
 	startPayload := map[string]any{"type": req.Type, "message": req.Message}
 
-	// Push sensing input to monitor.
+	// Push sensing input to monitor. Carry the brain's pre-allocated
+	// runId when present so the Monitor UI groups this push under the
+	// same turn as the upcoming flow.Start("sensing_input", ...). Without
+	// it the SSE-only push lands as an extra "no runId" event and the FE
+	// turn grouper splits it into its own row.
 	monitorDetail := map[string]any{"type": req.Type}
+	earlyRunID := ""
+	if strings.HasPrefix(req.RunID, "lamp-chat-") {
+		earlyRunID = req.RunID
+	}
 	h.monitorBus.Push(domain.MonitorEvent{
 		Type:    "sensing_input",
 		Summary: "[" + req.Type + "] " + req.Message,
 		Detail:  monitorDetail,
+		RunID:   earlyRunID,
 	})
 
 	// Sync mood.CurrentUser with LeLamp's view on every event that carries
@@ -273,7 +292,21 @@ func (h *SensingHandler) PostEvent(c *gin.Context) {
 	}
 
 	// Same run_id as chat.send / JSONL: SetTrace before flow.Start so enter matches this turn (not previous).
-	reqID, runID := h.agentGateway.NextChatRunID()
+	// Brain pre-allocation: when the lelamp brain already minted a runId
+	// via /api/sensing/alloc-runid (delegate path), reuse it so the brain
+	// row and the OpenClaw turn share ONE Monitor row. Only accept ``lamp-
+	// chat-*`` prefix; anything else means brain-off / legacy caller →
+	// fall back to NextChatRunID.
+	var reqID, runID string
+	if strings.HasPrefix(req.RunID, "lamp-chat-") {
+		runID = req.RunID
+		reqID = req.ReqID
+		if reqID == "" {
+			reqID = fmt.Sprintf("chat-prealloc-%d", time.Now().UnixMilli())
+		}
+	} else {
+		reqID, runID = h.agentGateway.NextChatRunID()
+	}
 	flow.SetTrace(runID)
 
 	// Mark this run as guard-active so SSE handler broadcasts the agent response via Telegram.
@@ -442,6 +475,55 @@ func (h *SensingHandler) PostMonitorEvent(c *gin.Context) {
 		Detail:  req.Detail,
 		RunID:   req.RunID,
 	})
+	c.JSON(http.StatusOK, serializers.ResponseSuccess(nil))
+}
+
+// BrainFlowEventRequest is the payload from the lelamp brain (Python)
+// to surface decision + latency events into the Flow Monitor JSONL.
+//
+// Mirrors flow.Log(node, data, runID) — brain owns the runID so its
+// turns appear grouped in the Monitor UI. Best-effort: validation
+// errors return 400 but the brain treats this endpoint as fire-and-
+// forget, so a Pi-side flow.Log failure must never break routing.
+type BrainFlowEventRequest struct {
+	Node  string         `json:"node" validate:"required"`
+	Data  map[string]any `json:"data,omitempty"`
+	RunID string         `json:"runId,omitempty"`
+}
+
+// AllocChatRunID pre-allocates a (reqId, runId) pair from NextChatRunID
+// for the lelamp brain to use across the turn. The brain stamps every
+// brain_input / brain_chitchat / brain_delegate event with this runId,
+// and on delegate it ships the same id back via the /api/sensing/event
+// body so PostEvent reuses it instead of minting a fresh one. Result:
+// brain + OpenClaw share ONE Monitor Flow row instead of two adjacent
+// rows. Local-only by sameOriginOrLAN — no auth (lelamp is loopback).
+func (h *SensingHandler) AllocChatRunID(c *gin.Context) {
+	reqID, runID := h.agentGateway.NextChatRunID()
+	c.JSON(http.StatusOK, serializers.ResponseSuccess(map[string]string{
+		"reqId": reqID,
+		"runId": runID,
+	}))
+}
+
+// PostBrainFlowEvent emits a brain-side observation into flow.Log so
+// Decision (chit-chat vs delegate) + Latency events from the Python
+// brain land in local/flow_events_*.jsonl + the Monitor SSE stream.
+func (h *SensingHandler) PostBrainFlowEvent(c *gin.Context) {
+	var req BrainFlowEventRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, serializers.ResponseError(err.Error()))
+		return
+	}
+	if err := validator.New().Struct(req); err != nil {
+		c.JSON(http.StatusBadRequest, serializers.ResponseError(err.Error()))
+		return
+	}
+	data := req.Data
+	if data == nil {
+		data = map[string]any{}
+	}
+	flow.Log(req.Node, data, req.RunID)
 	c.JSON(http.StatusOK, serializers.ResponseSuccess(nil))
 }
 
