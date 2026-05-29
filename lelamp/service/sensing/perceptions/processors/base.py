@@ -9,9 +9,6 @@ from lelamp.service.sensing.perceptions.utils import PerceptionStateObservers
 
 logger = logging.getLogger(__name__)
 
-# Enable debug logging for all perception processors regardless of root level
-logging.getLogger("lelamp.service.sensing.perceptions.processors").setLevel(logging.DEBUG)
-
 T = TypeVar("T")
 
 
