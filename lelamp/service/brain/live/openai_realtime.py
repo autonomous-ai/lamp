@@ -583,11 +583,17 @@ class OpenAIRealtimeSession(BrainSession):
                     # speech lands mid-reply — we don't support barge-in
                     # in live mode and cancellation just produces stub
                     # ``response.done status=cancelled`` events.
+                    #
+                    # VAD sensitivity (threshold / prefix_padding_ms /
+                    # silence_duration_ms) is intentionally left unset so
+                    # the Realtime API applies its own ``server_vad``
+                    # defaults (currently 0.5 / 300ms / 500ms) — we track
+                    # the provider's tuning instead of pinning it. NOTE:
+                    # ``create_response`` / ``interrupt_response`` are NOT
+                    # VAD tuning — they are the runner's gating contract
+                    # and must stay set regardless of sensitivity.
                     "turn_detection": {
                         "type": "server_vad",
-                        "threshold": 0.5,
-                        "prefix_padding_ms": 300,
-                        "silence_duration_ms": 500,
                         "create_response": False,
                         "interrupt_response": False,
                     },
