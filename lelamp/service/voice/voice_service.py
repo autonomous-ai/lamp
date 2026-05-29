@@ -61,6 +61,15 @@ WEBRTCVAD_FRAME_MS = int(os.environ.get("LELAMP_WEBRTCVAD_FRAME_MS", "30"))
 # Echo cancellation config
 ECHO_RMS_FLOOR = int(os.environ.get("LELAMP_ECHO_RMS_FLOOR", "200"))
 ECHO_GATE_MAX_WAIT_S = float(os.environ.get("LELAMP_ECHO_GATE_MAX_WAIT_S", "1.5"))
+
+# Brain-mode client-side VAD was removed — the provider's own server
+# VAD (Gemini Live, OpenAI Realtime) decides turn boundaries from the
+# audio stream. The TTS echo gate (Layer 1) + reverb decay (Layer 2)
+# remain to keep our own playback out of the mic.
+# LELAMP_BRAIN_AMBIENT_RMS_MIN / LELAMP_BRAIN_END_OF_SPEECH_S /
+# LELAMP_BRAIN_POST_TTS_SUPPRESS_S are no longer read; they may be
+# safely removed from .env.
+
 ECHO_GATE_WINDOW_S = float(os.environ.get("LELAMP_ECHO_GATE_WINDOW_S", "0.05"))
 ECHO_SIMILARITY_THRESHOLD = float(os.environ.get("LELAMP_ECHO_SIMILARITY_THRESHOLD", "0.55"))
 ECHO_RELEVANCE_WINDOW_S = float(os.environ.get("LELAMP_ECHO_RELEVANCE_WINDOW_S", "15.0"))
@@ -263,6 +272,27 @@ class VoiceService:
         else:
             logger.info("Silero VAD disabled via LELAMP_SILERO_ENABLED=false")
 
+        # Brain integration — all mode-pick / wiring / lifecycle /
+        # VAD-closure-build / call-mode decision logic lives in
+        # ``lelamp.service.brain.orchestrator``. VoiceService just
+        # constructs it with explicit deps and defers via four hooks
+        # (in_live_mode property, start, stop, handle_stt_final).
+        from lelamp.service.brain.orchestrator import BrainOrchestrator
+        self._brain = BrainOrchestrator(
+            tts_service=self._tts,
+            alsa_device=self._alsa_device,
+            input_device=self._input_device,
+            decorate_callback=self._identify_and_decorate,
+            send_to_lamp_callback=self._send_to_lamp,
+            np_module=self._np,
+            webrtcvad_instance=self._webrtcvad,
+            silero_instance=self._silero,
+            webrtcvad_check=self._webrtcvad_is_speech,
+            silero_check=self._silero_is_speech,
+            rms_threshold=RMS_THRESHOLD,
+            stt_rate=STT_RATE,
+        )
+
     def set_music_service(self, music_service) -> None:
         self._music = music_service
 
@@ -287,6 +317,13 @@ class VoiceService:
     def start(self):
         if self._running:
             return
+        # Live mode short-circuits the entire classic pipeline — the
+        # runner owns the mic + provider + sentence dispatch to TTS.
+        # We don't even need the local STT provider to be available.
+        if self._brain.in_live_mode:
+            self._running = True
+            self._brain.start()
+            return
         if not self.available:
             logger.warning(
                 "VoiceService not starting — sd=%s np=%s stt=%s",
@@ -302,6 +339,7 @@ class VoiceService:
 
     def stop(self):
         self._running = False
+        self._brain.stop()
         if self._thread:
             self._thread.join(timeout=5)
             self._thread = None
@@ -472,7 +510,8 @@ class VoiceService:
             return True  # fail open — don't block speech
 
     def _tts_is_speaking(self) -> bool:
-        """Check if TTS is currently using the audio device."""
+        """Check if TTS is currently using the audio device — used by
+        the mic gate to prevent echo loopback."""
         return self._tts is not None and self._tts.speaking
 
     def _music_is_playing(self) -> bool:
@@ -728,7 +767,10 @@ class VoiceService:
             time.sleep(1.0)
 
     def _loop(self):
-        """Main loop: local VAD → STT on speech → disconnect on silence."""
+        """Main loop: local VAD → STT on speech → disconnect on silence.
+        The half-cascade text brain (if enabled via LELAMP_BRAIN_PROVIDER)
+        runs *after* STT finalises a transcript, so this loop is the same
+        whether the brain is on or off."""
         time.sleep(0.5)  # Brief pause for audio subsystem to settle
 
         # Use arecord only when explicitly configured via LELAMP_AUDIO_INPUT_ALSA.
@@ -1068,17 +1110,23 @@ class VoiceService:
                 buf_frames, buf_bytes, buf_duration, combined or "(empty)",
             )
                       
-            # Prepare message and user for speaker recognition and SER. 
+            # Prepare message and user for speaker recognition and SER.
             from lelamp.service.voice.speech_emotion.constants import UNKNOWN_USER_LABEL
             final_text, event_type = self._resolve_wake_word_split(combined)
             user = UNKNOWN_USER_LABEL
-            
             # 1. Speaker recognize and decorate the final text to send to Lamp.
             if combined:
                 final_msg, se_user = self._identify_and_decorate(final_text, audio_buffer)
                 user = se_user if se_user else UNKNOWN_USER_LABEL
                 logger.info("Final message → Lamp (%s): %r", event_type, final_msg)
-                self._send_to_lamp(final_msg, event_type=event_type)
+
+                # Half-cascade brain — when active, the orchestrator
+                # decides chit-chat vs delegate from `final_text` (the
+                # STT transcript without speaker prefix) and speaks the
+                # chit-chat reply via TTS itself. Returns True when it
+                # handled the turn so we skip the Lamp forward.
+                if not self._brain.handle_stt_final(final_text, user, event_type):
+                    self._send_to_lamp(final_msg, event_type=event_type)
 
             # 2. Submit SER — uses the UNTRIMMED snapshot so laughter / sighs
             self._submit_speech_emotion_from_session(ser_audio_buffer, user=user)
