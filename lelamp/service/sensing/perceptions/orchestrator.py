@@ -182,6 +182,8 @@ class PerceptionOrchestrator:
                 "[%s] service has been already started", self.__class__.__name__
             )
             return
+        if self._camera_capture is None:
+            self._logger.warning("Orchestrator started WITHOUT camera — frame-based perceptions will not run")
         self._register_processors()
         self._main_loop_thread = threading.Thread(
             target=self._loop, daemon=True, name="sensing"
