@@ -13,7 +13,7 @@ server-side. The runner just:
      pushes each sentence into ``TTSService.speak_queue`` — same
      ElevenLabs voice as the call-mode path, so the voice the user
      hears doesn't change when we toggle modes.
-  4. On ``on_delegate(transcript)``, forwards to Lumi the same way the
+  4. On ``on_delegate(transcript)``, forwards to Lamp the same way the
      classic STT path does (POST /api/sensing/event) so OpenClaw's
      turn pipeline is identical regardless of which brain mode picked
      the delegate.
@@ -68,7 +68,7 @@ def _drain_complete_sentences(buffer: str, on_sentence: Callable[[str], None]) -
 _STT_RATE = 16000
 _CHANNELS = 1
 _FRAME_DURATION_MS = 64
-_LUMI_SENSING_URL = "http://127.0.0.1:5000/api/sensing/event"
+_LAMP_SENSING_URL = "http://127.0.0.1:5000/api/sensing/event"
 
 # Extra mute window AFTER TTSService.speaking flips False. Real
 # speakers + room reverb can leak a few hundred ms of late audio that
@@ -161,7 +161,7 @@ class _ArecordStream:
 class LiveBrainRunner:
     """Owns the mic + a long-running BrainSession; pushes reply
     sentences into TTSService.speak_queue and delegate transcripts
-    into Lumi's sensing endpoint."""
+    into Lamp's sensing endpoint."""
 
     def __init__(
         self,
@@ -170,7 +170,7 @@ class LiveBrainRunner:
         alsa_device: Optional[str] = None,
         input_device: Optional[int] = None,
         decorate_callback: Optional[Callable[[str, list], tuple]] = None,
-        send_to_lumi_callback: Optional[Callable[[str, str], None]] = None,
+        send_to_lamp_callback: Optional[Callable[[str, str], None]] = None,
         is_speech_callback: Optional[Callable[[bytes], bool]] = None,
         workspace=None,
     ):
@@ -197,15 +197,15 @@ class LiveBrainRunner:
         #   recognizer on the buffered mic audio and prefixes the
         #   transcript with the speaker label so OpenClaw sees the
         #   same shape it gets from the call-mode path.
-        # ``send_to_lumi_callback(message, event_type)`` wraps
-        #   VoiceService._send_to_lumi. Reuses the same retry + echo-
+        # ``send_to_lamp_callback(message, event_type)`` wraps
+        #   VoiceService._send_to_lamp. Reuses the same retry + echo-
         #   filter logic call mode uses so live and call deliver to
         #   the sensing endpoint identically.
         # Both default to None — if the caller doesn't wire them, the
         # runner falls back to a no-prefix raw POST so live mode still
         # functions (degraded format).
         self._decorate_callback = decorate_callback
-        self._send_to_lumi_callback = send_to_lumi_callback
+        self._send_to_lamp_callback = send_to_lamp_callback
         # Local VAD chain (RMS → WebRTC → Silero) shared with the call
         # mode path. ``is_speech_callback(frame_bytes) -> bool`` returns
         # True when the frame contains speech, False for silence /
@@ -284,7 +284,7 @@ class LiveBrainRunner:
         # We log on the FIRST reply-text partial rather than waiting
         # for turn_complete because turn_complete only fires after
         # Gemini finishes generating its reply — which makes the
-        # journal look like "Lumi replied with nothing for several
+        # journal look like "Lamp replied with nothing for several
         # seconds, then both brain.input and brain.chitchat suddenly
         # appear together". Logging at first reply-token gives the
         # natural ordering: hear → think → reply.
@@ -319,7 +319,7 @@ class LiveBrainRunner:
         # injection — restart is the only way to pick up OpenClaw
         # turns (Telegram, web, etc.) that landed between voice turns.
         # Cost: ~0.5-1s connect overhead per turn (happens during the
-        # silence right after Lumi finishes replying, before user
+        # silence right after Lamp finishes replying, before user
         # speaks next — no impact on perceived response latency).
         self._restart_after_turn = False
 
@@ -380,7 +380,7 @@ class LiveBrainRunner:
           Phase 1 (idle): mic open, no realtime WS. Local VAD watches
             the stream; the rolling audio buffer keeps filling so
             speaker recog has 30s of warm audio when a delegate fires.
-            Echo gate drops TTS tail / Lumi's own voice. We exit Phase
+            Echo gate drops TTS tail / Lamp's own voice. We exit Phase
             1 only on a positive VAD verdict — no session is opened
             (and no provider tokens are spent) until then.
 
@@ -516,7 +516,7 @@ class LiveBrainRunner:
                         # turns (Telegram, web, other voice sessions)
                         # that landed while this turn was running.
                         # Connect cost ~0.5-1s lands during the
-                        # natural silence after Lumi finishes
+                        # natural silence after Lamp finishes
                         # replying, so the user doesn't perceive it.
                         logger.info(
                             "Live brain turn ended — restarting session for fresh history"
@@ -677,7 +677,7 @@ class LiveBrainRunner:
         ``brain.chitchat`` log shape.
 
         Delegate routing in live mode goes through the function tool
-        only (``delegate_to_lumi``). The legacy ``[DELEGATE]`` text
+        only (``delegate_to_lamp``). The legacy ``[DELEGATE]`` text
         marker that call mode uses was a fallback here too but the
         runner no longer scans for it — the marker text is enabled
         only on the call-mode prompt; live-mode prompts explicitly
@@ -952,7 +952,7 @@ class LiveBrainRunner:
         for pat in self._HALLUCINATION_PATTERNS:
             if pat in lo:
                 return f"matches ASR hallucination pattern {pat!r}"
-        # Echo of Lumi's own most recent reply — happens when the
+        # Echo of Lamp's own most recent reply — happens when the
         # TTS tail leaks past the post-TTS holdoff and ASR transcribes
         # it. Compare against the trailing portion of the last
         # chit-chat we logged. Conservative: only skip on a very
@@ -992,7 +992,7 @@ class LiveBrainRunner:
 
     def _on_delegate(self, transcript: str) -> None:
         """Brain decided this turn is a task for OpenClaw. Forward
-        through VoiceService's send-to-Lumi pipeline so the message
+        through VoiceService's send-to-Lamp pipeline so the message
         gets the same speaker prefix + echo filter + retry logic the
         call-mode path uses.
 
@@ -1058,15 +1058,15 @@ class LiveBrainRunner:
         ):
             decorated = f"Unknown Speaker: {decorated}"
 
-        logger.info("brain.delegate [live] → Lumi: %r", decorated)
+        logger.info("brain.delegate [live] → Lamp: %r", decorated)
 
-        if self._send_to_lumi_callback is not None:
+        if self._send_to_lamp_callback is not None:
             try:
-                self._send_to_lumi_callback(decorated, "voice")
+                self._send_to_lamp_callback(decorated, "voice")
                 return
             except Exception as e:
                 logger.warning(
-                    "Live send_to_lumi_callback failed (%s) — falling back "
+                    "Live send_to_lamp_callback failed (%s) — falling back "
                     "to raw POST", e,
                 )
 
@@ -1074,7 +1074,7 @@ class LiveBrainRunner:
         # without callbacks.
         try:
             requests.post(
-                _LUMI_SENSING_URL,
+                _LAMP_SENSING_URL,
                 json={"type": "voice", "message": decorated},
                 timeout=2.0,
             )
@@ -1193,7 +1193,7 @@ class LiveBrainRunner:
         if not text:
             return False
         # Strip leading "[user] " / "[user] [ambient] " priority tags
-        # that Lumi server adds — keep the substantive part.
+        # that Lamp server adds — keep the substantive part.
         head = text
         for tag in ("[user] [ambient] ", "[user] "):
             if head.startswith(tag):

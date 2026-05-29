@@ -37,7 +37,7 @@ ASR side-channel** that runs in parallel. We use its output only for:
 
   1. `brain.input` journal logging (debug).
   2. The delegate transcript routed to OpenClaw (see
-     `_on_delegate` — the model's `delegate_to_lumi` tool no longer
+     `_on_delegate` — the model's `delegate_to_lamp` tool no longer
      takes a `transcript` arg because the model used to hallucinate
      it from history).
   3. Re-injection into the next session's context window when an
@@ -52,7 +52,7 @@ The side-channel ASR can be **WRONG** while the model is still
 **RIGHT**. Example from the journal (2026-05-27 08:37):
 
 ```
-brain.input  [live] 'Em bay theo đi Lumi.'      ← side-channel ASR (wrong)
+brain.input  [live] 'Em bay theo đi Lamp.'      ← side-channel ASR (wrong)
 brain.tts.start [live] 'Ừm, bạn muốn nghe bài thơ về chủ đề gì nè?'
 brain.chitchat [live] '... thơ tình, thơ buồn, hay thiên nhiên?'
                        ↑ model's reply (right — user asked for a poem)
@@ -171,7 +171,7 @@ model.
 
 Close the session after every `turn_complete` → outer mic loop
 reopens with a fresh `load_context()`. Cost was acceptable (~0.7-1s
-connect during the natural silence after Lumi replies). Quality
+connect during the natural silence after Lamp replies). Quality
 regression was not: Gemini lost its in-session conversation memory
 turn-over-turn, so replies turned into generic "I can do X, Y, Z"
 feature-list dumps from the SOUL + SKILLS blocks in the system

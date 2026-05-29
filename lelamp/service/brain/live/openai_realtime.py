@@ -7,7 +7,7 @@ hosting one asyncio loop that owns a single Realtime WebSocket. Mic
 frames are marshalled in via ``send_audio``; the model decides to either:
 
   - speak directly back (chit-chat — PCM audio chunks flow to the speaker), or
-  - call the ``delegate_to_lumi`` function tool with the user's transcript
+  - call the ``delegate_to_lamp`` function tool with the user's transcript
     (task — VoiceService forwards the transcript to OpenClaw exactly the
     way an STT final would be forwarded).
 
@@ -58,7 +58,7 @@ logger = logging.getLogger("lelamp.brain.openai")
 
 DEFAULT_MODEL = os.environ.get("LELAMP_OPENAI_REALTIME_MODEL", "gpt-realtime")
 DEFAULT_VOICE = os.environ.get("LELAMP_OPENAI_REALTIME_VOICE", "alloy")
-# Optional explicit override — if blank, fall back to lumi config's
+# Optional explicit override — if blank, fall back to lamp config's
 # stt_language (same source classic STT + Gemini brain use).
 DEFAULT_LANGUAGE = os.environ.get("LELAMP_OPENAI_REALTIME_LANGUAGE", "")
 # ASR model for the Realtime input transcription. `whisper-1` is the
@@ -112,7 +112,7 @@ class OpenAIRealtimeBrain(Brain):
         # Language source priority (matches GeminiLiveBrain):
         #   1. ``language`` arg passed to constructor (explicit override)
         #   2. ``LELAMP_OPENAI_REALTIME_LANGUAGE`` env var
-        #   3. lumi config's ``stt_language``
+        #   3. lamp config's ``stt_language``
         #   4. empty → no hint, model auto-detects
         # OpenAI Realtime has no per-API language field — the hint goes
         # straight into the system prompt via prompts.language_hint().
@@ -805,7 +805,7 @@ class OpenAIRealtimeSession(BrainSession):
         # Tool takes no arguments — the runner pulls the actual
         # user transcript from the ASR side-channel. Fire on_delegate
         # unconditionally so the runner can route this turn.
-        logger.info("delegate_to_lumi signal received")
+        logger.info("delegate_to_lamp signal received")
         if self._on_delegate is not None:
             try:
                 self._on_delegate("")
@@ -813,7 +813,7 @@ class OpenAIRealtimeSession(BrainSession):
                 logger.warning("on_delegate callback raised: %s", e)
         # ACK the tool call so the server doesn't stall the response. We
         # deliberately do NOT call response.create() afterwards: in the
-        # delegate case the bigger Lumi will speak, so we want OpenAI to
+        # delegate case the bigger Lamp will speak, so we want OpenAI to
         # stay quiet until the next user utterance.
         if call_id:
             try:

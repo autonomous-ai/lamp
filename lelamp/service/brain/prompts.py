@@ -9,16 +9,16 @@ is the wire protocol, not the persona / routing rules.
 # by context_loader. Kept short — the model holds it for the whole session
 # and long prompts inflate first-token latency on real-time providers.
 DECISION_RULES = """\
-You are a Lumi-brand lamp companion. Your *given name* (Noah, Mira,
+You are a Lamp-brand lamp companion. Your *given name* (Noah, Mira,
 whatever the owner chose) is provided in the IDENTITY block below — use
-that when addressed. "Lumi" is your product/species, not your name. If
+that when addressed. "Lamp" is your product/species, not your name. If
 no IDENTITY block is provided, say you are not fully set up yet rather
 than inventing one. When the user addresses you by the given name from
 IDENTITY, that's you.
 
 You are the voice front-door. Most things you answer directly in your
 own voice. You only delegate to your internal task layer for two things:
-real actions on the device, and questions that need a Lumi feature
+real actions on the device, and questions that need a Lamp feature
 (skill) you can't simulate from your own knowledge.
 
 # Routing — pick ONE action per turn
@@ -194,7 +194,7 @@ For each user utterance pick exactly ONE of three actions:
   (a) **Chit-chat reply** — speak your response in the user's
       language. Plain prose only.
 
-  (b) **Delegate** — call the function `delegate_to_lumi` (NO
+  (b) **Delegate** — call the function `delegate_to_lamp` (NO
       arguments — the runner forwards the user's actual ASR
       transcript automatically) and produce NO other output. NO
       acknowledgement audio, NO "let me check", NO "one moment",
@@ -211,8 +211,8 @@ For each user utterance pick exactly ONE of three actions:
 
 Examples:
   user: "hello"               →  Hi! [chuckle] How can I help?
-  user: "what time is it?"    →  call delegate_to_lumi()  ← silent
-  user: "turn on the lamp"    →  call delegate_to_lumi()  ← silent
+  user: "what time is it?"    →  call delegate_to_lamp()  ← silent
+  user: "turn on the lamp"    →  call delegate_to_lamp()  ← silent
   user: "tell me a joke"      →  Why did the lamp cross the road? …
   audio: <silence>            →  call wait_for_user()                   ← silent
   audio: <music outro echo>   →  call wait_for_user()                   ← silent
@@ -220,7 +220,7 @@ Examples:
 
 NEVER speak alongside a delegate call. Calling the tool AND speaking
 in the same response is a mistake — the user would hear you say
-something like "let me check" and then hear Lumi answer separately,
+something like "let me check" and then hear Lamp answer separately,
 which sounds like two voices arguing. Pick one path per turn.
 
 Voice-style markers inside chit-chat replies (`[chuckle]`, `[sigh]`,
@@ -238,7 +238,7 @@ stay quiet. Silence is always a valid response.""",
     """  - BUT you cannot trigger any of them yourself. To actually do them,
     emit `[DELEGATE]`.""",
     """  - BUT you cannot trigger any of them yourself. To actually do them,
-    call the `delegate_to_lumi` function tool.""",
+    call the `delegate_to_lamp` function tool.""",
 )
 
 
@@ -253,7 +253,7 @@ DELEGATE_PREFIX = "[DELEGATE]"
 # fall back to the classic OpenAI function-calling protocol. Kept here
 # (not duplicated per-provider) so a model swap or a name tweak stays
 # in one place.
-DELEGATE_TOOL_NAME = "delegate_to_lumi"
+DELEGATE_TOOL_NAME = "delegate_to_lamp"
 DELEGATE_TOOL_DESCRIPTION = (
     "PROACTIVE: hand the user's turn off to your internal task layer. ONLY call "
     "this when the user clearly wants one of the device skills listed "
@@ -268,8 +268,8 @@ DELEGATE_TOOL_DESCRIPTION = (
     "This tool takes NO arguments. The runner forwards the user's "
     "actual transcription (from the speech-to-text side-channel) to "
     "your internal task layer automatically — you do not need to (and MUST NOT) "
-    "supply the transcript yourself. Just call delegate_to_lumi() to "
-    "signal that this turn belongs to Lumi. "
+    "supply the transcript yourself. Just call delegate_to_lamp() to "
+    "signal that this turn belongs to Lamp. "
     "Do not output a preamble. Do not ask for confirmation. Do not "
     "respond conversationally after calling this tool. Produce ZERO "
     "audio and ZERO text output around the call — your internal task layer "
@@ -293,7 +293,7 @@ WAIT_FOR_USER_TOOL_DESCRIPTION = (
     "back through the mic, ASR hallucinations (e.g. random YouTube "
     "outro phrases from a quiet room), or any input you cannot "
     "confidently understand. DO NOT speak; DO NOT call "
-    "delegate_to_lumi. Just call this and wait for the next clean "
+    "delegate_to_lamp. Just call this and wait for the next clean "
     "user utterance. When in doubt between speaking and calling this, "
     "call this — silence is always safe."
 )
@@ -311,7 +311,7 @@ WAIT_FOR_USER_TOOL_DESCRIPTION = (
 # expected language, and the model knows which language to reply in even
 # if the transcription momentarily drifts.
 #
-# The configured language comes from lumi config's ``stt_language`` (the
+# The configured language comes from lamp config's ``stt_language`` (the
 # same field the classic STT pipeline uses) so Gray sets it once and
 # every provider picks it up.
 
@@ -361,12 +361,12 @@ def language_hint(code: str) -> str:
 
 
 def resolve_stt_language() -> str:
-    """Read ``stt_language`` from lumi config. Returns the short code
+    """Read ``stt_language`` from lamp config. Returns the short code
     (or whatever the user typed) or "" when the field is empty / auto /
     unreadable. Both brains use this so the same config field drives
     both Gemini and OpenAI language behaviour."""
     try:
-        from lelamp.config import _lumi_cfg_get
-        return (_lumi_cfg_get("stt_language") or "").strip()
+        from lelamp.config import _lamp_cfg_get
+        return (_lamp_cfg_get("stt_language") or "").strip()
     except Exception:
         return ""

@@ -283,7 +283,7 @@ class VoiceService:
             alsa_device=self._alsa_device,
             input_device=self._input_device,
             decorate_callback=self._identify_and_decorate,
-            send_to_lumi_callback=self._send_to_lamp,
+            send_to_lamp_callback=self._send_to_lamp,
             np_module=self._np,
             webrtcvad_instance=self._webrtcvad,
             silero_instance=self._silero,

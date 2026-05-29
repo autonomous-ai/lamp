@@ -11,7 +11,7 @@ Sources (each best-effort, falls through silently on failure):
                        $OPENCLAW_AGENTS_DIR/main/sessions/<id>.jsonl
                        where <id> comes from sessions.json indexed by
                        sessionKey (default `agent:main:main`).
-    Lumi /api/agent  — last-resort fallback when the workspace isn't visible
+    Lamp /api/agent  — last-resort fallback when the workspace isn't visible
                        (e.g. on a Mac dev box where Pi files are absent).
 
 If everything is missing the loader returns empty strings — the brain still
@@ -35,7 +35,7 @@ DEFAULT_WORKSPACE = "/root/.openclaw"
 DEFAULT_WORKSPACE_SUBDIR = "workspace"     # where SOUL.md lives
 DEFAULT_AGENTS_SUBDIR = "agents/main"      # where sessions/ lives
 DEFAULT_SESSION_KEY = "agent:main:main"
-DEFAULT_LUMI_BASE = "http://127.0.0.1:5000"
+DEFAULT_LAMP_BASE = "http://127.0.0.1:5000"
 DEFAULT_HISTORY_LIMIT = 20
 DEFAULT_HTTP_TIMEOUT = 1.5
 
@@ -134,7 +134,7 @@ class BrainContext:
             # OpenClaw-curated memory first, brain's per-day chit-chat
             # diary appended underneath as a labelled sub-section. Two
             # separators are intentional — they keep the boundary visible
-            # so the model treats "things Lumi the agent decided to
+            # so the model treats "things Lamp the agent decided to
             # remember" and "things the voice front door has been
             # hearing in chit-chat" as separate tracks, while still
             # living in the same MEMORY block.
@@ -156,7 +156,7 @@ class BrainContext:
             )
         if self.skills_catalog.strip():
             # OpenClaw's skill catalog — list of `name: description` lines.
-            # This is the authoritative source for "what Lumi can do that
+            # This is the authoritative source for "what Lamp can do that
             # the brain can't simulate" — the DECISION_RULES leans on this
             # block as the delegate trigger, so when OpenClaw adds a new
             # skill the brain picks it up on next restart with zero prompt
@@ -537,12 +537,12 @@ def _read_openclaw_history(
 
 
 def _fetch_recent_turns(
-    lumi_base: str, limit: int, timeout: float
+    lamp_base: str, limit: int, timeout: float
 ) -> List[Turn]:
-    """Hit Lumi's /api/agent/recent and condense the MonitorEvent stream into
+    """Hit Lamp's /api/agent/recent and condense the MonitorEvent stream into
     a list of (role, text) turns. We keep only user inputs and assistant
     responses — sensing/control events are noise for chit-chat context."""
-    url = f"{lumi_base.rstrip('/')}/api/agent/recent"
+    url = f"{lamp_base.rstrip('/')}/api/agent/recent"
     try:
         resp = requests.get(url, params={"last": limit * 4}, timeout=timeout)
     except requests.RequestException as e:
@@ -736,7 +736,7 @@ def load_context(
     workspace_dir: Optional[str] = None,
     agents_dir: Optional[str] = None,
     session_key: Optional[str] = None,
-    lumi_base_url: Optional[str] = None,
+    lamp_base_url: Optional[str] = None,
     history_limit: int = DEFAULT_HISTORY_LIMIT,
     timeout: float = DEFAULT_HTTP_TIMEOUT,
     include_history: bool = True,
@@ -747,7 +747,7 @@ def load_context(
 
     History resolution order:
         1. OpenClaw session JSONL (exact mirror of chat.history)
-        2. Lumi /api/agent/recent (only used if #1 returned nothing — for
+        2. Lamp /api/agent/recent (only used if #1 returned nothing — for
            dev machines without the workspace mounted)
 
     If ``extra_session_dir`` is provided, it should point at a
@@ -759,7 +759,7 @@ def load_context(
     """
     workspace_dir, agents_dir = _resolve_paths(workspace_dir, agents_dir)
     session_key = session_key or os.environ.get("OPENCLAW_SESSION_KEY") or DEFAULT_SESSION_KEY
-    lumi_base_url = lumi_base_url or os.environ.get("LUMI_BASE_URL") or DEFAULT_LUMI_BASE
+    lamp_base_url = lamp_base_url or os.environ.get("LAMP_BASE_URL") or DEFAULT_LAMP_BASE
 
     identity, identity_name = _read_identity(workspace_dir)
     user_profile = _read_user(workspace_dir)
@@ -775,9 +775,9 @@ def load_context(
         if turns:
             history_source = "openclaw_jsonl"
         else:
-            turns = _fetch_recent_turns(lumi_base_url, history_limit, timeout)
+            turns = _fetch_recent_turns(lamp_base_url, history_limit, timeout)
             if turns:
-                history_source = "lumi_recent"
+                history_source = "lamp_recent"
         if extra_session_dir:
             extra = _load_extra_session_turns(extra_session_dir, history_limit)
             extra_turns_n = len(extra)

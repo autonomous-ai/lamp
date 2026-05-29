@@ -49,11 +49,11 @@ class BrainOrchestrator:
         # signature stays stable across mode flips.
         alsa_device: Optional[str],
         input_device: Optional[int],
-        # Speaker recog + Lumi forwarder — both wrap VoiceService
+        # Speaker recog + Lamp forwarder — both wrap VoiceService
         # methods. The live runner needs them so delegate turns are
         # decorated + sent the same way the classic path does.
         decorate_callback: Callable,
-        send_to_lumi_callback: Callable,
+        send_to_lamp_callback: Callable,
         # Local VAD chain components — the live runner uses these to
         # gate frames before they hit the realtime provider. None
         # values are tolerated (degraded modes — see
@@ -70,7 +70,7 @@ class BrainOrchestrator:
         self._alsa_device = alsa_device
         self._input_device = input_device
         self._decorate_callback = decorate_callback
-        self._send_to_lumi_callback = send_to_lumi_callback
+        self._send_to_lamp_callback = send_to_lamp_callback
         self._np = np_module
         self._webrtcvad = webrtcvad_instance
         self._silero = silero_instance
@@ -134,9 +134,9 @@ class BrainOrchestrator:
 
         Returns:
             True  — brain handled the turn (chit-chat reply spoken).
-                    Caller MUST NOT also forward to Lumi.
+                    Caller MUST NOT also forward to Lamp.
             False — brain abstained / delegated / errored. Caller
-                    should fall through to the normal Lumi forward.
+                    should fall through to the normal Lamp forward.
         """
         if (
             self._text_brain is None
@@ -187,12 +187,12 @@ class BrainOrchestrator:
                 logger.warning("brain chitchat speak failed: %s", e)
             return True
         if decision.decision == "delegate":
-            logger.info("brain.delegate [%s] → Lumi", user)
+            logger.info("brain.delegate [%s] → Lamp", user)
             return False
-        # decision == "error" — log and let it fall through to Lumi
+        # decision == "error" — log and let it fall through to Lamp
         # (safe default; never silently drop user input).
         logger.warning(
-            "brain.error [%s] %s — falling through to Lumi",
+            "brain.error [%s] %s — falling through to Lamp",
             user, decision.error or "(no detail)",
         )
         return False
@@ -240,7 +240,7 @@ class BrainOrchestrator:
             # as call mode (otherwise OpenClaw sees a raw transcript
             # without the "<Name>: …" prefix).
             decorate_callback=self._decorate_callback,
-            send_to_lumi_callback=self._send_to_lumi_callback,
+            send_to_lamp_callback=self._send_to_lamp_callback,
             # Reuse the same VAD chain call mode uses (RMS → WebRTC →
             # Silero) so the live runner only sends meaningful audio
             # to the provider — saves cost + bandwidth + privacy vs

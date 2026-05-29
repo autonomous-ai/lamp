@@ -3,7 +3,7 @@ Gemini Live brain — speech-in router that decides chit-chat vs task.
 
 The model receives raw 16 kHz mic audio and is instructed to either:
   - speak directly back (chit-chat — audio chunks flow to the speaker), or
-  - call the `delegate_to_lumi` function tool with the user's transcript
+  - call the `delegate_to_lamp` function tool with the user's transcript
     (task — VoiceService forwards the transcript to OpenClaw exactly the
     way an STT final would be forwarded).
 
@@ -48,7 +48,7 @@ DEFAULT_MODEL = os.environ.get(
 DEFAULT_VOICE = os.environ.get("LELAMP_GEMINI_LIVE_VOICE", "Aoede")
 DEFAULT_LANGUAGE = os.environ.get("LELAMP_GEMINI_LIVE_LANGUAGE", "")
 
-# Map lumi config's `stt_language` short codes onto Gemini Live BCP-47
+# Map lamp config's `stt_language` short codes onto Gemini Live BCP-47
 # tags. Empty / "auto" / unknown → leave language_code unset so Gemini
 # auto-detects from the audio (good for mixed-language households).
 _STT_LANG_TO_BCP47 = {
@@ -74,15 +74,15 @@ def _resolve_language(language: Optional[str]) -> str:
     Source priority:
       1. ``language`` arg passed to GeminiLiveBrain (explicit).
       2. ``LELAMP_GEMINI_LIVE_LANGUAGE`` env override.
-      3. Lumi config's ``stt_language`` (so the brain follows the same
+      3. Lamp config's ``stt_language`` (so the brain follows the same
          language the classic STT pipeline was tuned for).
       4. Empty → leave unset so Gemini auto-detects.
     """
     candidate = (language or DEFAULT_LANGUAGE or "").strip()
     if not candidate:
         try:
-            from lelamp.config import _lumi_cfg_get
-            candidate = (_lumi_cfg_get("stt_language") or "").strip()
+            from lelamp.config import _lamp_cfg_get
+            candidate = (_lamp_cfg_get("stt_language") or "").strip()
         except Exception:
             candidate = ""
     if not candidate or candidate.lower() == "auto":
@@ -543,7 +543,7 @@ class GeminiLiveSession(BrainSession):
         # Disable thinking output. Gemini 3.x flash-live defaults to
         # emitting reasoning tokens as part of the response stream,
         # which the runner buffers into ``brain.chitchat`` text and
-        # pipes into ElevenLabs — the user then HEARS Lumi say things
+        # pipes into ElevenLabs — the user then HEARS Lamp say things
         # like "The user's input 'vui lòng' is short and Vietnamese,
         # roughly translating to please... So I'll reply..." before
         # the actual answer. ``thinking_budget=0`` turns thinking off
@@ -863,7 +863,7 @@ class GeminiLiveSession(BrainSession):
             # user transcript from the ASR side-channel. Fire
             # on_delegate unconditionally so the runner routes this
             # turn.
-            logger.info("delegate_to_lumi signal received")
+            logger.info("delegate_to_lamp signal received")
             if self._on_delegate is not None:
                 try:
                     self._on_delegate("")

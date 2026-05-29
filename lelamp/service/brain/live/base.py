@@ -46,7 +46,7 @@ class BrainSession(ABC):
                             Gemini Live) for the chit-chat reply. May be
                             called many times per session.
             on_text:        Optional. Called with (text, is_final) for the
-                            brain's *reply* — the transcript of what Lumi
+                            brain's *reply* — the transcript of what Lamp
                             just said. Useful for monitor logging.
             on_user_input:  Optional. Called with (text, is_final) for the
                             brain's transcription of the *user's* speech.
