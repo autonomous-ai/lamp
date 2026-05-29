@@ -25,7 +25,32 @@ IMG_FILE_rpi := golden.img
 IMG_FILE_opi := golden-opi.img.xz
 IMG_FILE := $(IMG_FILE_$(TARGET))
 
-build:
+# Preflight — check Docker resources + clean dangling layers before a long
+# build run. Avoids the most common failure modes: OOM (Docker memory < 4GB)
+# and "No space left" / missing .img at xz time (host disk full or Docker
+# disk image full). Warns but doesn't block — user can ctrl+C if limits
+# look serious. Safe: only prunes dangling images, never volumes or named
+# images (UV cache / lerobot clone stay intact).
+build-preflight:
+	@echo "==> Preflight checks"
+	@command -v docker >/dev/null 2>&1 || { echo "ERROR: Docker not installed"; exit 1; }
+	@docker info >/dev/null 2>&1 || { echo "ERROR: Docker daemon not running (start Docker Desktop)"; exit 1; }
+	@DOCKER_MEM_GB=$$(docker info --format '{{.MemTotal}}' | awk '{printf "%.1f", $$1/1024/1024/1024}'); \
+		MEM_INT=$$(echo $$DOCKER_MEM_GB | cut -d. -f1); \
+		echo "    Docker memory:    $${DOCKER_MEM_GB} GB"; \
+		if [ "$$MEM_INT" -lt 4 ]; then \
+			echo "    ⚠️  WARNING: <4 GB Docker memory — OOM very likely. Docker Desktop → Settings → Resources → Memory ≥ 8 GB, then restart Docker"; \
+		fi
+	@FREE_GB=$$(df -k . | tail -1 | awk '{printf "%.0f", $$4/1024/1024}'); \
+		echo "    Host free disk:   $${FREE_GB} GB"; \
+		if [ "$$FREE_GB" -lt 30 ]; then \
+			echo "    ⚠️  WARNING: <30 GB free — image is 14G + workspace ~10G + buffer. Run 'make clean' + free host disk first"; \
+		fi
+	@echo "    Cleaning dangling Docker images (safe — keeps pi-builder + volumes)"
+	@docker image prune -f >/dev/null 2>&1 || true
+	@echo
+
+build: build-preflight
 	# Build the Docker build environment (shared for both targets)
 	docker build -t pi-builder .
 
