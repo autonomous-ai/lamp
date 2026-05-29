@@ -120,8 +120,8 @@ func (s *Service) runWSConn(ctx context.Context, handler domain.AgentEventHandle
 		"id":     "lamp-1",
 		"method": "connect",
 		"params": map[string]interface{}{
-			"minProtocol": 3,
-			"maxProtocol": 3,
+			"minProtocol": 4,
+			"maxProtocol": 4,
 			"client": map[string]interface{}{
 				"id":       "node-host",
 				"version":  "1.0",
@@ -186,7 +186,7 @@ func (s *Service) runWSConn(ctx context.Context, handler domain.AgentEventHandle
 		} `json:"result"`
 		Payload struct {
 			// uptimeMs may live at payload top level (older gateway responses) or
-			// inside snapshot (current 2026.5.7 hello-ok shape) — capture both,
+			// inside snapshot (current 2026.5.27 hello-ok shape) — capture both,
 			// prefer the non-zero one.
 			UptimeMs int64 `json:"uptimeMs"`
 			Snapshot struct {
