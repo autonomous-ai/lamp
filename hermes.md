@@ -26,7 +26,7 @@ Thêm config field:
 }
 ```
 
-Tại `lumi/server/wire.go` — bind `domain.AgentGateway` provider:
+Tại `lamp/server/wire.go` — bind `domain.AgentGateway` provider:
 
 ```go
 func ProvideAgentGateway(cfg *config.Config, ...) domain.AgentGateway {
@@ -295,7 +295,7 @@ Hermes chạy local: `http://127.0.0.1:8642`.
 ### New files
 
 ```
-lumi/internal/hermes/
+lamp/internal/hermes/
 ├── service.go         (~180 LOC)  — AgentGateway impl, state, ProvideService
 ├── client.go          (~220 LOC)  — HTTP client, SSE consumer, retry
 ├── sse_translator.go  (~180 LOC)  — SSE event → domain.WSEvent
@@ -314,17 +314,17 @@ lumi/internal/hermes/
 
 ### Modified files
 
-- `lumi/server/config/config.go` — thêm 5 field Hermes.
-- `lumi/server/wire.go` — `ProvideAgentGateway` switch case.
-- `lumi/internal/hermes/wire.go` — new wire set.
-- Có thể cần: `lumi/server/config/config.go` thêm getter/setter.
+- `lamp/server/config/config.go` — thêm 5 field Hermes.
+- `lamp/server/wire.go` — `ProvideAgentGateway` switch case.
+- `lamp/internal/hermes/wire.go` — new wire set.
+- Có thể cần: `lamp/server/config/config.go` thêm getter/setter.
 
 ### Unchanged
 
-- `lumi/server/agent/delivery/http/handler_events.go` (đã switch theo `evt.Event`)
-- `lumi/server/agent/delivery/http/handler_hw.go` (`[HW:/...]` markers độc lập backend)
+- `lamp/server/agent/delivery/http/handler_events.go` (đã switch theo `evt.Event`)
+- `lamp/server/agent/delivery/http/handler_hw.go` (`[HW:/...]` markers độc lập backend)
 - LeLamp, sensing, monitor SSE, LED, network, OTA, web UI
-- `lumi/internal/openclaw/` (không đụng — vẫn là backend default)
+- `lamp/internal/openclaw/` (không đụng — vẫn là backend default)
 
 ---
 
