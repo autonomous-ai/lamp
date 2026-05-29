@@ -5,8 +5,8 @@ Pipeline:
   1. Mic always on, local RMS energy check (free, zero cost)
   2. Speech detected → create STT session, stream audio
   3. Silence for SILENCE_TIMEOUT → close session (stop billing)
-  4. Transcripts → POST to Lumi Server /api/sensing/event
-  5. Lumi Go → local intent match or OpenClaw → AI responds → POST /voice/speak
+  4. Transcripts → POST to Lamp Server /api/sensing/event
+  5. Lamp Go → local intent match or OpenClaw → AI responds → POST /voice/speak
 
 STT provider is pluggable (default: Deepgram).
 """
@@ -29,7 +29,7 @@ from lelamp import config as _lelamp_config
 
 logger = logging.getLogger("lelamp.voice")
 
-LUMI_SENSING_URL = "http://127.0.0.1:5000/api/sensing/event"
+LAMP_SENSING_URL = "http://127.0.0.1:5000/api/sensing/event"
 
 STT_RATE = 16000   # Rate expected by all STT providers
 CHANNELS = 1
@@ -75,8 +75,8 @@ SPEAKER_MIN_AUDIO_S = _lelamp_config.SPEAKER_MIN_AUDIO_S
 
 SPEECH_EMOTION_ENABLED = _lelamp_config.SPEECH_EMOTION_ENABLED
 
-# Wake word patterns (lowercase match) — default for agent named "Lumi"
-DEFAULT_WAKE_WORDS = ["hello lumi", "hey lumi", "hey lu mi", "này lumi", "ê lumi", "lumi ơi"]
+# Wake word patterns (lowercase match) — default for agent named "Lamp"
+DEFAULT_WAKE_WORDS = ["hello lamp", "hey lamp", "này lamp", "ê lamp", "lamp ơi"]
 
 
 
@@ -496,7 +496,7 @@ class VoiceService:
         duration_s: float = 0.0,
         voiceprint_hash: Optional[str] = None,
     ) -> str:
-        """Format Lumi message for an unrecognized speaker (enroll hints, cooldown)."""
+        """Format Lamp message for an unrecognized speaker (enroll hints, cooldown)."""
         now = time.time()
         in_cooldown = False
         if voiceprint_hash:
@@ -587,13 +587,13 @@ class VoiceService:
         """Detect wake word in `combined` and split it off.
 
         Returns ``(final_text, event_type)``:
-        * ``final_text`` — the text that will be sent to Lumi (wake word stripped
+        * ``final_text`` — the text that will be sent to Lamp (wake word stripped
           when a command, otherwise the original transcript).
         * ``event_type`` — ``"voice_command"`` when a wake word matched at the
           start, otherwise ``"voice"``. Used as the sensing-event ``type`` field.
 
         Empty ``combined`` short-circuits to ``("", "voice")``; the caller still
-        gets a usable shape but typically skips the Lumi POST.
+        gets a usable shape but typically skips the Lamp POST.
         """
         if not combined:
             return "", "voice"
@@ -614,7 +614,7 @@ class VoiceService:
     def _identify_and_decorate(
         self, transcript: str, audio_buffer: list[bytes],
     ) -> tuple[str, Optional[str]]:
-        """Run speaker recognition; return (Lumi message, SER user name or None).
+        """Run speaker recognition; return (Lamp message, SER user name or None).
 
         ``user_name`` is set only when speaker recognize completes without
         ``error`` — known label or ``unknown`` for no match. ``None`` skips SER.
@@ -987,7 +987,7 @@ class VoiceService:
             # the user stops, so without this the voiceprint ends up 30-50%
             # silence and the embedding degrades.
             last_speech_idx: int = len(audio_buffer) - 1
-            # Signal Lumi to show listening LED as soon as mic session opens (before transcript arrives)
+            # Signal Lamp to show listening LED as soon as mic session opens (before transcript arrives)
             try:
                 requests.post("http://127.0.0.1:5000/api/sensing/event",
                               json={"type": "voice_listening", "message": "listening"},
@@ -1073,12 +1073,12 @@ class VoiceService:
             final_text, event_type = self._resolve_wake_word_split(combined)
             user = UNKNOWN_USER_LABEL
             
-            # 1. Speaker recognize and decorate the final text to send to Lumi.
+            # 1. Speaker recognize and decorate the final text to send to Lamp.
             if combined:
                 final_msg, se_user = self._identify_and_decorate(final_text, audio_buffer)
                 user = se_user if se_user else UNKNOWN_USER_LABEL
-                logger.info("Final message → Lumi (%s): %r", event_type, final_msg)
-                self._send_to_lumi(final_msg, event_type=event_type)
+                logger.info("Final message → Lamp (%s): %r", event_type, final_msg)
+                self._send_to_lamp(final_msg, event_type=event_type)
 
             # 2. Submit SER — uses the UNTRIMMED snapshot so laughter / sighs
             self._submit_speech_emotion_from_session(ser_audio_buffer, user=user)
@@ -1137,9 +1137,9 @@ class VoiceService:
             return True
         return False
 
-    def _send_to_lumi(self, message: str, event_type: str = "voice"):
+    def _send_to_lamp(self, message: str, event_type: str = "voice"):
         """Send the final decorated message (speaker prefix + optional audio
-        path) to Lumi as a sensing event.
+        path) to Lamp as a sensing event.
 
         ``message`` is already the output of ``_identify_and_decorate`` — it
         contains ``"<Name>: <text>"`` for a known speaker or
@@ -1152,30 +1152,30 @@ class VoiceService:
         import json as _json
         payload = {"type": event_type, "message": message}
         logger.info("curl -s -X POST %s -H 'Content-Type: application/json' -d '%s'",
-                    LUMI_SENSING_URL, _json.dumps(payload))
+                    LAMP_SENSING_URL, _json.dumps(payload))
         max_retries = 3
         for attempt in range(1, max_retries + 1):
             try:
                 resp = requests.post(
-                    LUMI_SENSING_URL,
+                    LAMP_SENSING_URL,
                     json=payload,
                     timeout=5,
                 )
                 if resp.status_code == 503 and attempt < max_retries:
-                    logger.warning("Lumi agent not ready (503), retrying in 2s... (attempt %d/%d)", attempt, max_retries)
+                    logger.warning("Lamp agent not ready (503), retrying in 2s... (attempt %d/%d)", attempt, max_retries)
                     time.sleep(2)
                     continue
                 elif resp.status_code != 200:
-                    logger.warning("Lumi returned %d: %s", resp.status_code, resp.text)
+                    logger.warning("Lamp returned %d: %s", resp.status_code, resp.text)
                 else:
-                    logger.info("Sent to Lumi: %r", message)
+                    logger.info("Sent to Lamp: %r", message)
                 return
             except requests.ConnectionError as e:
                 if attempt < max_retries:
-                    logger.warning("Lumi not reachable (attempt %d/%d), retrying in 2s...", attempt, max_retries)
+                    logger.warning("Lamp not reachable (attempt %d/%d), retrying in 2s...", attempt, max_retries)
                     time.sleep(2)
                 else:
-                    logger.warning("Failed to send voice event to Lumi after %d attempts: %s", max_retries, e)
+                    logger.warning("Failed to send voice event to Lamp after %d attempts: %s", max_retries, e)
             except requests.RequestException as e:
-                logger.warning("Failed to send voice event to Lumi: %s", e)
+                logger.warning("Failed to send voice event to Lamp: %s", e)
                 return

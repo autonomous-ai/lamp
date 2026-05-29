@@ -1,22 +1,22 @@
-# Tổng Quan Kiến Trúc — Lumi AI Lamp
+# Tổng Quan Kiến Trúc — Lamp AI Lamp
 
 ## Kiến Trúc 3 Tầng
 
 ```
-OpenClaw (AI/LLM) → Lumi Server (Go, :5000) → LeLamp Runtime (Python, :5001) → Phần cứng
+OpenClaw (AI/LLM) → Lamp Server (Go, :5000) → LeLamp Runtime (Python, :5001) → Phần cứng
 ```
 
 | Tầng | Ngôn ngữ | Port | Vai trò |
 |------|----------|------|---------|
 | OpenClaw | Go | WS | Bộ não AI, LLM, SKILL.md, memory, channels |
-| Lumi Server | Go | 5000 | Hệ thống (mạng, OTA, MQTT, reset), sensing event routing, local intent |
+| Lamp Server | Go | 5000 | Hệ thống (mạng, OTA, MQTT, reset), sensing event routing, local intent |
 | LeLamp Runtime | Python | 5001 | Hardware drivers (servo, LED, camera, audio, display), FastAPI |
 
 ## Thư Mục Dự Án
 
 ```
-lumi/
-├── cmd/lamp/main.go              — Entry point Lumi Server
+lamp/
+├── cmd/lamp/main.go              — Entry point Lamp Server
 ├── cmd/bootstrap/main.go         — OTA bootstrap worker
 ├── server/
 │   ├── server.go                 — Gin HTTP server, route setup
@@ -47,7 +47,7 @@ lelamp/
 ├── devices/                      — Camera device abstraction (LocalVideoCaptureDevice)
 ├── service/
 │   ├── voice/voice_service.py    — Local VAD + Deepgram STT, speaker ID, SER submit
-│   ├── voice/speech_emotion/     — Queue SER → dlbackend → Lumi speech_emotion.detected
+│   ├── voice/speech_emotion/     — Queue SER → dlbackend → Lamp speech_emotion.detected
 │   ├── voice/tts_service.py      — OpenAI-compatible TTS
 │   ├── sensing/
 │   │   ├── sensing_service.py    — Vòng lặp sensing nền
@@ -75,11 +75,11 @@ web/                              — React 19 + Vite + Tailwind CSS 4 SPA
 ```
 Mic (always on) → Local VAD (RMS energy, free)
     → Speech detected → Connect Deepgram STT
-        → "hey lumi, tắt đèn" → voice_command → local intent → thực thi
+        → "hey lamp, tắt đèn" → voice_command → local intent → thực thi
         → "anh ơi đi ăn không" → voice (ambient) → OpenClaw
     → Silence 3s → Disconnect Deepgram
-    → _submit_speech_emotion_from_session: WAV → dlbackend SER → Lumi event (luôn chạy, độc lập transcript)
-    → _identify_and_decorate (1 lần) → if transcript: _send_to_lumi voice/voice_command
+    → _submit_speech_emotion_from_session: WAV → dlbackend SER → Lamp event (luôn chạy, độc lập transcript)
+    → _identify_and_decorate (1 lần) → if transcript: _send_to_lamp voice/voice_command
 ```
 
 Chi tiết SER: [speech-emotion_vi.md](speech-emotion_vi.md).
@@ -99,7 +99,7 @@ Event có ảnh? (large motion, face enter) → encode frame full-resolution JPE
 Ảnh face enter: frame gốc được vẽ bounding box + nhãn friend/stranger
 
 POST /api/sensing/event {type, message, image?}
-    → Lumi Go:
+    → Lamp Go:
         1. Voice event + local intent match? → thực thi trực tiếp (~50ms)
         2. Không match → forward OpenClaw:
            - Có image → SendChatMessageWithImage (text + vision content block)

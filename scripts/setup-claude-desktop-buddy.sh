@@ -6,11 +6,11 @@
 # This script:
 #   1. Downloads buddy-plugin binary from OTA metadata
 #   2. Installs to /opt/claude-desktop-buddy/
-#   3. Creates systemd service (lumi-buddy)
+#   3. Creates systemd service (claude-desktop-buddy)
 #   4. Enables and starts the service
 set -euo pipefail
 
-OTA_METADATA_URL="${OTA_METADATA_URL:-https://storage.googleapis.com/s3-autonomous-upgrade-3/lumi/ota/metadata.json}"
+OTA_METADATA_URL="${OTA_METADATA_URL:-https://storage.googleapis.com/s3-autonomous-upgrade-3/lamp/ota/metadata.json}"
 BUDDY_DIR="/opt/claude-desktop-buddy"
 
 ensure_root() {
@@ -106,10 +106,10 @@ rm -rf "$DIR_TMP"
 # ----------------------------------------------------------
 echo "[buddy] Creating systemd service..."
 
-cat >/etc/systemd/system/lumi-buddy.service <<EOF
+cat >/etc/systemd/system/claude-desktop-buddy.service <<EOF
 [Unit]
-Description=Lumi Claude Desktop Buddy (BLE)
-After=bluetooth.target lumi.service
+Description=Lamp Claude Desktop Buddy (BLE)
+After=bluetooth.target lamp.service
 Wants=bluetooth.target
 
 [Service]
@@ -121,15 +121,15 @@ Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=lumi-buddy
+SyslogIdentifier=claude-desktop-buddy
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable lumi-buddy
-systemctl restart lumi-buddy
+systemctl enable claude-desktop-buddy
+systemctl restart claude-desktop-buddy
 
 echo ""
 echo "======================================"
@@ -137,6 +137,6 @@ echo "Claude Desktop Buddy installed!"
 echo "Version:  $BUDDY_VERSION"
 echo "Binary:   $BUDDY_DIR/buddy-plugin"
 echo "Config:   $BUDDY_DIR/config/buddy.json"
-echo "Service:  systemctl status lumi-buddy"
-echo "Logs:     journalctl -u lumi-buddy -f"
+echo "Service:  systemctl status claude-desktop-buddy"
+echo "Logs:     journalctl -u claude-desktop-buddy -f"
 echo "======================================"

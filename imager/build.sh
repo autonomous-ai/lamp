@@ -38,12 +38,12 @@
 #         - Install packages (btrfs-progs, hostapd, dnsmasq, nginx, etc.)
 #         - Verify btrfs binary works (shared libs check)
 #         - Generate locale
-#         - stage_rpi5_wifi_stability: disable IPv6, power-save service
+#         - stage_rpi5_wifi_stability: disable IPv6 (legacy RPi 5 workaround)
 #         - stage_enable_spi: dtparam=spi=on in config.txt
-#         - stage_backend_units: systemd services (bootstrap, lumi, lumi-lelamp) + software-update
+#         - stage_backend_units: systemd services (bootstrap, lamp, lamp-lelamp) + software-update
 #         - stage_pulseaudio: PulseAudio echo cancellation (WebRTC AEC for mic/speaker)
 #         - stage_lelamp_uv: install uv (Python package manager for LeLamp)
-#         - stage_nginx: write nginx config with lumi/lelamp/openclaw upstreams
+#         - stage_nginx: write nginx config with backend/lelamp/openclaw upstreams
 #         - stage_ap: hostapd, dnsmasq, dhcpcd, device-ap/sta-mode scripts
 #         - stage_nodejs_openclaw: Node.js 22 + OpenClaw gateway
 #  20.  Install btrfs-resize-once service
@@ -53,7 +53,7 @@
 # PHASE 2 — OVERLAY (always runs — fast)
 #   Copy base.img → golden.img, mount, chroot:
 #         - stage_ota_metadata: fetch build versions from GCS
-#         - stage_backend: download bootstrap-server + lumi-server binaries
+#         - stage_backend: download bootstrap-server + lamp-server binaries
 #         - stage_lelamp: download LeLamp Python app + uv sync
 #         - stage_web: download web UI zip
 #   Take initial @factory snapshot (baked into image at build time)
@@ -64,8 +64,8 @@
 #   2. firstrun-wifi.service: unblocks rfkill, sets Wi-Fi country (runs once)
 #   3. btrfs-resize-once.service: resizes partition + Btrfs to full SD (runs once, self-destructs)
 #      @factory is the build-time white board — never overwritten
-#   4. User runs 'sudo device-ap-mode' to start AP hotspot "Lumi-XXXX" at 192.168.100.1
-#   5. nginx serves setup web UI, bootstrap/lumi/lelamp backends running
+#   4. User runs 'sudo device-ap-mode' to start AP hotspot "Lamp-XXXX" at 192.168.100.1
+#   5. nginx serves setup web UI, bootstrap/lamp/lelamp backends running
 #
 # BTRFS SUBVOLUME LAYOUT
 #   @               — initial live root
@@ -106,7 +106,7 @@
 #   sudo device-ap-mode           — switch to hotspot mode
 #   sudo device-sta-mode          — switch to station (client) mode
 #   sudo connect-wifi SSID PASS   — connect to WiFi (switches to STA mode)
-#   sudo software-update <bootstrap|lumi|lelamp|openclaw|web>  — OTA update a component
+#   sudo software-update <bootstrap|lamp|lelamp|openclaw|web>  — OTA update a component
 # =============================================================================
 set -euo pipefail
 
@@ -117,7 +117,7 @@ PI_TIMEZONE="America/New_York"
 USERNAME="system"           # Linux user created on the image
 PASSWORD="12345"            # Password for the user
 OUT_IMG_SIZE="8G"           # Output image size (expands to full SD on first boot)
-OTA_METADATA_URL="https://storage.googleapis.com/s3-autonomous-upgrade-3/lumi/ota/metadata.json"
+OTA_METADATA_URL="https://storage.googleapis.com/s3-autonomous-upgrade-3/lamp/ota/metadata.json"
 AP_BAND="${AP_BAND:-2.4}"   # 2.4 or 5 (5 GHz needs supported regulatory domain + chip)
 AP_CHANNEL="${AP_CHANNEL:-}" # default: 6 for 2.4 GHz, 36 for 5 GHz
 COUNTRY_CODE="US"           # Regulatory country code for hostapd
@@ -559,7 +559,7 @@ keyboard-configuration keyboard-configuration/xkb-keymap select us
 keyboard-configuration keyboard-configuration/variant select English (US)
 keyboard-configuration keyboard-configuration/model select Generic 105-key PC (intl.)
 DBCONF
-cat > ${MNT}/etc/apt/apt.conf.d/99-lumi-silent <<'APT'
+cat > ${MNT}/etc/apt/apt.conf.d/99-lamp-silent <<'APT'
 Dpkg::Use-Pty "false";
 APT
 
@@ -730,7 +730,7 @@ retry() {
 
 # install_binary_from_zip(url, dest, name)
 # Downloads a zip, finds the executable inside, installs to dest.
-# Used for bootstrap-server and lumi-server OTA binaries.
+# Used for bootstrap-server and lamp-server OTA binaries.
 install_binary_from_zip() {
   local url="\$1" dest="\$2" name="\$3"
   local ztmp="/tmp/\${name}-zip.$$" dtmp="/tmp/\${name}-dir.$$"
@@ -760,36 +760,16 @@ systemctl enable systemd-timesyncd
 date -u '+%Y-%m-%d %H:%M:%S' > /etc/fake-hwclock.data
 
 # ── stage: WiFi stability (RPi 5 specific) ───────────────────────────────────
-# RPi 5 Wi-Fi drops connections when:
-#   1. IPv6 is enabled (causes duplicate address detection delays)
-#   2. Wi-Fi power save mode is on (chip sleeps between AP beacons)
-# Solutions:
-#   sysctl: disable IPv6 globally via kernel parameters
-#   service: runs 'iw dev wlan0 set power_save off' after interface appears
-echo "[stage] WiFi stability"
+# Legacy RPi 5 workaround: disable IPv6 globally to avoid duplicate address
+# detection delays. Harmless on OrangePi.
+echo "[stage] WiFi stability (IPv6 off)"
 mkdir -p /etc/sysctl.d
-cat > /etc/sysctl.d/99-lumi-wifi.conf <<'EOF'
+cat > /etc/sysctl.d/99-lamp-wifi.conf <<'EOF'
 net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
 EOF
-sysctl -p /etc/sysctl.d/99-lumi-wifi.conf 2>/dev/null || true
-
-cat > /etc/systemd/system/lumi-wifi-power-save.service <<'EOF'
-[Unit]
-Description=Disable WiFi power save (RPi 5 stability)
-After=network.target
-Before=hostapd.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/bin/sh -c 'for i in 1 2 3 4 5; do ip link show wlan0 >/dev/null 2>&1 && break; sleep 2; done; iw dev wlan0 set power_save off 2>/dev/null || true'
-
-[Install]
-WantedBy=multi-user.target
-EOF
-systemctl enable lumi-wifi-power-save.service
+sysctl -p /etc/sysctl.d/99-lamp-wifi.conf 2>/dev/null || true
 
 # ── stage: SPI ────────────────────────────────────────────────────────────────
 # Enable the SPI bus in firmware config for hardware peripherals.
@@ -802,7 +782,7 @@ if [ -n "\$CFG" ]; then
   if grep -qE '^\s*#?\s*dtparam=spi=on' "\$CFG" 2>/dev/null; then
     sed -i -E 's/^\s*#\s*(dtparam=spi=on)/\1/' "\$CFG" || true
   else
-    printf '\n# SPI enabled by lumi build\ndtparam=spi=on\n' >> "\$CFG"
+    printf '\n# SPI enabled by lamp build\ndtparam=spi=on\n' >> "\$CFG"
   fi
 fi
 
@@ -832,28 +812,28 @@ SyslogIdentifier=bootstrap
 WantedBy=multi-user.target
 EOF
 
-cat > /etc/systemd/system/lumi.service <<'EOF'
+cat > /etc/systemd/system/lamp.service <<'EOF'
 [Unit]
-Description=Lumi Backend
+Description=Lamp Backend
 After=network.target
 
 [Service]
 User=root
 WorkingDirectory=/root
-ExecStart=/usr/local/bin/lumi-server
+ExecStart=/usr/local/bin/lamp-server
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=lumi
+SyslogIdentifier=lamp
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-cat > /etc/systemd/system/lumi-lelamp.service <<'EOF'
+cat > /etc/systemd/system/lamp-lelamp.service <<'EOF'
 [Unit]
-Description=Lumi LeLamp Hardware Runtime
+Description=Lamp LeLamp Hardware Runtime
 After=network.target
 
 [Service]
@@ -866,27 +846,27 @@ Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=lumi-lelamp
+SyslogIdentifier=lamp-lelamp
 
 [Install]
 WantedBy=multi-user.target
 EOF
-systemctl enable bootstrap lumi lumi-lelamp
+systemctl enable bootstrap lamp lamp-lelamp
 
-# software-update: OTA updater for bootstrap, lumi, lelamp, openclaw, and web UI.
-# Usage: software-update <bootstrap|lumi|lelamp|openclaw|web>
+# software-update: OTA updater for bootstrap, lamp, lelamp, openclaw, and web UI.
+# Usage: software-update <bootstrap|lamp|lelamp|openclaw|web>
 # Downloads the binary/zip from OTA metadata URL and hot-swaps it.
 cat > /usr/local/bin/software-update <<'SWUPDATE'
 #!/bin/bash
 set -euo pipefail
-OTA_METADATA_URL="${OTA_METADATA_URL:-https://storage.googleapis.com/s3-autonomous-upgrade-3/lumi/ota/metadata.json}"
+OTA_METADATA_URL="${OTA_METADATA_URL:-https://storage.googleapis.com/s3-autonomous-upgrade-3/lamp/ota/metadata.json}"
 retry() {
   local cmd="\$1" max="\${2:-5}" delay="\${3:-2}" n=0
   until [ "\$n" -ge "\$max" ]; do eval "\$cmd" && return 0; n=\$((n+1)); sleep "\$delay"; done
   echo "ERROR: failed \$max attempts"; return 1
 }
 [ "\$(id -u)" -ne 0 ] && { echo "Run as root."; exit 1; }
-[ \$# -lt 1 ] && { echo "Usage: software-update <bootstrap|lumi|lelamp|openclaw|web>"; exit 1; }
+[ \$# -lt 1 ] && { echo "Usage: software-update <bootstrap|lamp|lelamp|openclaw|web>"; exit 1; }
 
 # Wait for NTP time sync (RPi has no battery-backed RTC; clock may be wrong on boot)
 for i in \$(seq 1 10); do
@@ -895,7 +875,7 @@ for i in \$(seq 1 10); do
   sleep 2
 done
 KIND="\$1"
-case "\$KIND" in bootstrap|lumi|lelamp|openclaw|web) ;; *) echo "Unknown: \$KIND (bootstrap, lumi, lelamp, openclaw, web)"; exit 1 ;; esac
+case "\$KIND" in bootstrap|lamp|lelamp|openclaw|web) ;; *) echo "Unknown: \$KIND (bootstrap, lamp, lelamp, openclaw, web)"; exit 1 ;; esac
 META="\$(mktemp)"
 retry "curl -fsSL -H 'Cache-Control: no-cache' -o '\$META' '\$OTA_METADATA_URL'" 5
 URL=\$(jq -r --arg k "\$KIND" '.[\$k].url // empty' "\$META")
@@ -909,13 +889,13 @@ if [ "\$KIND" = "web" ]; then
   unzip -o -q /tmp/web.zip -d /usr/share/nginx/html/setup
   rm -f /tmp/web.zip
   systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
-elif [ "\$KIND" = "lumi" ]; then
+elif [ "\$KIND" = "lamp" ]; then
   Z="\$(mktemp)"; D="\$(mktemp -d)"
   curl -fsSL -o "\$Z" "\$URL"; unzip -o -q "\$Z" -d "\$D"; rm -f "\$Z"
   b=\$(find "\$D" -type f -executable 2>/dev/null | head -1)
   [ -z "\$b" ] && b=\$(find "\$D" -type f 2>/dev/null | head -1)
-  cp -f "\$b" /usr/local/bin/lumi-server; chmod +x /usr/local/bin/lumi-server; rm -rf "\$D"
-  systemctl restart lumi 2>/dev/null || true
+  cp -f "\$b" /usr/local/bin/lamp-server; chmod +x /usr/local/bin/lamp-server; rm -rf "\$D"
+  systemctl restart lamp 2>/dev/null || true
 elif [ "\$KIND" = "bootstrap" ]; then
   Z="\$(mktemp)"; D="\$(mktemp -d)"
   curl -fsSL -o "\$Z" "\$URL"; unzip -o -q "\$Z" -d "\$D"; rm -f "\$Z"
@@ -933,7 +913,7 @@ elif [ "\$KIND" = "lelamp" ]; then
   rm -rf "\$LELAMP_DIR/.venv"
   cd "\$LELAMP_DIR" && "\$UV_BIN" sync --python 3.12 --extra hardware || { echo "uv sync failed"; exit 1; }
   cd /
-  systemctl restart lumi-lelamp 2>/dev/null || true
+  systemctl restart lamp-lelamp 2>/dev/null || true
 elif [ "\$KIND" = "openclaw" ]; then
   V="\${VER:-latest}"
   npm install -g "openclaw@\${V}" || { echo "npm install openclaw failed"; exit 1; }
@@ -946,7 +926,7 @@ chmod +x /usr/local/bin/software-update
 # ── stage: nginx ──────────────────────────────────────────────────────────────
 # nginx serves two things:
 #   1. Static web UI at / (setup wizard — downloaded from OTA)
-#   2. API proxy at /api/ → localhost:5000 (lumi-server), /hw/ → :5001 (lelamp), /gw/ → :18789 (openclaw)
+#   2. API proxy at /api/ → localhost:5000 (lamp-server), /hw/ → :5001 (lelamp), /gw/ → :18789 (openclaw)
 # Captive portal detection endpoints return 204 (no content) to prevent
 # the OS from auto-opening a browser when connecting to the AP.
 echo "[stage] Setup nginx"
@@ -954,7 +934,7 @@ rm -f /etc/nginx/sites-enabled/default
 mkdir -p /usr/share/nginx/html/setup
 # Web UI download moved to Phase 2 (overlay) — only config is in base
 
-cat > /etc/nginx/conf.d/lumi.conf <<'EOF'
+cat > /etc/nginx/conf.d/lamp.conf <<'EOF'
 upstream backend  { server 127.0.0.1:5000; }
 upstream lelamp   { server 127.0.0.1:5001; }
 upstream openclaw { server 127.0.0.1:18789; }
@@ -975,7 +955,7 @@ server {
   add_header Referrer-Policy "no-referrer" always;
   add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
   # Strict CSP. LeLamp self-hosts Swagger UI assets under /static/ (served
-  # via the Lumi /api/hardware/* proxy), so no CDN whitelist or
+  # via the Lamp /api/hardware/* proxy), so no CDN whitelist or
   # `'unsafe-inline'` script-src is needed. Mirrors scripts/setup.sh.
   add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; connect-src 'self' ws: wss:; frame-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'" always;
 
@@ -991,7 +971,7 @@ server {
     proxy_send_timeout 86400s;
   }
 
-  # Lumi Buddy (macOS companion) persistent WebSocket.
+  # Lamp Buddy (macOS companion) persistent WebSocket.
   location = /api/buddy/ws {
     proxy_pass http://backend;
     proxy_http_version 1.1;
@@ -1013,9 +993,9 @@ server {
     proxy_set_header X-Real-IP \$remote_addr;
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
   }
-  # Top-level openapi.json proxied to Lumi backend so the in-iframe Swagger
+  # Top-level openapi.json proxied to Lamp backend so the in-iframe Swagger
   # UI (loaded via /api/hardware/docs) can fetch its spec at the absolute
-  # path FastAPI hardcodes. Lumi adminAuthMiddleware gates the cookie/Bearer.
+  # path FastAPI hardcodes. Lamp adminAuthMiddleware gates the cookie/Bearer.
   location = /openapi.json {
     proxy_pass http://backend;
     proxy_set_header Host \$host;
@@ -1069,7 +1049,7 @@ systemctl enable nginx
 #   dnsmasq   — DHCP server + DNS resolver for connected clients
 #   dhcpcd5   — assigns static IP 192.168.100.1 to wlan0 in AP mode
 #
-# AP SSID is "Lumi-XXXX" where XXXX = last 4 chars of Pi serial number.
+# AP SSID is "Lamp-XXXX" where XXXX = last 4 chars of Pi serial number.
 # This is set at runtime by device-ap-mode (not hardcoded in config).
 #
 # Three helper scripts are installed:
@@ -1106,7 +1086,7 @@ Restart=on-failure
 RestartSec=5
 EOF
 
-# hostapd config — SSID placeholder "Lumi-XXXX" is replaced at runtime
+# hostapd config — SSID placeholder "Lamp-XXXX" is replaced at runtime
 # by device-ap-mode using the actual Pi serial number. AP_BAND switches between
 # 2.4 GHz (hw_mode=g, default channel 6) and 5 GHz (hw_mode=a + ieee80211ac=1,
 # default channel 36). 5 GHz needs a regulatory domain that permits it AND a
@@ -1118,7 +1098,7 @@ if [ "\${AP_BAND}" = "5" ]; then
   cat > /etc/hostapd/hostapd.conf <<EOF
 interface=wlan0
 driver=nl80211
-ssid=Lumi-XXXX
+ssid=Lamp-XXXX
 hw_mode=\$HWMODE
 channel=\$CHANNEL
 country_code=\${COUNTRY_CODE}
@@ -1134,7 +1114,7 @@ else
   cat > /etc/hostapd/hostapd.conf <<EOF
 interface=wlan0
 driver=nl80211
-ssid=Lumi-XXXX
+ssid=Lamp-XXXX
 hw_mode=\$HWMODE
 channel=\$CHANNEL
 country_code=\${COUNTRY_CODE}
@@ -1150,7 +1130,7 @@ echo 'DAEMON_CONF="/etc/hostapd/hostapd.conf"' > /etc/default/hostapd
 # dnsmasq config — DHCP range 192.168.100.50-150 on wlan0
 # address=/#/192.168.100.1 redirects ALL DNS queries to the Pi (captive portal)
 mkdir -p /etc/dnsmasq.d
-cat > /etc/dnsmasq.d/99-lumi.conf <<'EOF'
+cat > /etc/dnsmasq.d/99-lamp.conf <<'EOF'
 interface=wlan0
 bind-interfaces
 dhcp-range=wlan0,192.168.100.50,192.168.100.150,255.255.255.0,24h
@@ -1172,7 +1152,7 @@ nohook wpa_supplicant
 EOF
 
 # device-ap-mode: switches wlan0 to Access Point mode
-# Called by btrfs-resize-once on first boot and by lumi-server on demand
+# Called by btrfs-resize-once on first boot and by lamp-server on demand
 cat > /usr/local/bin/device-ap-mode <<'EOF'
 #!/bin/bash
 set -e
@@ -1201,19 +1181,19 @@ if [ -z "\$SERIAL" ]; then
   done
 fi
 SUFFIX=\${SERIAL: -4}
-AP_SSID="Lumi-\${SUFFIX}"
+AP_SSID="Lamp-\${SUFFIX}"
 [ -f /etc/hostapd/hostapd.conf ] && sed -i "s/^ssid=.*/ssid=\${AP_SSID}/" /etc/hostapd/hostapd.conf
 
 # mDNS hostname so the web UI can redirect AP→STA via .local without knowing
 # the LAN IP. Lowercase because URLs in the wild aren't case-normalized even
 # though mDNS itself is.
 SUFFIX_LC=\$(echo "\$SUFFIX" | tr '[:upper:]' '[:lower:]')
-LUMI_HOSTNAME="lumi-\${SUFFIX_LC}"
-hostnamectl set-hostname "\$LUMI_HOSTNAME" 2>/dev/null || hostname "\$LUMI_HOSTNAME" || true
+LAMP_HOSTNAME="lamp-\${SUFFIX_LC}"
+hostnamectl set-hostname "\$LAMP_HOSTNAME" 2>/dev/null || hostname "\$LAMP_HOSTNAME" || true
 if grep -q '^127\.0\.1\.1' /etc/hosts; then
-  sed -i "s/^127\.0\.1\.1.*/127.0.1.1 \$LUMI_HOSTNAME/" /etc/hosts
+  sed -i "s/^127\.0\.1\.1.*/127.0.1.1 \$LAMP_HOSTNAME/" /etc/hosts
 else
-  echo "127.0.1.1 \$LUMI_HOSTNAME" >> /etc/hosts
+  echo "127.0.1.1 \$LAMP_HOSTNAME" >> /etc/hosts
 fi
 systemctl enable avahi-daemon 2>/dev/null || true
 systemctl restart avahi-daemon 2>/dev/null || true
@@ -1224,7 +1204,6 @@ iw reg set "\$REG" 2>/dev/null || true
 ip link set wlan0 down 2>/dev/null || true; sleep 1
 iw dev wlan0 set type __ap 2>/dev/null || true
 ip link set wlan0 up; sleep 1
-iw dev wlan0 set power_save off 2>/dev/null || true
 ip addr flush dev wlan0
 ip addr add 192.168.100.1/24 dev wlan0
 # Start AP services
@@ -1260,7 +1239,6 @@ killall hostapd dnsmasq 2>/dev/null || true
 ip link set wlan0 down 2>/dev/null || true; sleep 1
 iw dev wlan0 set type managed
 ip link set wlan0 up; sleep 1
-iw dev wlan0 set power_save off 2>/dev/null || true
 ip addr flush dev wlan0
 # Remove AP static IP config from dhcpcd
 sed -i '/static ip_address=192.168.100.1\/24/d;/nohook wpa_supplicant/d' /etc/dhcpcd.conf
@@ -1280,7 +1258,7 @@ chmod +x /usr/local/bin/device-sta-mode
 
 # connect-wifi: writes wpa_supplicant config then switches to STA mode
 # Usage: connect-wifi SSID PASSWORD  (or  connect-wifi SSID  for open networks)
-# Called by lumi-server API endpoint /api/network/setup
+# Called by lamp-server API endpoint /api/network/setup
 cat > /usr/local/bin/connect-wifi <<'EOF'
 #!/bin/bash
 set -e
@@ -1332,7 +1310,7 @@ PULSE_CONF="/etc/pulse/default.pa"
 if [ -f "\$PULSE_CONF" ] && ! grep -q "module-echo-cancel" "\$PULSE_CONF"; then
   cat >> "\$PULSE_CONF" <<'PULSE_EOF'
 
-### Echo cancellation (WebRTC AEC) for Lumi smart lamp
+### Echo cancellation (WebRTC AEC) for Lamp
 load-module module-echo-cancel source_name=aec_source sink_name=aec_sink aec_method=webrtc aec_args="analog_gain_control=0 digital_gain_control=0" channels=1
 set-default-source aec_source
 set-default-sink aec_sink
@@ -1814,25 +1792,25 @@ echo "[overlay] Fetch OTA metadata"
 META="\$(mktemp)"
 retry "curl -fsSL -H 'Cache-Control: no-cache' -o '\$META' '\$OTA_METADATA_URL'" 5
 WEB_URL=\$(jq -r '.web.url // empty'         "\$META")
-LUMI_URL=\$(jq -r '.lumi.url // empty'       "\$META")
+LAMP_URL=\$(jq -r '.lamp.url // empty'       "\$META")
 BOOTSTRAP_URL=\$(jq -r '.bootstrap.url // empty' "\$META")
 LELAMP_URL=\$(jq -r '.lelamp.url // empty'   "\$META")
 BUDDY_URL=\$(jq -r '."claude-desktop-buddy".url // empty' "\$META")
 WEB_VER=\$(jq -r '.web.version // empty'     "\$META")
-LUMI_VER=\$(jq -r '.lumi.version // empty'   "\$META")
+LAMP_VER=\$(jq -r '.lamp.version // empty'   "\$META")
 BOOTSTRAP_VER=\$(jq -r '.bootstrap.version // empty' "\$META")
 LELAMP_VER=\$(jq -r '.lelamp.version // empty' "\$META")
 BUDDY_VER=\$(jq -r '."claude-desktop-buddy".version // empty' "\$META")
 rm -f "\$META"
-[ -z "\$WEB_URL" ] || [ -z "\$LUMI_URL" ] || [ -z "\$BOOTSTRAP_URL" ] && {
-  echo "ERROR: OTA metadata missing web.url, lumi.url or bootstrap.url"; exit 1
+[ -z "\$WEB_URL" ] || [ -z "\$LAMP_URL" ] || [ -z "\$BOOTSTRAP_URL" ] && {
+  echo "ERROR: OTA metadata missing web.url, lamp.url or bootstrap.url"; exit 1
 }
-echo "[overlay] web=\$WEB_VER lumi=\$LUMI_VER bootstrap=\$BOOTSTRAP_VER lelamp=\$LELAMP_VER buddy=\$BUDDY_VER"
+echo "[overlay] web=\$WEB_VER lamp=\$LAMP_VER bootstrap=\$BOOTSTRAP_VER lelamp=\$LELAMP_VER buddy=\$BUDDY_VER"
 
 # ── stage: backend binaries ──────────────────────────────────────────────────
 echo "[overlay] Install backend binaries"
 install_binary_from_zip "\$BOOTSTRAP_URL" /usr/local/bin/bootstrap-server "bootstrap"
-install_binary_from_zip "\$LUMI_URL"      /usr/local/bin/lumi-server      "lumi"
+install_binary_from_zip "\$LAMP_URL"      /usr/local/bin/lamp-server      "lamp"
 
 # ── stage: LeLamp (Python hardware runtime) ──────────────────────────────────
 echo "[overlay] Install LeLamp"
@@ -1940,8 +1918,8 @@ rm -f /tmp/web.zip
 
 # ── stage: Claude Desktop Buddy (BLE plugin, optional) ───────────────────────
 # Optional BLE bridge that pairs the lamp with Claude Desktop. The Mac-side
-# "Lumi Buddy" Swift app is a separate component and is NOT installed here.
-# Service name is lumi-buddy.service for legacy parity with setup.sh.
+# "Lamp Buddy" Swift app is a separate component and is NOT installed here.
+# Service name is claude-desktop-buddy.service for legacy parity with setup.sh.
 if [ -n "\$BUDDY_URL" ]; then
   echo "[overlay] Install Claude Desktop Buddy"
   BUDDY_DIR="/opt/claude-desktop-buddy"
@@ -1958,10 +1936,10 @@ if [ -n "\$BUDDY_URL" ]; then
   fi
   echo "\$BUDDY_VER" > "\$BUDDY_DIR/VERSION_BUDDY"
   rm -rf /tmp/buddy-extract
-  cat > /etc/systemd/system/lumi-buddy.service <<UNIT
+  cat > /etc/systemd/system/claude-desktop-buddy.service <<UNIT
 [Unit]
-Description=Lumi Claude Desktop Buddy (BLE)
-After=bluetooth.target lumi.service
+Description=Lamp Claude Desktop Buddy (BLE)
+After=bluetooth.target lamp.service
 Wants=bluetooth.target
 
 [Service]
@@ -1973,13 +1951,13 @@ Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=lumi-buddy
+SyslogIdentifier=claude-desktop-buddy
 
 [Install]
 WantedBy=multi-user.target
 UNIT
   systemctl daemon-reload
-  systemctl enable lumi-buddy
+  systemctl enable claude-desktop-buddy
 else
   echo "[overlay] WARN: No claude-desktop-buddy URL in OTA metadata, skipping buddy install"
 fi
@@ -2043,7 +2021,7 @@ mount ${OUT_LOOP_BOOT} ${MNT}/boot/firmware
 
 # Check critical binaries
 for BIN in /sbin/init \
-           /usr/local/bin/lumi-server /usr/local/bin/bootstrap-server \
+           /usr/local/bin/lamp-server /usr/local/bin/bootstrap-server \
            /usr/local/bin/fr-snapshot /usr/local/bin/fr-rollback \
            /usr/local/bin/device-ap-mode /usr/local/bin/device-sta-mode \
            /usr/local/bin/connect-wifi /usr/local/bin/software-update \
@@ -2056,7 +2034,7 @@ for BIN in /sbin/init \
 done
 
 # Check critical config files
-for CFG in /etc/fstab /etc/hostapd/hostapd.conf /etc/nginx/conf.d/lumi.conf \
+for CFG in /etc/fstab /etc/hostapd/hostapd.conf /etc/nginx/conf.d/lamp.conf \
            /boot/firmware/cmdline.txt; do
   if [ -f "${MNT}${CFG}" ]; then
     echo "  [OK] $CFG"
@@ -2066,7 +2044,7 @@ for CFG in /etc/fstab /etc/hostapd/hostapd.conf /etc/nginx/conf.d/lumi.conf \
 done
 
 # Check systemd services are enabled
-for SVC in bootstrap lumi lumi-lelamp nginx openclaw btrfs-resize-once firstrun-wifi; do
+for SVC in bootstrap lamp lamp-lelamp nginx openclaw btrfs-resize-once firstrun-wifi; do
   if [ -L "${MNT}/etc/systemd/system/multi-user.target.wants/${SVC}.service" ] || \
      [ -L "${MNT}/etc/systemd/system/sysinit.target.wants/${SVC}.service" ]; then
     echo "  [OK] ${SVC}.service enabled"
@@ -2113,7 +2091,7 @@ echo "    Size:      ${OUT_IMG_SIZE} (expands to fill SD on first boot)"
 echo "    User:      ${USERNAME} / ${PASSWORD}"
 echo "    Hostname:  ${PI_HOSTNAME}"
 echo "    Timezone:  ${PI_TIMEZONE}"
-echo "    AP:        Lumi-XXXX (serial-based SSID) @ 192.168.100.1"
+echo "    AP:        Lamp-XXXX (serial-based SSID) @ 192.168.100.1"
 echo ""
 echo "    Flash:"
 echo "      diskutil unmountDisk /dev/diskN"
@@ -2126,4 +2104,4 @@ echo "      sudo fr-rollback              — restore @factory and reboot"
 echo "      sudo device-ap-mode           — switch to hotspot"
 echo "      sudo device-sta-mode          — switch to WiFi client"
 echo "      sudo connect-wifi SSID PASS   — connect to WiFi"
-echo "      sudo software-update <bootstrap|lumi|lelamp|openclaw|web>  — OTA update"
+echo "      sudo software-update <bootstrap|lamp|lelamp|openclaw|web>  — OTA update"

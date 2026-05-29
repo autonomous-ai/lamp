@@ -1,8 +1,8 @@
 # Claude Desktop Buddy — Spec tích hợp
 
-> Biến đèn Lumi thành Hardware Buddy của Claude Desktop. Chạy như plugin
+> Biến đèn Lamp thành Hardware Buddy của Claude Desktop. Chạy như plugin
 > Go độc lập trên Pi, bridge trạng thái BLE của Claude vào hệ LeLamp
-> (LED/display/audio) và Lumi (OpenClaw/sensing) sẵn có.
+> (LED/display/audio) và Lamp (OpenClaw/sensing) sẵn có.
 
 **Nguồn**: [anthropics/claude-desktop-buddy](https://github.com/anthropics/claude-desktop-buddy) (firmware ESP32 reference + protocol REFERENCE.md)
 **Trạng thái**: Implementation — Phase 1, 2, 3 đã ship (2026-05-11)
@@ -15,25 +15,25 @@
 Claude Desktop ("Claude for macOS/Windows") expose 1 BLE API trong
 Developer Mode để hardware companion kết nối qua Nordic UART Service.
 Reference của Anthropic là ESP32 desk pet — LCD nhỏ, 2 nút, không có
-brain. Lumi implement cùng wire protocol nhưng là **smart buddy**: đèn
+brain. Lamp implement cùng wire protocol nhưng là **smart buddy**: đèn
 đầy đủ với camera, mic, speaker, LED ring, servo, display, và brain
 agentic OpenClaw.
 
-Lumi có thể phản ánh state Claude lên LED, voice-approve tool call rảnh
+Lamp có thể phản ánh state Claude lên LED, voice-approve tool call rảnh
 tay, stream chat turns ra display/TTS, và feed context presence ngược lại.
 
 ### Use case
 
 | # | Use case | Trạng thái | Mô tả |
 |---|----------|------------|-------|
-| UC-1 | **Ambient state** | [x] xong | LED ring phản ánh state Claude (sleep/idle/busy/attention/heart/celebrate). Lumi lamp hiện không có LCD/display, chỉ điều khiển LED. |
-| UC-2 | **Voice approval** | [x] xong | Prompt tool-call → Lumi đọc qua skill OpenClaw → user nói approve/deny rảnh tay. |
+| UC-1 | **Ambient state** | [x] xong | LED ring phản ánh state Claude (sleep/idle/busy/attention/heart/celebrate). Lamp lamp hiện không có LCD/display, chỉ điều khiển LED. |
+| UC-2 | **Voice approval** | [x] xong | Prompt tool-call → Lamp đọc qua skill OpenClaw → user nói approve/deny rảnh tay. |
 | UC-3 | **Thống kê hoạt động qua HTTP** | [x] xong | Buddy track token count, sessions chạy, approval stats; expose qua `GET /status` cho consumer local. (Chưa có display trên lamp.) |
-| UC-4 | **Fan-out chat turn** | [x] xong | Mọi `evt:"turn"` (user/assistant/tool blocks) được forward lên Lumi monitor bus dạng `buddy_event` — sẵn cho TTS, transcript memory, dashboard. |
+| UC-4 | **Fan-out chat turn** | [x] xong | Mọi `evt:"turn"` (user/assistant/tool blocks) được forward lên Lamp monitor bus dạng `buddy_event` — sẵn cho TTS, transcript memory, dashboard. |
 | UC-5 | **Nhận character pack** | [x] xong | Desktop drag GIF folder vào panel → stream qua BLE → lưu vào `/opt/claude-desktop-buddy/chars/<name>/`. |
 | UC-9 | **TTS narration trạng thái** | [x] xong | Thông báo ngắn khi state đổi ("Claude đã kết nối" / "Claude bắt đầu" / "Claude xong rồi" / "Claude đã ngắt kết nối") và cho mỗi block `tool_use` / `thinking` ("Claude đang sửa file", "Claude đang tìm web", …). Multi-lang (`vi` / `en` / `zh`) trong `i18n.go`, throttle 1 lần/category/turn. Gọi LeLamp `/voice/speak` với `cached: true` để phrase set bounded hit TTS cache on-disk; `Narrator.Warmup` chạy mọi phrase với `prerender: true` 8s sau khởi động nên lần đầu cũng phát từ cache. Transition busy→idle gọi thêm `/emotion {happy,0.7}` để LeLamp phối hợp LED + servo "thở ra" giữa các turn. Tool lạ fallback sang câu generic không kèm tên — tên tool Claude Code (CamelCase, `mcp__*`) đọc qua TTS không thành tiếng. |
-| UC-8 | **Đọc reply Claude qua TTS** | [ ] tiếp theo | Lumi subscribe `buddy_event`, filter `role=assistant` + text block, strip markdown, đẩy text qua LeLamp TTS để user nghe thay vì nhìn màn Mac. Respect presence (skip khi user vắng), busy state của voice pipeline, ưu tiên agent emotion. |
-| UC-6 | **Presence feedback** | [ ] tương lai | Presence Lumi (camera/PIR) → Desktop. Cần mở rộng protocol. |
+| UC-8 | **Đọc reply Claude qua TTS** | [ ] tiếp theo | Lamp subscribe `buddy_event`, filter `role=assistant` + text block, strip markdown, đẩy text qua LeLamp TTS để user nghe thay vì nhìn màn Mac. Respect presence (skip khi user vắng), busy state của voice pipeline, ưu tiên agent emotion. |
+| UC-6 | **Presence feedback** | [ ] tương lai | Presence Lamp (camera/PIR) → Desktop. Cần mở rộng protocol. |
 | UC-7 | **OpenClaw biết transcript** | [ ] tương lai | OpenClaw đọc history chat khi user hỏi qua voice. |
 
 ---
@@ -42,7 +42,7 @@ tay, stream chat turns ra display/TTS, và feed context presence ngược lại.
 
 ```
 ┌──────────────────┐       BLE (Nordic UART)        ┌──────────────────────────────┐
-│  Claude Desktop  │ ◄───────────────────────────►  │          Lumi (Pi)           │
+│  Claude Desktop  │ ◄───────────────────────────►  │          Lamp (Pi)           │
 │  (Mac / Windows) │                                │                              │
 │  Developer →     │   Heartbeat (msg/running/      │  ┌────────────────────────┐  │
 │  Hardware Buddy  │   tokens/prompt), Event        │  │   buddy-plugin         │  │
@@ -58,7 +58,7 @@ tay, stream chat turns ra display/TTS, và feed context presence ngược lại.
 │                  │                                │     │ HTTP     │ HTTP        │
 │                  │                                │     ▼          ▼             │
 │                  │                                │  ┌─────────┐ ┌──────────┐    │
-│                  │                                │  │  Lumi   │ │ LeLamp   │    │
+│                  │                                │  │  Lamp   │ │ LeLamp   │    │
 │                  │                                │  │ :5000   │ │ :5001    │    │
 │                  │                                │  │ OpenClaw│ │ LED ring │    │
 │                  │                                │  │ sensing │ │ + TTS    │    │
@@ -76,7 +76,7 @@ claude-desktop-buddy/
 ├── agent.go             BlueZ DisplayOnly pairing agent (đã register nhưng chưa dùng — §5)
 ├── protocol.go          Wire types: Heartbeat, TimeSync, Event, Command, Ack, PermissionDecision
 ├── state.go             6-state machine (sleep/idle/busy/attention/heart/celebrate)
-├── bridge.go            HTTP outbound tới LeLamp (:5001) + Lumi (:5000)
+├── bridge.go            HTTP outbound tới LeLamp (:5001) + Lamp (:5000)
 ├── httpserver.go        HTTP API :5002 — /status /health /approve /deny
 ├── transfer.go          Nhận folder character-pack push (lưu vào chars/)
 ├── skill/SKILL.md       Skill OpenClaw cho voice approval flow
@@ -88,9 +88,9 @@ claude-desktop-buddy/
 
 ### Process model
 
-`buddy-plugin` là **systemd service độc lập** (`lumi-buddy.service`),
-tách khỏi binary Lumi chính. Restart độc lập; không link vào process
-Lumi. Gọi Lumi và LeLamp qua HTTP local.
+`buddy-plugin` là **systemd service độc lập** (`claude-desktop-buddy.service`),
+tách khỏi binary Lamp chính. Restart độc lập; không link vào process
+Lamp. Gọi Lamp và LeLamp qua HTTP local.
 
 ```
 Layout runtime trên Pi:
@@ -98,8 +98,8 @@ Layout runtime trên Pi:
   /opt/claude-desktop-buddy/VERSION_BUDDY  — version stamp
   /opt/claude-desktop-buddy/chars/         — character pack nhận về
   /root/config/buddy.json                  — config runtime (tạo 1 lần)
-  /etc/systemd/system/lumi-buddy.service   — service unit
-  /var/log/lumi-buddy.log                  — log rotate (2MB × 10)
+  /etc/systemd/system/claude-desktop-buddy.service   — service unit
+  /var/log/claude-desktop-buddy.log                  — log rotate (2MB × 10)
 ```
 
 ---
@@ -134,10 +134,10 @@ thấy được.
 2. buddy-plugin start → đọc `/root/config/buddy.json` → resolve device
    name qua `resolveDeviceName()`:
    - Đọc `device_name` từ config (default `Claude-{deviceid}`).
-   - Nếu có `{deviceid}`, fetch `device_id` từ Lumi
+   - Nếu có `{deviceid}`, fetch `device_id` từ Lamp
      `GET http://127.0.0.1:5000/api/system/info` (retry 15 × 2s).
    - `shortDeviceID()` giữ segment cuối sau dash, trim 4 ký tự
-     (`lumi-004` → `004`) — để name + Nordic UART UUID cùng fit trong
+     (`lamp-004` → `004`) — để name + Nordic UART UUID cùng fit trong
      31-byte primary advertisement.
    - Fallback `Claude-unknown` nếu lamp chưa setup qua
      `/api/device/setup`.
@@ -257,7 +257,7 @@ tool result). Presence field `evt`. `content` hoặc là string thuần
 
 `formatContentBlock()` render mỗi block thành 1 dòng log tag:
 `[thinking: …]`, `[tool_use <name>(<input>)]`, `[tool_result <id>: …]`,
-`[tool_ref: <name>]`. Mỗi event fan-out lên Lumi qua
+`[tool_ref: <name>]`. Mỗi event fan-out lên Lamp qua
 `bridge.OnEvent` với `type=buddy_event` trên monitor bus.
 
 #### `Command` — control + folder push
@@ -412,12 +412,12 @@ Overlay transient (`heart`, `celebrate`) khóa state 3 s; ticker expiry
 
 ---
 
-## 7. State → bridge LeLamp + Lumi
+## 7. State → bridge LeLamp + Lamp
 
 `Bridge.OnStateChange` được wire làm callback transition của state
 machine. Mỗi transition fire:
 
-| State | LeLamp LED call | Lumi monitor event |
+| State | LeLamp LED call | Lamp monitor event |
 |---|---|---|
 | `sleep` | `POST /led/off` | `buddy_state` |
 | `idle` | (không gọi — ambient quản LED) | `buddy_state` |
@@ -426,7 +426,7 @@ machine. Mỗi transition fire:
 | `heart` | `/led/solid {[255,200,100]}` | `buddy_state` |
 | `celebrate` | `/led/effect {rainbow,*,2.0,3000ms}` | `buddy_state` |
 
-> Lumi lamp hiện không có LCD/eye display; code `bridge.go` vẫn cố gọi
+> Lamp lamp hiện không có LCD/eye display; code `bridge.go` vẫn cố gọi
 > `/display/info`, `/display/eyes`, `/display/eyes-mode` qua LeLamp,
 > nhưng đây là no-op trên hardware không màn. Hoặc xóa các nhánh này
 > khi không-display là permanent, hoặc bổ sung display peripheral.
@@ -442,7 +442,7 @@ POST http://127.0.0.1:5000/api/monitor/event
 }
 ```
 
-Consumer phía Lumi có thể subscribe `buddy_event` cho TTS, transcript
+Consumer phía Lamp có thể subscribe `buddy_event` cho TTS, transcript
 memory, dashboard… — chưa wire cái nào.
 
 ### Vị trí trong LED priority
@@ -475,7 +475,7 @@ Agent emotion vẫn thắng buddy; voice intent của user thắng cả 2.
 1. Heartbeat đến với prompt != null
 2. state → attention; bridge fire:
      LeLamp: blink cam + display "Approve <tool>?"
-     Lumi:   POST /api/sensing/event { type:"buddy_approval", message:"Claude Desktop needs approval: …" }
+     Lamp:   POST /api/sensing/event { type:"buddy_approval", message:"Claude Desktop needs approval: …" }
 3. OpenClaw route sensing event tới skill `claude-desktop-buddy`
 4. Skill (SKILL.md tại claude-desktop-buddy/skill/):
      - Express emotion: curious 0.8
@@ -504,7 +504,7 @@ claude-desktop-buddy/skill/SKILL.md
 ```
 
 Skill ship cùng buddy binary và **không** copy vào
-`lumi/resources/openclaw-skills/`. OpenClaw đọc từ install dir của
+`lamp/resources/openclaw-skills/`. OpenClaw đọc từ install dir của
 buddy tại runtime (xem SKILL.md cho rule discovery chính xác).
 
 ---
@@ -541,40 +541,40 @@ prompt cũ.
 
 ---
 
-## 10. Phối hợp phía Lumi
+## 10. Phối hợp phía Lamp
 
-### Watcher đổi config (lumi/server/server.go)
+### Watcher đổi config (lamp/server/server.go)
 
-Khi user setup device qua `POST /api/device/setup`, Lumi save
+Khi user setup device qua `POST /api/device/setup`, Lamp save
 `device_id` vào `config/config.json` và notify config bus in-process.
-Lumi server nghe bus đó, khi `device_id` transition thì chạy:
+Lamp server nghe bus đó, khi `device_id` transition thì chạy:
 
 ```
-systemctl cat lumi-buddy.service   # skip im lặng nếu chưa cài
-systemctl restart lumi-buddy
+systemctl cat claude-desktop-buddy.service   # skip im lặng nếu chưa cài
+systemctl restart claude-desktop-buddy
 ```
 
 Buddy có dịp re-resolve `Claude-{deviceid}` về id mới được assign mà
 không cần can thiệp thủ công. Lamp chưa cài buddy plugin thì pre-check
 `systemctl cat` no-op.
 
-### Endpoint system info Lumi
+### Endpoint system info Lamp
 
 Buddy đọc `device_id` qua HTTP thay vì đọc file config trực tiếp:
 
 ```
 GET http://127.0.0.1:5000/api/system/info
-→ { "data": { "deviceId": "lumi-004", … } }
+→ { "data": { "deviceId": "lamp-004", … } }
 ```
 
-Cách này giữ buddy không biết schema config của Lumi.
+Cách này giữ buddy không biết schema config của Lamp.
 
 ---
 
 ## 11. Config
 
 `/root/config/buddy.json` (tạo 1 lần bởi `setup-claude-desktop-buddy.sh`
-hoặc `software-update lumi-buddy`, tooling không bao giờ overwrite sau):
+hoặc `software-update claude-desktop-buddy`, tooling không bao giờ overwrite sau):
 
 ```json
 {
@@ -582,7 +582,7 @@ hoặc `software-update lumi-buddy`, tooling không bao giờ overwrite sau):
   "device_name": "Claude-{deviceid}",
   "http_port": 5002,
   "lelamp_url": "http://127.0.0.1:5001",
-  "lumi_url": "http://127.0.0.1:5000",
+  "lamp_url": "http://127.0.0.1:5000",
   "approval_timeout_sec": 30,
   "led_mapping": {
     "sleep":     { "action": "off" },
@@ -643,7 +643,7 @@ Orange Pi 4 Pro ship với chip BT AIC8820 (Aicsemi, manufacturer ID
 - **Reset hazard**: restart `bluetoothd` / chip nhiều lần có thể đẩy
   controller vào state `UP RUNNING PSCAN` (chỉ classic) và từ chối LE
   advertising 1 lúc. Recovery: `sudo systemctl restart bluetooth &&
-  sudo hciconfig hci0 reset && sudo systemctl restart lumi-buddy`.
+  sudo hciconfig hci0 reset && sudo systemctl restart claude-desktop-buddy`.
 
 Raspberry Pi (Broadcom / RP1) không có quirks này và dùng MAC factory,
 nhưng phần còn lại của integration giống hệt.
@@ -652,16 +652,16 @@ nhưng phần còn lại của integration giống hệt.
 
 ## 14. Triển khai
 
-### systemd unit (`/etc/systemd/system/lumi-buddy.service`)
+### systemd unit (`/etc/systemd/system/claude-desktop-buddy.service`)
 
 ```ini
 [Unit]
-Description=Lumi Claude Desktop Buddy
-After=bluetooth.target lumi.service
+Description=Lamp Claude Desktop Buddy
+After=bluetooth.target lamp.service
 Wants=bluetooth.target
 
 [Service]
-ExecStart=/opt/claude-desktop-buddy/buddy-plugin -config /root/config/buddy.json -log /var/log/lumi-buddy.log
+ExecStart=/opt/claude-desktop-buddy/buddy-plugin -config /root/config/buddy.json -log /var/log/claude-desktop-buddy.log
 Restart=always
 RestartSec=5
 User=root
@@ -678,14 +678,14 @@ WantedBy=multi-user.target
 | `/opt/claude-desktop-buddy/VERSION_BUDDY` | Version stamp match OTA metadata |
 | `/opt/claude-desktop-buddy/chars/<name>/` | Character pack nhận về từ folder push |
 | `/root/config/buddy.json` | Runtime config (giữ qua OTA) |
-| `/var/lib/lumi-buddy/stats.json` | Counter approve/deny lifetime (giữ qua OTA + reset config) |
-| `/var/log/lumi-buddy.log` | Log rotate (2 MB × 10 backup) |
+| `/var/lib/claude-desktop-buddy/stats.json` | Counter approve/deny lifetime (giữ qua OTA + reset config) |
+| `/var/log/claude-desktop-buddy.log` | Log rotate (2 MB × 10 backup) |
 
 ### Lệnh update
 
 - Cài lần đầu: `setup-claude-desktop-buddy.sh` (download từ OTA
   metadata, tạo service, không động config nếu đã tồn tại).
-- Update sau: `software-update lumi-buddy` (chỉ binary + version stamp
+- Update sau: `software-update claude-desktop-buddy` (chỉ binary + version stamp
   + restart service; config không bao giờ bị overwrite).
 
 ---
@@ -710,13 +710,13 @@ WantedBy=multi-user.target
 - [x] LED phản ánh state mà không đè agent emotion hoặc ambient
 - [x] Voice approve / deny route qua OpenClaw, end-to-end
 - [x] Token count + sessions chạy track + expose qua `/status` (chưa có display trên lamp)
-- [x] Buddy crash không ảnh hưởng Lumi server chính
+- [x] Buddy crash không ảnh hưởng Lamp server chính
 - [x] OpenClaw giảm proactive behavior khi Desktop busy
-- [x] Chat turn (user / assistant / tool blocks) stream vào Lumi monitor bus
+- [x] Chat turn (user / assistant / tool blocks) stream vào Lamp monitor bus
 - [x] Folder push character pack lưu vào `chars/<name>/`
 - [x] UC-9 TTS narration trạng thái (vi/en/zh) qua cache LeLamp + emotion khi done
-- [x] Counter approve/deny giữ được qua restart (`/var/lib/lumi-buddy/stats.json`)
+- [x] Counter approve/deny giữ được qua restart (`/var/lib/claude-desktop-buddy/stats.json`)
 - [ ] UC-8 đọc reply assistant qua TTS — kế tiếp
 - [ ] GATT link bonded encrypted (`sec: true`) — defer
-- [ ] Presence feedback Lumi → Desktop — mở rộng protocol tương lai
+- [ ] Presence feedback Lamp → Desktop — mở rộng protocol tương lai
 - [ ] Inject transcript context vào OpenClaw — tương lai

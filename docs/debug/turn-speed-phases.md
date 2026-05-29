@@ -30,15 +30,15 @@ Read batch chạy ~700-950ms cho 3-5 reads concurrent (với `& wait`). Write ba
 
 **Commit Phase 1:**
 - `b00ee869` parallel-batch (3 emotion skill + backend inject)
-- `45db216c` snapshot path fix (lelamp đổi `/tmp/lumi-snapshots` → `/root/.openclaw/media/lumi-snapshots`)
+- `45db216c` snapshot path fix (lelamp đổi `/tmp/lamp-snapshots` → `/root/.openclaw/media/lamp-snapshots`)
 - `249e63ee` patterns.json fold vào read batch
 - `f3b4b046` wellbeing batch + drop habit cache miss
 - `2fc1c515` drop `<say>` wrapper
 - `170db493` drop Output Format header
 
-## Phase 2 — Pre-inject data từ Lumi backend
+## Phase 2 — Pre-inject data từ Lamp backend
 
-**Insight tiếp:** mỗi turn vẫn còn ~9s think "between tools" (giữa read batch và write batch) để: đọc 5 read response → synthesize mood → decide skip/genre → plan POST commands. Không loại bỏ được decision logic, nhưng có thể loại bỏ **plan-reads pass** nếu Lumi đọc data sẵn rồi đính vào prompt.
+**Insight tiếp:** mỗi turn vẫn còn ~9s think "between tools" (giữa read batch và write batch) để: đọc 5 read response → synthesize mood → decide skip/genre → plan POST commands. Không loại bỏ được decision logic, nhưng có thể loại bỏ **plan-reads pass** nếu Lamp đọc data sẵn rồi đính vào prompt.
 
 **Cách:**
 - Backend handler.go khi nhận `motion.activity` / `emotion.detected`: pre-fetch toàn bộ data skill cần (wellbeing-history, mood-history, audio/status, music-suggestion-history, audio/history, patterns.json, days count).
@@ -54,10 +54,10 @@ Read batch chạy ~700-950ms cho 3-5 reads concurrent (với `& wait`). Write ba
 | `motion.activity` | ~23s | ~12s (~48%) |
 
 **Trade-off:**
-- Tight coupling Lumi backend ↔ skill data needs (backend phải biết shape data của skill).
+- Tight coupling Lamp backend ↔ skill data needs (backend phải biết shape data của skill).
 - Token cost +2-3KB/event in prompt (cache stable, prompt cache absorb được).
 - Race condition lý thuyết (pre-fetch lúc T+0, agent đọc lúc T+8s → data có thể stale 1-5s) — chấp nhận được cho wellbeing/mood (slow-changing).
-- Iteration: skill đổi data needs → phải update Lumi binary + redeploy.
+- Iteration: skill đổi data needs → phải update Lamp binary + redeploy.
 
 **Mitigation:**
 - Fallback GET trong SKILL.md nếu context block thiếu/hỏng.
@@ -74,11 +74,11 @@ Read batch chạy ~700-950ms cho 3-5 reads concurrent (với `& wait`). Write ba
 
 **Insight tiếp:** sau Phase 2, vẫn còn ~6-8s/turn cho think pass sau khi POST `wellbeing/log` xong. Tool call protocol bắt buộc agent consume `tool_result` rồi mới generate reply tiếp — cho dù side-effect (log write) không có gì để wait.
 
-**HW marker pattern** (đã có sẵn cho `/emotion`, `/audio/play`, `/dm`...): agent nhúng `[HW:/path:{json}]` vào TEXT reply. Lumi parse marker từ text, fire HTTP POST trong goroutine background, strip marker khỏi TTS. Agent không "thấy" như tool call → không có tool round-trip → không có post-write think pass.
+**HW marker pattern** (đã có sẵn cho `/emotion`, `/audio/play`, `/dm`...): agent nhúng `[HW:/path:{json}]` vào TEXT reply. Lamp parse marker từ text, fire HTTP POST trong goroutine background, strip marker khỏi TTS. Agent không "thấy" như tool call → không có tool round-trip → không có post-write think pass.
 
 **Đụng:**
-- `lumi/server/openclaw/delivery/sse/handler_hw.go`: route Lumi-bound markers (path bắt đầu `/wellbeing/`) tới `http://127.0.0.1:5000/api/...` thay vì lelamp `5001`. Thêm flow log `hw_wellbeing`.
-- `lumi/resources/openclaw-skills/wellbeing/SKILL.md`: "What to write" rewrite — instruct `[HW:/wellbeing/log:{action,notes,user}]` thay curl exec. Giữ curl làm fallback nếu HW marker bị reject.
+- `lamp/server/openclaw/delivery/sse/handler_hw.go`: route Lamp-bound markers (path bắt đầu `/wellbeing/`) tới `http://127.0.0.1:5000/api/...` thay vì lelamp `5001`. Thêm flow log `hw_wellbeing`.
+- `lamp/resources/openclaw-skills/wellbeing/SKILL.md`: "What to write" rewrite — instruct `[HW:/wellbeing/log:{action,notes,user}]` thay curl exec. Giữ curl làm fallback nếu HW marker bị reject.
 
 **Gotcha — regex limit:** `hwMarkerRe` = `\[HW:(/[^:]+):(\{[^}]*\})\]` cấm `}` trong body. Wellbeing log body flat (`{action,notes,user}`) → OK. Nếu `notes` chứa `}` regex break — agent cần escape hoặc fallback curl.
 
@@ -100,7 +100,7 @@ Pattern y nguyên wellbeing, áp dụng cho 3-skill chain (`user-emotion-detecti
 1. **commit 1/4** — Phase 2 pre-inject. Backend `BuildEmotionContext(detectedEmotion, user)` trong `lib/skillcontext/emotion.go` → digest `[emotion_context: {mapped_mood, recent_signals, prior_decision, is_decision_stale, audio_playing, last_suggestion_age_min, audio_recent, music_pattern_for_hour, suggestion_worthy}]`. 3 SKILL.md đổi "What to read" → use context block với fallback bash batch. Decision rules vẫn ở agent (5 rules synthesis, threshold cooldown, genre pick, phrasing).
 2. **commit 2/4** — Phase 3a HW route. `handler_hw.go` extend prefix list từ chỉ `/wellbeing/` → `/wellbeing/`, `/mood/`, `/music-suggestion/`. Thêm flow event types `hw_mood`, `hw_music_suggestion`. Backend-only no-op.
 3. **commit 3/4** — Phase 3b SKILL.md HW marker. `mood/SKILL.md` (signal + decision đều dùng `[HW:/mood/log:{...}]`, kind trong body), `music-suggestion/SKILL.md` (`[HW:/music-suggestion/log:{...}]`), `user-emotion-detection/SKILL.md` (signal cũng dùng HW marker với `mapped_mood` từ context). Curl POST giữ làm fallback nếu marker regex bị reject (notes/reasoning chứa `}`).
-4. **commit 4/4** — UI flow events. `types.ts` + `helpers.ts` + `FlowDiagram.tsx` add `hw_mood`, `hw_music_suggestion` (stack với hw_wellbeing ở Lumi-side column).
+4. **commit 4/4** — UI flow events. `types.ts` + `helpers.ts` + `FlowDiagram.tsx` add `hw_mood`, `hw_music_suggestion` (stack với hw_wellbeing ở Lamp-side column).
 
 **Estimated speedup emotion turn:**
 
@@ -129,6 +129,6 @@ Pattern y nguyên wellbeing, áp dụng cho 3-skill chain (`user-emotion-detecti
 | `lifecycle_start` → first `thinking`/`assistant` delta | LLM warmup thực — model reasoning silently trước khi token đầu chảy ra. Đo trực tiếp từ stream events (`type === "thinking"` / `"assistant_delta"`). | `llm warmup` (xanh dương) |
 | first delta → `first tool_call` | LLM streaming + planning trước tool call đầu. | `llm streaming` (tím) |
 
-(Lưu ý: trước đây có `llm_first_token` flow event tự chế trong Lumi handler để mark warmup, đã bỏ — Lumi giờ đo trực tiếp từ stream events trong UI helpers. Pipeline aggregator + timing strip cùng nguồn truth.)
+(Lưu ý: trước đây có `llm_first_token` flow event tự chế trong Lamp handler để mark warmup, đã bỏ — Lamp giờ đo trực tiếp từ stream events trong UI helpers. Pipeline aggregator + timing strip cùng nguồn truth.)
 
 Khi optimize: nếu `openclaw init` lớn → check WS RTT + session context size; nếu `llm ttft` lớn → check prompt size / cache hit rate (auto-compact); nếu `llm streaming` lớn → giảm thinking budget hoặc số tool turn (xem Phase 1/2 ở trên).

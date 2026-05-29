@@ -1,0 +1,13 @@
+.build/
+.swiftpm/
+Package.resolved
+DerivedData/
+*.xcodeproj/
+*.xcworkspace/
+.DS_Store
+xcuserdata/
+dist/
+
+# mock-lamp build output
+mock-lamp/lamp-buddy-mock-lamp
+mock-lamp/mock-lamp

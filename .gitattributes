@@ -1,0 +1,8 @@
+hardware/cad/*.stp filter=lfs diff=lfs merge=lfs -text
+hardware/cad/*.STP filter=lfs diff=lfs merge=lfs -text
+hardware/cad/*.step filter=lfs diff=lfs merge=lfs -text
+hardware/cad/*.STEP filter=lfs diff=lfs merge=lfs -text
+hardware/cad/*.stl filter=lfs diff=lfs merge=lfs -text
+hardware/cad/*.STL filter=lfs diff=lfs merge=lfs -text
+hardware/cad/*.f3d filter=lfs diff=lfs merge=lfs -text
+hardware/cad/*.f3z filter=lfs diff=lfs merge=lfs -text

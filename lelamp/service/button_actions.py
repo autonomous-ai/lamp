@@ -35,30 +35,30 @@ DOUBLE_CLICK_WINDOW = 0.4  # seconds to wait for second click
 LONG_PRESS_DURATION = 5.0  # seconds held → shutdown on release
 FACTORY_RESET_DURATION = 10.0  # seconds held → factory-reset on release (supersedes shutdown)
 
-# Lumi Go sensing endpoint. Head-pat notify is fire-and-forget — Lumi
+# Lamp Go sensing endpoint. Head-pat notify is fire-and-forget — Lamp
 # Go appends a NO_REPLY hint so the agent records the event in
 # conversation history without speaking back.
-LUMI_SENSING_URL = "http://127.0.0.1:5000/api/sensing/event"
+LAMP_SENSING_URL = "http://127.0.0.1:5000/api/sensing/event"
 
 
 def _notify_head_pat(spoken: str):
-    """Tell Lumi Go that the lamp was just stroked. Called from the
+    """Tell Lamp Go that the lamp was just stroked. Called from the
     head-pat TTS thread *after* speak_cached actually played a phrase,
     so the rate is bounded by phrase playback (~1-3s) — no extra
     debounce needed. TTS-busy strokes are dropped silently and never
     notify, which is the right behaviour: the agent only learns about
     petting moments the user actually heard a response to.
 
-    `spoken` is the exact phrase Lumi just said (incl. eleven_v3 audio
-    tags like [laughs] / [whispers]) so the agent can read Lumi's tone
+    `spoken` is the exact phrase Lamp just said (incl. eleven_v3 audio
+    tags like [laughs] / [whispers]) so the agent can read Lamp's tone
     and weave it into memory — "I laughed and said tickles" lands
     differently than "I sighed and asked them to stop"."""
     try:
         requests.post(
-            LUMI_SENSING_URL,
+            LAMP_SENSING_URL,
             json={
                 "type": "touch.head_pat",
-                "message": f'Lumi was petted and responded: "{spoken}"',
+                "message": f'Lamp was petted and responded: "{spoken}"',
             },
             timeout=0.5,
         )
@@ -68,14 +68,14 @@ def _notify_head_pat(spoken: str):
 
 def _current_lang() -> str:
     try:
-        from lelamp.config import _lumi_cfg_get
-        return (_lumi_cfg_get("stt_language") or "").strip()
+        from lelamp.config import _lamp_cfg_get
+        return (_lamp_cfg_get("stt_language") or "").strip()
     except Exception:
         return ""
 
 
 def _phrase(key: str) -> str:
-    """Return the localized phrase for `key` based on Lumi's stt_language.
+    """Return the localized phrase for `key` based on Lamp's stt_language.
     Falls back to DEFAULT_LANG when the config can't be read or the
     language is empty/unknown."""
     pool = PHRASES_BY_LANG.get(key, {})
@@ -119,7 +119,7 @@ def _tts_available() -> bool:
 
 
 def _wake_if_sleepy(source: str):
-    """If Lumi is currently sleeping, fire a stretching wake emotion so a
+    """If Lamp is currently sleeping, fire a stretching wake emotion so a
     click pulls her out of sleep before the listening cue lands. Calls
     the /emotion handler in-process — it clears `_sleeping`, cancels the
     sleepy auto-release timer, plays the wake animation, and auto-deactivates
@@ -151,7 +151,7 @@ def single_click_action(source: str = "button"):
         audio_stop()
     # Always announce the listening cue so the user hears confirmation
     # of the click — both for unmute (mic just opened) and for
-    # stop-speaker (Lumi was talking, user wants the floor). The cue
+    # stop-speaker (Lamp was talking, user wants the floor). The cue
     # itself preempts in-flight TTS via stop() + speak_cached retry,
     # so calling stop_tts() above is fine — _announce_listening handles
     # the lock handoff.
@@ -179,8 +179,8 @@ def triple_click_action(source: str = "button"):
 
 def head_pat_action(source: str = "touch"):
     """Speak a random pet response. Non-interrupting: if TTS is busy
-    (Lumi already talking), drop silently so petting mid-speech doesn't
-    truncate her sentence. After the phrase actually plays, ping Lumi Go
+    (Lamp already talking), drop silently so petting mid-speech doesn't
+    truncate her sentence. After the phrase actually plays, ping Lamp Go
     so the agent records the petting moment (silent — NO_REPLY)."""
     text = _random_head_pat_phrase()
     logger.info("%s head pat -- %r", source, text)
@@ -229,25 +229,25 @@ def _factory_reset_phrase() -> str:
     """Inline i18n until PHRASE_FACTORY_RESET lands in i18n.py."""
     lang = _current_lang()
     if lang.startswith("vi"):
-        return "Đang khôi phục cài đặt gốc. Lumi sẽ khởi động lại."
+        return "Đang khôi phục cài đặt gốc. Lamp sẽ khởi động lại."
     if lang.startswith("zh"):
-        return "正在恢复出厂设置，Lumi 将重新启动。"
-    return "Factory reset starting. Lumi will reboot."
+        return "正在恢复出厂设置，Lamp 将重新启动。"
+    return "Factory reset starting. Lamp will reboot."
 
 
 def factory_reset_action(source: str = "button"):
-    """Announce + POST /api/system/factory-reset on lumi-server. Lumi-server
+    """Announce + POST /api/system/factory-reset on lamp-server. Lamp-server
     wipes per-device state (config, API keys, enrollments, WiFi) and reboots
     into AP setup mode. Lelamp does NOT touch state itself — single source of
-    truth for what gets wiped lives in lumi-server's factoryResetWipePaths.
+    truth for what gets wiped lives in lamp-server's factoryResetWipePaths.
 
     Authoritative because of physical presence: 10s deliberate hold + the
     /api/system/factory-reset endpoint allows loopback origin without Bearer
-    (see lumi server.go adminOrLoopbackAuth)."""
+    (see lamp server.go adminOrLoopbackAuth)."""
     logger.info("%s factory-reset hold (10s+) -- triggering soft reset", source)
 
     # Step 1: TTS announce so the user knows the gesture registered. Brief —
-    # the reboot lands ~5s after lumi-server accepts the POST, we want the
+    # the reboot lands ~5s after lamp-server accepts the POST, we want the
     # announce + 3s settle window to fit inside that.
     if _tts_available():
         state.tts_service.speak_cached(_factory_reset_phrase())
@@ -263,7 +263,7 @@ def factory_reset_action(source: str = "button"):
         logger.warning(f"Servo release before factory-reset failed: {e}")
 
     # Step 3: trigger the Go-side wipe. Loopback bypasses admin auth (see
-    # lumi server.go adminOrLoopbackAuth) so this works even on devices that
+    # lamp server.go adminOrLoopbackAuth) so this works even on devices that
     # never completed setup (no llm_api_key in config).
     try:
         requests.post(

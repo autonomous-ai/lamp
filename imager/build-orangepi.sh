@@ -13,7 +13,7 @@
 #   Phase 1  extract .img, expand to OUT_IMG_SIZE, partprobe, resize2fs
 #   Phase 2  chroot apt install + write systemd units + helper scripts + configs
 #   Phase 3  chroot OTA bake — backend binaries + lelamp + web UI + buddy
-#   Phase 4  install lumi-resize-once.service for first-boot SD-fill expand
+#   Phase 4  install lamp-resize-once.service for first-boot SD-fill expand
 #   Phase 5  unmount + compress → /output/golden-opi.img.xz
 #
 # Run via Makefile (Docker container, --privileged for losetup/mount).
@@ -27,7 +27,7 @@ PI_TIMEZONE="America/New_York"
 USERNAME="system"
 PASSWORD="12345"
 OUT_IMG_SIZE="${OUT_IMG_SIZE:-14G}"
-OTA_METADATA_URL="${OTA_METADATA_URL:-https://storage.googleapis.com/s3-autonomous-upgrade-3/lumi/ota/metadata.json}"
+OTA_METADATA_URL="${OTA_METADATA_URL:-https://storage.googleapis.com/s3-autonomous-upgrade-3/lamp/ota/metadata.json}"
 AP_BAND="${AP_BAND:-2.4}"
 AP_CHANNEL="${AP_CHANNEL:-}"
 COUNTRY_CODE="${COUNTRY_CODE:-US}"
@@ -175,7 +175,7 @@ chroot "${MNT}" debconf-set-selections <<'DBCONF' || true
 debconf debconf/frontend select Noninteractive
 keyboard-configuration keyboard-configuration/layoutcode string us
 DBCONF
-cat > "${MNT}/etc/apt/apt.conf.d/99-lumi-silent" <<'APT'
+cat > "${MNT}/etc/apt/apt.conf.d/99-lamp-silent" <<'APT'
 Dpkg::Use-Pty "false";
 APT
 
@@ -200,7 +200,7 @@ retry() {
   return 1
 }
 
-# ── apt: install Lumi runtime deps (matches setup.sh + production OPi list) ──
+# ── apt: install Lamp runtime deps (matches setup.sh + production OPi list) ──
 echo "[stage] apt update + install"
 apt-get update -qq
 apt-get install -y \\
@@ -269,20 +269,20 @@ mkdir -p /opt/lelamp
 # ── systemd units ────────────────────────────────────────────────────────────
 echo "[stage] systemd units"
 
-cat > /etc/systemd/system/lumi.service <<'UNIT'
+cat > /etc/systemd/system/lamp.service <<'UNIT'
 [Unit]
-Description=Lumi Backend
+Description=Lamp Backend
 After=network-online.target
 
 [Service]
 User=root
 WorkingDirectory=/root
-ExecStart=/usr/local/bin/lumi-server
+ExecStart=/usr/local/bin/lamp-server
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=lumi
+SyslogIdentifier=lamp
 
 [Install]
 WantedBy=multi-user.target
@@ -306,9 +306,9 @@ SyslogIdentifier=bootstrap
 WantedBy=multi-user.target
 UNIT
 
-cat > /etc/systemd/system/lumi-lelamp.service <<'UNIT'
+cat > /etc/systemd/system/lamp-lelamp.service <<'UNIT'
 [Unit]
-Description=Lumi LeLamp Hardware Runtime
+Description=Lamp LeLamp Hardware Runtime
 After=network.target
 
 [Service]
@@ -322,22 +322,7 @@ Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=lumi-lelamp
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-
-cat > /etc/systemd/system/lumi-wifi-power-save.service <<'UNIT'
-[Unit]
-Description=Disable WiFi power save on wlan0 (stability)
-After=network-online.target
-Before=hostapd.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/bin/sh -c 'for i in 1 2 3 4 5 6 7 8 9 10; do ip link show wlan0 >/dev/null 2>&1 && break; sleep 2; done; iw dev wlan0 set power_save off 2>/dev/null || iwconfig wlan0 power off 2>/dev/null || true'
+SyslogIdentifier=lamp-lelamp
 
 [Install]
 WantedBy=multi-user.target
@@ -457,17 +442,17 @@ if [ -z "\$SERIAL" ]; then
   done
 fi
 SUFFIX=\${SERIAL: -4}
-AP_SSID="Lumi-\${SUFFIX}"
+AP_SSID="Lamp-\${SUFFIX}"
 [ -f /etc/hostapd/hostapd.conf ] && sed -i "s/^ssid=.*/ssid=\${AP_SSID}/" /etc/hostapd/hostapd.conf
 
-# mDNS hostname lumi-<suffix>.local so the setup wizard's AP→.local handoff works.
+# mDNS hostname lamp-<suffix>.local so the setup wizard's AP→.local handoff works.
 SUFFIX_LC=\$(echo "\$SUFFIX" | tr '[:upper:]' '[:lower:]')
-LUMI_HOSTNAME="lumi-\${SUFFIX_LC}"
-hostnamectl set-hostname "\$LUMI_HOSTNAME" 2>/dev/null || hostname "\$LUMI_HOSTNAME" || true
+LAMP_HOSTNAME="lamp-\${SUFFIX_LC}"
+hostnamectl set-hostname "\$LAMP_HOSTNAME" 2>/dev/null || hostname "\$LAMP_HOSTNAME" || true
 if grep -q '^127\.0\.1\.1' /etc/hosts; then
-  sed -i "s/^127\.0\.1\.1.*/127.0.1.1 \$LUMI_HOSTNAME/" /etc/hosts
+  sed -i "s/^127\.0\.1\.1.*/127.0.1.1 \$LAMP_HOSTNAME/" /etc/hosts
 else
-  echo "127.0.1.1 \$LUMI_HOSTNAME" >> /etc/hosts
+  echo "127.0.1.1 \$LAMP_HOSTNAME" >> /etc/hosts
 fi
 systemctl enable avahi-daemon 2>/dev/null || true
 systemctl restart avahi-daemon 2>/dev/null || true
@@ -481,8 +466,6 @@ iw dev wlan0 set type __ap
 iw dev wlan0 set channel 6
 sleep 1
 ip link set wlan0 up; sleep 1
-iw dev wlan0 set power_save off 2>/dev/null || true
-iwconfig wlan0 power off 2>/dev/null || true
 ip addr flush dev wlan0
 ip addr add 192.168.100.1/24 dev wlan0
 
@@ -520,8 +503,6 @@ killall dnsmasq 2>/dev/null || true
 ip link set wlan0 down 2>/dev/null || true; sleep 1
 iw dev wlan0 set type managed
 ip link set wlan0 up; sleep 1
-iw dev wlan0 set power_save off 2>/dev/null || true
-iwconfig wlan0 power off 2>/dev/null || true
 ip addr flush dev wlan0
 sed -i '/static ip_address=192.168.100.1\\/24/d;/nohook wpa_supplicant/d' /etc/dhcpcd.conf 2>/dev/null || true
 systemctl unmask wpa_supplicant@wlan0 2>/dev/null || true
@@ -582,26 +563,25 @@ chmod +x /usr/local/bin/connect-wifi
 cat > /usr/local/bin/software-update <<'EOFSCRIPT'
 #!/bin/bash
 set -e
-OTA_METADATA_URL="\${OTA_METADATA_URL:-https://storage.googleapis.com/s3-autonomous-upgrade-3/lumi/ota/metadata.json}"
+OTA_METADATA_URL="\${OTA_METADATA_URL:-https://storage.googleapis.com/s3-autonomous-upgrade-3/lamp/ota/metadata.json}"
 [ "\$(id -u)" -ne 0 ] && { echo "Run as root."; exit 1; }
-[ \$# -ne 1 ] && { echo "Usage: software-update <lumi|openclaw|bootstrap|web|lelamp|lumi-buddy>"; exit 1; }
+[ \$# -ne 1 ] && { echo "Usage: software-update <lamp|openclaw|bootstrap|web|lelamp|claude-desktop-buddy>"; exit 1; }
 APP="\$1"
 case "\$APP" in
-  lumi|openclaw|bootstrap|web|lelamp|lumi-buddy) ;;
+  lamp|openclaw|bootstrap|web|lelamp|claude-desktop-buddy) ;;
   *) echo "Unknown app: \$APP"; exit 1 ;;
 esac
 META=\$(mktemp); ZIP=\$(mktemp); DIR=\$(mktemp -d)
 trap 'rm -f "\$META" "\$ZIP"; rm -rf "\$DIR"' EXIT
 curl -fsSL -H "Cache-Control: no-cache" -o "\$META" "\$OTA_METADATA_URL"
 KEY="\$APP"
-[ "\$APP" = "lumi-buddy" ] && KEY="claude-desktop-buddy"
 VERSION=\$(jq -r --arg a "\$KEY" '.[\$a].version // empty' "\$META")
 URL=\$(jq -r --arg a "\$KEY" '.[\$a].url // empty' "\$META")
 [ -z "\$URL" ] && { echo "No URL in metadata for \$APP"; exit 1; }
 curl -fsSL -o "\$ZIP" "\$URL"
 unzip -o -q "\$ZIP" -d "\$DIR"
 case "\$APP" in
-  lumi)      cp -f "\$(find \$DIR -type f -executable | head -1 || find \$DIR -type f | head -1)" /usr/local/bin/lumi-server      && chmod +x /usr/local/bin/lumi-server      && systemctl restart lumi ;;
+  lamp)      cp -f "\$(find \$DIR -type f -executable | head -1 || find \$DIR -type f | head -1)" /usr/local/bin/lamp-server      && chmod +x /usr/local/bin/lamp-server      && systemctl restart lamp ;;
   bootstrap) cp -f "\$(find \$DIR -type f -executable | head -1 || find \$DIR -type f | head -1)" /usr/local/bin/bootstrap-server && chmod +x /usr/local/bin/bootstrap-server && systemctl restart bootstrap ;;
   web)       rm -rf /usr/share/nginx/html/setup/* && cp -a "\$DIR"/* /usr/share/nginx/html/setup/ ;;
   *)         echo "manual update for \$APP not implemented in this stub" ;;
@@ -628,7 +608,7 @@ if [ "\${AP_BAND}" = "5" ]; then
   cat > /etc/hostapd/hostapd.conf <<EOF
 interface=wlan0
 driver=nl80211
-ssid=Lumi-XXXX
+ssid=Lamp-XXXX
 hw_mode=a
 channel=\$CHANNEL
 country_code=\${COUNTRY_CODE}
@@ -643,7 +623,7 @@ else
   cat > /etc/hostapd/hostapd.conf <<EOF
 interface=wlan0
 driver=nl80211
-ssid=Lumi-XXXX
+ssid=Lamp-XXXX
 hw_mode=g
 channel=\$CHANNEL
 country_code=\${COUNTRY_CODE}
@@ -656,7 +636,7 @@ fi
 echo 'DAEMON_CONF="/etc/hostapd/hostapd.conf"' > /etc/default/hostapd
 
 mkdir -p /etc/dnsmasq.d
-cat > /etc/dnsmasq.d/99-lumi.conf <<'EOF'
+cat > /etc/dnsmasq.d/99-lamp.conf <<'EOF'
 interface=wlan0
 bind-interfaces
 dhcp-range=wlan0,192.168.100.50,192.168.100.150,255.255.255.0,24h
@@ -767,7 +747,7 @@ server {
 }
 NGINX
 mkdir -p /usr/share/nginx/html/setup
-echo '<h1>Lumi setup — flash the device and reboot.</h1>' > /usr/share/nginx/html/setup/index.html
+echo '<h1>Lamp setup — flash the device and reboot.</h1>' > /usr/share/nginx/html/setup/index.html
 
 # ── PulseAudio: WebRTC echo cancel + udev ignore for I2S codecs ──────────────
 echo "[stage] PulseAudio"
@@ -775,11 +755,11 @@ PULSE_CONF="/etc/pulse/default.pa"
 if [ -f "\$PULSE_CONF" ] && ! grep -q "module-echo-cancel" "\$PULSE_CONF"; then
   cat >> "\$PULSE_CONF" <<'PULSE_EOF'
 
-### Echo cancellation (WebRTC AEC) for Lumi smart lamp
+### Echo cancellation (WebRTC AEC) for Lamp
 load-module module-echo-cancel source_name=aec_source sink_name=aec_sink aec_method=webrtc aec_args="analog_gain_control=0 digital_gain_control=0" channels=1
 set-default-source aec_source
 set-default-sink aec_sink
-load-module module-native-protocol-unix auth-anonymous=1 socket=/tmp/pulse-anon-lumi
+load-module module-native-protocol-unix auth-anonymous=1 socket=/tmp/pulse-anon-lamp
 PULSE_EOF
 fi
 
@@ -821,9 +801,9 @@ ALSA_EOF
 echo "[stage] mask conflicting vendor services"
 systemctl mask orangepi-firstrun-config.service 2>/dev/null || true
 
-# ── enable Lumi services (symlink, since chroot has no running systemd) ──────
-echo "[stage] enable Lumi services"
-for unit in lumi bootstrap lumi-lelamp lumi-wifi-power-save openclaw avahi-daemon bluetooth ssh; do
+# ── enable Lamp services (symlink, since chroot has no running systemd) ──────
+echo "[stage] enable Lamp services"
+for unit in lamp bootstrap lamp-lelamp openclaw avahi-daemon bluetooth ssh; do
   systemctl enable "\$unit" 2>/dev/null || true
 done
 
@@ -833,7 +813,7 @@ CHROOT_STAGES
 # ─────────────────────────────────────────────────────────────────────────────
 # Phase 3 — OTA bake: backend binaries + lelamp + web UI + buddy
 # ─────────────────────────────────────────────────────────────────────────────
-log "Phase 3 — OTA bake (Lumi binaries from metadata.json)"
+log "Phase 3 — OTA bake (Lamp binaries from metadata.json)"
 
 chroot "${MNT}" /bin/bash <<OVERLAY_STAGES
 set -euo pipefail
@@ -869,24 +849,24 @@ echo "[overlay] fetch OTA metadata"
 META=\$(mktemp)
 retry "curl -fsSL -H 'Cache-Control: no-cache' -o '\$META' '${OTA_METADATA_URL}'" 5
 WEB_URL=\$(jq -r '.web.url // empty'               "\$META")
-LUMI_URL=\$(jq -r '.lumi.url // empty'             "\$META")
+LAMP_URL=\$(jq -r '.lamp.url // empty'             "\$META")
 BOOTSTRAP_URL=\$(jq -r '.bootstrap.url // empty'   "\$META")
 LELAMP_URL=\$(jq -r '.lelamp.url // empty'         "\$META")
 BUDDY_URL=\$(jq -r '."claude-desktop-buddy".url // empty' "\$META")
 WEB_VER=\$(jq -r '.web.version // empty'           "\$META")
-LUMI_VER=\$(jq -r '.lumi.version // empty'         "\$META")
+LAMP_VER=\$(jq -r '.lamp.version // empty'         "\$META")
 BOOTSTRAP_VER=\$(jq -r '.bootstrap.version // empty' "\$META")
 LELAMP_VER=\$(jq -r '.lelamp.version // empty'     "\$META")
 BUDDY_VER=\$(jq -r '."claude-desktop-buddy".version // empty' "\$META")
 rm -f "\$META"
-[ -z "\$WEB_URL" ] || [ -z "\$LUMI_URL" ] || [ -z "\$BOOTSTRAP_URL" ] && {
-  echo "ERROR: OTA metadata missing web.url / lumi.url / bootstrap.url"; exit 1
+[ -z "\$WEB_URL" ] || [ -z "\$LAMP_URL" ] || [ -z "\$BOOTSTRAP_URL" ] && {
+  echo "ERROR: OTA metadata missing web.url / lamp.url / bootstrap.url"; exit 1
 }
-echo "[overlay] web=\$WEB_VER lumi=\$LUMI_VER bootstrap=\$BOOTSTRAP_VER lelamp=\$LELAMP_VER buddy=\$BUDDY_VER"
+echo "[overlay] web=\$WEB_VER lamp=\$LAMP_VER bootstrap=\$BOOTSTRAP_VER lelamp=\$LELAMP_VER buddy=\$BUDDY_VER"
 
 echo "[overlay] backend binaries"
 install_binary_from_zip "\$BOOTSTRAP_URL" /usr/local/bin/bootstrap-server "bootstrap"
-install_binary_from_zip "\$LUMI_URL"      /usr/local/bin/lumi-server      "lumi"
+install_binary_from_zip "\$LAMP_URL"      /usr/local/bin/lamp-server      "lamp"
 
 echo "[overlay] LeLamp"
 LELAMP_DIR="/opt/lelamp"
@@ -960,10 +940,10 @@ if [ -n "\$BUDDY_URL" ]; then
     cp -f /tmp/buddy-extract/config/buddy.json /root/config/buddy.json
   echo "\$BUDDY_VER" > "\$BUDDY_DIR/VERSION_BUDDY"
   rm -rf /tmp/buddy-extract
-  cat > /etc/systemd/system/lumi-buddy.service <<'UNIT'
+  cat > /etc/systemd/system/claude-desktop-buddy.service <<'UNIT'
 [Unit]
-Description=Lumi Claude Desktop Buddy (BLE)
-After=bluetooth.target lumi.service
+Description=Lamp Claude Desktop Buddy (BLE)
+After=bluetooth.target lamp.service
 Wants=bluetooth.target
 
 [Service]
@@ -975,12 +955,12 @@ Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=lumi-buddy
+SyslogIdentifier=claude-desktop-buddy
 
 [Install]
 WantedBy=multi-user.target
 UNIT
-  systemctl enable lumi-buddy
+  systemctl enable claude-desktop-buddy
 else
   echo "[overlay] no buddy URL — skipping"
 fi
@@ -992,7 +972,7 @@ echo "[overlay] Phase 3 complete"
 # 'source' on the host pulls them into variables.
 cat > /tmp/ota-versions.env <<MANIFEST
 WEB_VER=\${WEB_VER}
-LUMI_VER=\${LUMI_VER}
+LAMP_VER=\${LAMP_VER}
 BOOTSTRAP_VER=\${BOOTSTRAP_VER}
 LELAMP_VER=\${LELAMP_VER}
 BUDDY_VER=\${BUDDY_VER}
@@ -1000,12 +980,12 @@ MANIFEST
 OVERLAY_STAGES
 
 # Capture OTA versions for the build manifest before they get wiped by Phase 5.
-BAKED_WEB_VER=""; BAKED_LUMI_VER=""; BAKED_BOOTSTRAP_VER=""; BAKED_LELAMP_VER=""; BAKED_BUDDY_VER=""
+BAKED_WEB_VER=""; BAKED_LAMP_VER=""; BAKED_BOOTSTRAP_VER=""; BAKED_LELAMP_VER=""; BAKED_BUDDY_VER=""
 if [ -f "${MNT}/tmp/ota-versions.env" ]; then
   # shellcheck disable=SC1090
   . "${MNT}/tmp/ota-versions.env" || true
   BAKED_WEB_VER="${WEB_VER:-}"
-  BAKED_LUMI_VER="${LUMI_VER:-}"
+  BAKED_LAMP_VER="${LAMP_VER:-}"
   BAKED_BOOTSTRAP_VER="${BOOTSTRAP_VER:-}"
   BAKED_LELAMP_VER="${LELAMP_VER:-}"
   BAKED_BUDDY_VER="${BUDDY_VER:-}"
@@ -1024,7 +1004,7 @@ cat > /output/manifest-opi.json <<MANIFEST_JSON
   "ota_metadata_url": "${OTA_METADATA_URL}",
   "ota_versions": {
     "web": "${BAKED_WEB_VER}",
-    "lumi": "${BAKED_LUMI_VER}",
+    "lamp": "${BAKED_LAMP_VER}",
     "bootstrap": "${BAKED_BOOTSTRAP_VER}",
     "lelamp": "${BAKED_LELAMP_VER}",
     "claude-desktop-buddy": "${BAKED_BUDDY_VER}"
@@ -1039,11 +1019,11 @@ MANIFEST_JSON
 log "Manifest: /output/manifest-opi.json"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Phase 4 — Install lumi-resize-once.service (first-boot SD-fill expand)
+# Phase 4 — Install lamp-resize-once.service (first-boot SD-fill expand)
 # ─────────────────────────────────────────────────────────────────────────────
-log "Phase 4 — lumi-resize-once (first-boot expand)"
+log "Phase 4 — lamp-resize-once (first-boot expand)"
 
-cat > "${MNT}/usr/local/bin/lumi-resize-once" <<'RESIZE_EOF'
+cat > "${MNT}/usr/local/bin/lamp-resize-once" <<'RESIZE_EOF'
 #!/bin/bash
 # Runs ONCE at first boot. Expands root partition + ext4 to fill the SD card,
 # then disables itself. Compares root partition device to deduce the parent
@@ -1070,17 +1050,17 @@ resize2fs "${ROOT_PART}" || { log "WARN resize2fs failed"; }
 log "resize complete"
 
 # Self-disable so this service never runs again, even if image is re-cloned.
-systemctl disable lumi-resize-once.service 2>/dev/null || true
-rm -f /etc/systemd/system/lumi-resize-once.service
-rm -f /etc/systemd/system/multi-user.target.wants/lumi-resize-once.service
-rm -f /usr/local/bin/lumi-resize-once
+systemctl disable lamp-resize-once.service 2>/dev/null || true
+rm -f /etc/systemd/system/lamp-resize-once.service
+rm -f /etc/systemd/system/multi-user.target.wants/lamp-resize-once.service
+rm -f /usr/local/bin/lamp-resize-once
 RESIZE_EOF
-chmod +x "${MNT}/usr/local/bin/lumi-resize-once"
+chmod +x "${MNT}/usr/local/bin/lamp-resize-once"
 
-cat > "${MNT}/etc/systemd/system/lumi-resize-once.service" <<'UNIT'
+cat > "${MNT}/etc/systemd/system/lamp-resize-once.service" <<'UNIT'
 [Unit]
 Description=Expand root filesystem to fill SD card on first boot (self-destructing)
-ConditionPathExists=/usr/local/bin/lumi-resize-once
+ConditionPathExists=/usr/local/bin/lamp-resize-once
 DefaultDependencies=no
 After=local-fs.target systemd-remount-fs.service
 Before=basic.target
@@ -1088,7 +1068,7 @@ Before=basic.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/local/bin/lumi-resize-once
+ExecStart=/usr/local/bin/lamp-resize-once
 
 [Install]
 WantedBy=multi-user.target
@@ -1097,8 +1077,8 @@ UNIT
 # Manually link into wants (systemctl enable inside chroot also works, but we
 # already exited the chroot — symlink is the equivalent + no DBus needed).
 mkdir -p "${MNT}/etc/systemd/system/multi-user.target.wants"
-ln -sf /etc/systemd/system/lumi-resize-once.service \
-  "${MNT}/etc/systemd/system/multi-user.target.wants/lumi-resize-once.service"
+ln -sf /etc/systemd/system/lamp-resize-once.service \
+  "${MNT}/etc/systemd/system/multi-user.target.wants/lamp-resize-once.service"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Phase 5 — Restore resolv.conf, unmount, compress

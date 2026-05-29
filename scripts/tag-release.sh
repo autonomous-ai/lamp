@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Creates an annotated git tag whose message embeds the current OTA metadata
 # snapshot from CDN, then pushes to origin. Lets buyers map the version
-# string on the board ("lumi-server --version") back to a specific commit +
+# string on the board ("lamp-server --version") back to a specific commit +
 # component version set in the public repo (GPL v3 §6 compliance).
 #
 # Usage:
@@ -9,7 +9,7 @@
 set -euo pipefail
 
 VERSION="${1:-}"
-OTA_METADATA_URL="${OTA_METADATA_URL:-https://cdn.autonomous.ai/lumi/ota/metadata.json}"
+OTA_METADATA_URL="${OTA_METADATA_URL:-https://cdn.autonomous.ai/lamp/ota/metadata.json}"
 REMOTE="${TAG_REMOTE:-origin}"
 
 if [[ -z "$VERSION" ]]; then

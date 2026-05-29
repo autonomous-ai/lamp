@@ -138,7 +138,7 @@ class PresenseService:
         self._send_event(
             "presence.away",
             f"No one has been around for {minutes} minute(s). "
-            f"Lumi is going to sleep — lights off. "
+            f"Lamp is going to sleep — lights off. "
             f"Announce that you're going to sleep in a cozy, sleepy way.",
             cooldown=config.AWAY_TIMEOUT_S,
         )

@@ -73,10 +73,10 @@ endif
 
 # ── upload — push built image + release note to GCS, version-stamped ─────
 # Versioned filename: golden-<target>-<UTC-timestamp>-<git-sha>.img.xz
-# Bucket + path mirror the OTA artifact layout (s3-autonomous-upgrade-3/lumi/).
+# Bucket + path mirror the OTA artifact layout (s3-autonomous-upgrade-3/lamp/).
 GCS_BUCKET := s3-autonomous-upgrade-3
-GCS_PATH   := lumi/imager/output
-GCS_LEDGER := lumi/imager/RELEASES.md
+GCS_PATH   := lamp/imager/output
+GCS_LEDGER := lamp/imager/RELEASES.md
 VERSION    := $(shell date -u +%Y%m%d-%H%M%S)-$(shell git -C .. rev-parse --short HEAD 2>/dev/null || echo nogit)
 TARGET_PREFIX_rpi := golden-rpi
 TARGET_PREFIX_opi := golden-opi
@@ -97,10 +97,10 @@ upload: $(RELEASE_NOTE)
 	if gcloud storage cp gs://$(GCS_BUCKET)/$(GCS_LEDGER) $$TMP 2>/dev/null; then \
 		echo "    (existing ledger fetched, prepending new entry)"; \
 	else \
-		printf "# Lumi Imager Releases\n\nAppend-only history of built images. Newest first.\n\n" > $$TMP; \
+		printf "# Lamp Imager Releases\n\nAppend-only history of built images. Newest first.\n\n" > $$TMP; \
 	fi; \
 	NEW=$$(mktemp); \
-	{ awk '/^# Lumi Imager Releases/,/^$$/' $$TMP; cat $(RELEASE_NOTE); echo ""; echo "---"; echo ""; awk 'BEGIN{p=0} /^## /{p=1} p' $$TMP; } > $$NEW; \
+	{ awk '/^# Lamp Imager Releases/,/^$$/' $$TMP; cat $(RELEASE_NOTE); echo ""; echo "---"; echo ""; awk 'BEGIN{p=0} /^## /{p=1} p' $$TMP; } > $$NEW; \
 	gcloud storage cp $$NEW gs://$(GCS_BUCKET)/$(GCS_LEDGER); \
 	rm -f $$TMP $$NEW
 	@echo ""
@@ -162,10 +162,10 @@ $(RELEASE_NOTE):
 upload-source:
 	@[ -f input/orangepi.7z ] || { echo "ERROR: input/orangepi.7z not found"; exit 1; }
 	@command -v gcloud >/dev/null 2>&1 || { echo "ERROR: gcloud not installed"; exit 1; }
-	@echo "==> Mirroring input/orangepi.7z → gs://$(GCS_BUCKET)/lumi/imager/source/$(OPI_FILE_NAME)"
-	gcloud storage cp input/orangepi.7z gs://$(GCS_BUCKET)/lumi/imager/source/$(OPI_FILE_NAME)
+	@echo "==> Mirroring input/orangepi.7z → gs://$(GCS_BUCKET)/lamp/imager/source/$(OPI_FILE_NAME)"
+	gcloud storage cp input/orangepi.7z gs://$(GCS_BUCKET)/lamp/imager/source/$(OPI_FILE_NAME)
 	@echo "==> Public URL (use as OPI_SOURCE_URL):"
-	@echo "    https://storage.googleapis.com/$(GCS_BUCKET)/lumi/imager/source/$(OPI_FILE_NAME)"
+	@echo "    https://storage.googleapis.com/$(GCS_BUCKET)/lamp/imager/source/$(OPI_FILE_NAME)"
 
 OPI_FILE_NAME := Orangepi4pro_1.0.6_debian_bookworm_server_linux5.15.147.7z
 

@@ -1,0 +1,186 @@
+export const API = "/api";
+// HW points at the Go reverse proxy (/api/hardware/*) instead of nginx /hw/*.
+// Web never touches /hw/* directly anymore — adminAuthMiddleware on the
+// proxy gates the bearer, and Go calls LeLamp on loopback. Bearer is
+// attached automatically by the fetch interceptor in lib/api.ts (search for
+// `__lampFetchPatched`). For <img src> / <a href> / window.open use the
+// `hwUrl()` helper which appends ?token= since those can't set headers.
+export const HW  = "/api/hardware";
+// Agent gateway base path. Runtime-agnostic: `/api/agent/*` proxies to the
+// configured agent runtime (OpenClaw default; picoclaw / claudecode also
+// supported via `config.AgentRuntime`). All callers must go through this
+// constant so swapping providers stays a one-line change here.
+export const AGENT_API = `${API}/agent`;
+export const HISTORY_LEN = 60;
+export const FLOW_EVENTS_MAX = 10000;
+
+// ─── Types ──────────────────────────────────────────────────────────────────
+
+export interface SystemInfo {
+  cpuLoad: number;
+  cpuCount: number;
+  cpuPerCore: number[];
+  swapTotal: number;
+  swapUsed: number;
+  swapPercent: number;
+  memTotal: number;
+  memUsed: number;
+  memPercent: number;
+  cpuTemp: number;
+  uptime: number;
+  serviceUptime: number;
+  lelampUptime: number;
+  lelampVersion: string;
+  goRoutines: number;
+  version: string;
+  deviceId: string;
+  diskTotal: number;
+  diskUsed: number;
+  diskPercent: number;
+}
+export interface NetworkInfo {
+  ssid: string;
+  ip: string;
+  publicIp: string;
+  tailscaleIp: string;
+  signal: number;      // dBm; 0 = unknown
+  linkRate: number;    // current PHY link rate in Mbps; 0 = unknown
+  internet: boolean;
+  mac: string;
+}
+export interface HWHealth {
+  status: string;
+  servo: boolean;
+  led: boolean;
+  camera: boolean;
+  audio: boolean;
+  sensing: boolean;
+  voice: boolean;
+  tts: boolean;
+  display: boolean;
+}
+export interface OCStatus {
+  name: string;
+  connected: boolean;
+  sessionKey: boolean;
+  emotion?: string;
+  version?: string;
+  uptime?: number; // seconds since Lamp WS became ready; 0 when disconnected (debug only)
+  agentUptime?: number; // OpenClaw gateway process uptime in seconds; survives Lamp restarts
+}
+export interface PresenceInfo {
+  state: string;
+  enabled: boolean;
+  seconds_since_motion: number;
+}
+export interface VoiceStatus {
+  voice_available: boolean;
+  voice_listening: boolean;
+  tts_available: boolean;
+  tts_speaking: boolean;
+  mic_muted?: boolean;
+}
+export interface ServoState {
+  available_recordings: string[];
+  current: string | null;
+  bus_connected?: boolean;
+  robot_connected?: boolean;
+}
+export interface DisplayState {
+  mode: string;
+  hardware: boolean;
+  available_expressions: string[];
+}
+export interface AudioVolume {
+  control: string;
+  volume: number;
+}
+export interface LEDColor {
+  led_count: number;
+  on: boolean;
+  color: [number, number, number];
+  hex: string;
+  brightness: number;
+  effect: string | null;
+  scene: string | null;
+}
+export interface SceneInfo {
+  scenes: string[];
+  active?: string;
+}
+export interface FaceStatus {
+  enrolled_count: number;
+  enrolled_names: string[];
+}
+export interface FaceOwnerDetail {
+  label: string;
+  telegram_username?: string | null;
+  telegram_id?: string | null;
+  photo_count: number;
+  photos: string[];
+  mood_days?: string[];
+  wellbeing_days?: string[];
+  music_suggestion_days?: string[];
+  posture_days?: string[];
+  audio_history_days?: string[];
+  voice_samples?: string[];
+  habit_patterns?: boolean;
+  files?: string[];
+}
+export interface FaceOwnersDetail {
+  enrolled_count: number;
+  persons: FaceOwnerDetail[];
+}
+export interface MonitorEvent {
+  id: string;
+  time: string;
+  type: string;
+  summary: string;
+  detail?: Record<string, string> | null;
+  runId?: string;
+  phase?: string;
+  state?: string;
+  error?: string;
+}
+// UI-augmented version with local seq id
+export interface DisplayEvent extends MonitorEvent {
+  _seq: number;
+}
+
+export type Section = "overview" | "system" | "flow" | "camera" | "servo" | "face-owners" | "analytics" | "logs" | "chat" | "cli" | "sensing" | "bluetooth" | "api-docs" | "agent-config";
+
+export type NavLeaf = { id: Section; label: string; icon: string };
+export type NavLink = { href: string; label: string; icon: string; external?: boolean };
+export type NavChild = NavLeaf | NavLink;
+export type NavGroup = { group: string; label: string; icon: string; children: NavChild[] };
+export type NavEntry = NavLeaf | NavGroup;
+
+export function isNavGroup(e: NavEntry): e is NavGroup {
+  return "group" in e;
+}
+export function isNavLink(c: NavChild): c is NavLink {
+  return "href" in c;
+}
+
+export const NAV: NavEntry[] = [
+  { id: "chat",     label: "Chat",     icon: "▤" },
+  {
+    group: "device",
+    label: "Device",
+    icon: "⎚",
+    children: [
+      { id: "overview",    label: "Overview",  icon: "⊞" },
+      { id: "system",      label: "System",    icon: "⚙" },
+      { id: "flow",        label: "Flow",      icon: "⇄" },
+      { id: "face-owners", label: "Users",     icon: "☺" },
+      { id: "camera",      label: "Camera",    icon: "◎" },
+      { id: "sensing",     label: "Sensing",   icon: "◉" },
+      { id: "analytics",   label: "Analytics", icon: "⊟" },
+      { id: "servo",       label: "Servo",     icon: "⎈" },
+      { id: "bluetooth",   label: "Bluetooth", icon: "✦" },
+      { id: "logs",        label: "Logs",      icon: "☰" },
+      { id: "cli",         label: "CLI",       icon: "▸" },
+      { id: "api-docs",    label: "API Docs",  icon: "⎗" },
+    ],
+  },
+];

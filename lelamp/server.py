@@ -2,7 +2,7 @@
 LeLamp Hardware Runtime -- FastAPI server on port 5001.
 
 Only starts the drivers we need. LiveKit/OpenAI code stays untouched but never imported.
-Lumi Server (Go, port 5000) bridges requests here.
+Lamp Server (Go, port 5000) bridges requests here.
 """
 
 import json
@@ -42,7 +42,7 @@ from lelamp.config import (
     TTS_SPEED,
     TTS_VOICE,
     TTS_INSTRUCTIONS,
-    LUMI_CONFIG_PATH,
+    LAMP_CONFIG_PATH,
 )
 from lelamp.models import HealthResponse, StatusResponse
 from lelamp.presets import SCENE_PRESETS, SERVO_CMD_PLAY
@@ -95,11 +95,11 @@ _root.addHandler(_file)
 # GELF handler: send INFO+ logs to centralized Graylog
 try:
     from lelamp.service.gelf_handler import GELFHandler
-    from lelamp.config import _lumi_cfg_get
+    from lelamp.config import _lamp_cfg_get
 
     _gelf = GELFHandler()
     _gelf.setFormatter(logging.Formatter("%(message)s"))
-    _device_id = _lumi_cfg_get("device_id")
+    _device_id = _lamp_cfg_get("device_id")
     if _device_id:
         _gelf.set_host(_device_id)
     _root.addHandler(_gelf)
@@ -313,16 +313,16 @@ async def lifespan(app: FastAPI):
         if state.audio_input_device is not None:
             logger.info(f"Audio input device: {state.audio_input_device}")
 
-    # Auto-start voice pipeline from Lumi config
-    lumi_config_path = LUMI_CONFIG_PATH
+    # Auto-start voice pipeline from Lamp config
+    lamp_config_path = LAMP_CONFIG_PATH
     try:
-        with open(lumi_config_path) as f:
-            lumi_cfg = json.load(f)
-        dgk = lumi_cfg.get("deepgram_api_key", "")
-        llm_key = lumi_cfg.get("llm_api_key", "")
-        llm_url = lumi_cfg.get("llm_base_url", "")
-        voice = lumi_cfg.get("tts_voice", "") or TTS_VOICE
-        tts_provider = lumi_cfg.get("tts_provider", PROVIDER_OPENAI)
+        with open(lamp_config_path) as f:
+            lamp_cfg = json.load(f)
+        dgk = lamp_cfg.get("deepgram_api_key", "")
+        llm_key = lamp_cfg.get("llm_api_key", "")
+        llm_url = lamp_cfg.get("llm_base_url", "")
+        voice = lamp_cfg.get("tts_voice", "") or TTS_VOICE
+        tts_provider = lamp_cfg.get("tts_provider", PROVIDER_OPENAI)
         if llm_key and llm_url and TTSService and not state.tts_service:
             state.tts_service = TTSService(
                 api_key=llm_key,
@@ -332,7 +332,7 @@ async def lifespan(app: FastAPI):
                 output_device=state.audio_output_device,
                 voice=voice,
                 speed=TTS_SPEED,
-                instructions=lumi_cfg.get("tts_instructions", "") or TTS_INSTRUCTIONS or None,
+                instructions=lamp_cfg.get("tts_instructions", "") or TTS_INSTRUCTIONS or None,
                 on_speak_start=state._on_tts_speak_start,
                 on_speak_end=state._on_tts_speak_end,
                 provider=tts_provider,
@@ -344,7 +344,7 @@ async def lifespan(app: FastAPI):
                 state.tts_service.available,
             )
         if VoiceService and not state.voice_service:
-            agent_name = state._read_agent_name(lumi_cfg)
+            agent_name = state._read_agent_name(lamp_cfg)
             wake_words = state._build_wake_words(agent_name)
             stt_provider = None
             logger.info("STT selection: deepgram_key=%s, DeepgramSTT=%s, AutonomousSTT=%s, agent=%s",
@@ -355,8 +355,8 @@ async def lifespan(app: FastAPI):
                     dg_keywords.append(" ".join(agent_name) + ":2")
                 stt_provider = DeepgramSTT(api_key=dgk, keywords=dg_keywords)
             elif llm_key and llm_url and AutonomousSTT:
-                stt_model = (lumi_cfg.get("stt_model") or "").strip() or None
-                stt_language = (lumi_cfg.get("stt_language") or "").strip() or None
+                stt_model = (lamp_cfg.get("stt_model") or "").strip() or None
+                stt_language = (lamp_cfg.get("stt_language") or "").strip() or None
                 stt_kwargs = {}
                 if stt_model:
                     stt_kwargs["model"] = stt_model
@@ -382,10 +382,10 @@ async def lifespan(app: FastAPI):
                 logger.info("VoiceService auto-started (%s, wake_words=%s)", stt_provider.name, wake_words)
     except FileNotFoundError:
         logger.info(
-            f"Lumi config not found at {lumi_config_path}, voice will wait for /voice/start"
+            f"Lamp config not found at {lamp_config_path}, voice will wait for /voice/start"
         )
     except Exception as e:
-        logger.warning(f"Auto-start voice from lumi config failed: {e}")
+        logger.warning(f"Auto-start voice from lamp config failed: {e}")
 
     # Start music service
     if MusicService:
@@ -554,28 +554,28 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="LeLamp Hardware Runtime",
     description=(
-        "Hardware driver API for Lumi AI Lamp. "
+        "Hardware driver API for Lamp. "
         "Controls servo motors (5-axis Feetech), RGB LEDs (64x WS2812), "
         "camera, audio (mic/speaker), display, and AI voice pipeline. "
-        "Lumi Server (Go, port 5000) bridges requests here."
+        "Lamp Server (Go, port 5000) bridges requests here."
     ),
     version=(Path(__file__).parent / "VERSION_LELAMP").read_text().strip()
     if (Path(__file__).parent / "VERSION_LELAMP").exists()
     else "dev",
     lifespan=lifespan,
     # Built-in /docs disabled; a custom handler below serves the Swagger HTML
-    # without inline <script> so Lumi nginx can keep CSP `script-src 'self'`
+    # without inline <script> so Lamp nginx can keep CSP `script-src 'self'`
     # (no `'unsafe-inline'`). /redoc stays on the default since it's not the
     # endpoint the in-iframe browser flow uses.
     docs_url=None,
     redoc_url="/redoc",
     # `servers` tells Swagger UI which base URL to prepend on "Try it out".
     # In the browser context the iframe lives at /api/hardware/docs and admin
-    # auth gates /api/hardware/* via Lumi's reverse proxy; in the loopback /
+    # auth gates /api/hardware/* via Lamp's reverse proxy; in the loopback /
     # SSH-tunnel context calls go directly to LeLamp. Operator can switch
     # between them via the Swagger UI dropdown.
     servers=[
-        {"url": "/api/hardware", "description": "Via Lumi admin proxy (browser)"},
+        {"url": "/api/hardware", "description": "Via Lamp admin proxy (browser)"},
         {"url": "/", "description": "Direct (loopback / SSH tunnel)"},
     ],
     openapi_tags=[
@@ -655,7 +655,7 @@ except Exception as _speaker_import_err:  # noqa: BLE001
     )
 
 
-# Self-hosted Swagger UI assets. Lumi nginx CSP keeps `script-src 'self'` so
+# Self-hosted Swagger UI assets. Lamp nginx CSP keeps `script-src 'self'` so
 # the bundled JS/CSS load from this same origin (no cdn.jsdelivr.net). The
 # /docs handler below serves the HTML; its <script> tags reference these
 # files via relative paths.
@@ -671,10 +671,10 @@ def custom_swagger_ui() -> HTMLResponse:
     """Serve Swagger UI with no inline <script>.
 
     Built-in `app.docs_url` injects an inline `<script>const ui = SwaggerUIBundle(...)</script>`
-    block which forces Lumi nginx CSP to allow `'unsafe-inline'` for scripts.
+    block which forces Lamp nginx CSP to allow `'unsafe-inline'` for scripts.
     Externalising the init into `/static/swagger-init.js` lets the CSP stay
     strict (`script-src 'self'`). Relative URLs (`./openapi.json`,
-    `./static/...`) make the page work both via the Lumi proxy iframe and
+    `./static/...`) make the page work both via the Lamp proxy iframe and
     direct loopback access.
     """
     html = (

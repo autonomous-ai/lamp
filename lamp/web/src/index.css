@@ -1,0 +1,299 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
+@layer base {
+  :root {
+    --background: oklch(0.985 0.002 247);
+    --foreground: oklch(0.145 0.02 260);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0.02 260);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0.02 260);
+    --primary: oklch(0.488 0.243 264);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.96 0.02 247);
+    --secondary-foreground: oklch(0.25 0.02 260);
+    --muted: oklch(0.96 0.01 247);
+    --muted-foreground: oklch(0.45 0.02 260);
+    --accent: oklch(0.92 0.04 247);
+    --accent-foreground: oklch(0.25 0.02 260);
+    --destructive: oklch(0.577 0.245 27.325);
+    --destructive-foreground: oklch(0.985 0 0);
+    --border: oklch(0.9 0.01 247);
+    --input: oklch(0.9 0.01 247);
+    --ring: oklch(0.488 0.243 264);
+    --radius: 1rem;
+  }
+  .dark {
+    --background: oklch(0.145 0.02 260);
+    --foreground: oklch(0.965 0.01 247);
+    --card: oklch(0.2 0.02 260);
+    --card-foreground: oklch(0.965 0.01 247);
+    --popover: oklch(0.28 0.02 260);
+    --popover-foreground: oklch(0.965 0.01 247);
+    --primary: oklch(0.65 0.2 264);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.27 0.02 260);
+    --secondary-foreground: oklch(0.965 0 0);
+    --muted: oklch(0.27 0.02 260);
+    --muted-foreground: oklch(0.65 0.02 247);
+    --accent: oklch(0.32 0.04 264);
+    --accent-foreground: oklch(0.965 0 0);
+    --destructive: oklch(0.396 0.141 25.723);
+    --destructive-foreground: oklch(0.637 0.237 25.331);
+    --border: oklch(0.28 0.02 260);
+    --input: oklch(0.28 0.02 260);
+    --ring: oklch(0.65 0.2 264);
+  }
+  /* Select / popover: solid background, no transparency */
+  [data-slot="select-content"],
+  [data-radix-popper-content-wrapper] [data-slot="select-content"] {
+    background-color: var(--popover);
+    opacity: 1;
+  }
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background-color: var(--background);
+    color: var(--foreground);
+  }
+}
+
+/* ── Lamp Monitor — dark theme scope ── */
+.lm-root {
+  --lm-bg:          #0C0B09;
+  --lm-sidebar:     #111009;
+  --lm-card:        #17160F;
+  --lm-surface:     #1E1D14;
+  --lm-border:      #2A2820;
+  --lm-border-hi:   #3A3828;
+
+  --lm-amber:       #F59E0B;
+  --lm-amber-dim:   rgba(245,158,11,0.12);
+  --lm-amber-glow:  rgba(245,158,11,0.35);
+  --lm-teal:        #2DD4BF;
+  --lm-teal-dim:    rgba(45,212,191,0.12);
+  --lm-green:       #34D399;
+  --lm-red:         #F87171;
+  --lm-blue:        #60A5FA;
+  --lm-purple:      #A78BFA;
+  --lm-orange:      #FB923C;
+  --lm-yellow:      #FCD34D;
+
+  --lm-text:        #F0EEE8;
+  --lm-text-dim:    #9A9080;
+  --lm-text-muted:  #504A3C;
+
+  background: var(--lm-bg);
+  color: var(--lm-text);
+}
+
+/* ── Light theme — toggled via .lm-light class or system preference ── */
+.lm-root.lm-light {
+  --lm-bg:          #FAFAF8;
+  --lm-sidebar:     #F0EFEB;
+  --lm-card:        #FFFFFF;
+  --lm-surface:     #F5F4F0;
+  --lm-border:      #E0DED6;
+  --lm-border-hi:   #D0CEC6;
+
+  --lm-amber:       #D97706;
+  --lm-amber-dim:   rgba(217,119,6,0.10);
+  --lm-amber-glow:  rgba(217,119,6,0.25);
+  --lm-teal:        #0D9488;
+  --lm-teal-dim:    rgba(13,148,136,0.10);
+  --lm-green:       #059669;
+  --lm-red:         #DC2626;
+  --lm-blue:        #2563EB;
+  --lm-purple:      #7C3AED;
+  --lm-orange:      #EA580C;
+  --lm-yellow:      #CA8A04;
+
+  --lm-text:        #1C1917;
+  --lm-text-dim:    #57534E;
+  --lm-text-muted:  #A8A29E;
+}
+@media (prefers-color-scheme: light) {
+  .lm-root:not(.lm-dark) {
+    --lm-bg:          #FAFAF8;
+    --lm-sidebar:     #F0EFEB;
+    --lm-card:        #FFFFFF;
+    --lm-surface:     #F5F4F0;
+    --lm-border:      #E0DED6;
+    --lm-border-hi:   #D0CEC6;
+
+    --lm-amber:       #D97706;
+    --lm-amber-dim:   rgba(217,119,6,0.10);
+    --lm-amber-glow:  rgba(217,119,6,0.25);
+    --lm-teal:        #0D9488;
+    --lm-teal-dim:    rgba(13,148,136,0.10);
+    --lm-green:       #059669;
+    --lm-red:         #DC2626;
+    --lm-blue:        #2563EB;
+    --lm-purple:      #7C3AED;
+    --lm-orange:      #EA580C;
+    --lm-yellow:      #CA8A04;
+
+    --lm-text:        #1C1917;
+    --lm-text-dim:    #57534E;
+    --lm-text-muted:  #A8A29E;
+  }
+}
+
+/* Scrollbar */
+.lm-root ::-webkit-scrollbar        { width: 4px; height: 4px; }
+.lm-root ::-webkit-scrollbar-track  { background: transparent; }
+.lm-root ::-webkit-scrollbar-thumb  { background: var(--lm-border-hi); border-radius: 2px; }
+.lm-root ::-webkit-scrollbar-thumb:hover { background: var(--lm-amber); }
+.lm-hide-scroll { scrollbar-width: none; }
+.lm-hide-scroll::-webkit-scrollbar { display: none; }
+
+/* Hamburger button — hidden on desktop */
+.lm-hamburger {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--lm-text-dim);
+  cursor: pointer;
+  padding: 4px 6px;
+  font-size: 20px;
+  line-height: 1;
+  border-radius: 6px;
+}
+.lm-hamburger:hover { color: var(--lm-text); background: var(--lm-surface); }
+
+/* Sidebar overlay — hidden on desktop */
+.lm-sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(0, 0, 0, 0.55);
+}
+.lm-sidebar-overlay--open { display: block; }
+
+/* Responsive grid utility classes */
+.lm-grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.lm-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.lm-grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+.lm-grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+
+@media (max-width: 900px) {
+  .lm-grid-4 { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .lm-grid-5 { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+}
+
+@media (max-width: 768px) {
+  /* Sidebar becomes a slide-in drawer */
+  .lm-sidebar {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    height: 100% !important;
+    z-index: 50;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+  }
+  .lm-sidebar--open { transform: translateX(0) !important; }
+
+  .lm-hamburger { display: flex; align-items: center; justify-content: center; }
+
+  .lm-grid-3 { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .lm-grid-2 { grid-template-columns: 1fr; }
+  .lm-grid-5 { grid-template-columns: repeat(2, 1fr); }
+
+  .lm-content { padding: 12px !important; }
+
+  /* Flow section on mobile: hide the right-pane Turn Pipeline card entirely
+     and let the turn list fill the full content area. The pipeline is reached
+     by tapping the "View pipeline" button inside the selected turn card,
+     which opens a full-screen PipelineModal. Keeping both stacked on a phone
+     screen squeezed both into unreadable strips — the modal pattern gives
+     the diagram real estate to breathe. */
+  .lm-flow-layout { flex-direction: column !important; }
+  .lm-flow-turns  { width: 100% !important; flex: 1 !important; min-height: 0 !important; max-height: none !important; }
+  .lm-flow-pipeline { display: none !important; }
+
+  /* Mobile collapse: each turn card shows only its header row until tapped.
+     Selected turn (data-expanded="true") shows the full body. Lets the user
+     scan many turns at once on a small screen instead of swiping through
+     a few tall cards. */
+  .lm-turn-card[data-expanded="false"] {
+    max-height: 60px;
+    overflow: hidden;
+    position: relative;
+  }
+  .lm-turn-card[data-expanded="false"]::after {
+    content: "";
+    position: absolute;
+    inset: auto 0 0 0;
+    height: 16px;
+    background: linear-gradient(to bottom, transparent, var(--lm-surface));
+    pointer-events: none;
+  }
+
+  /* Mobile-only View pipeline button inside each TurnBadge. Hidden on desktop
+     because the pipeline already sits inline next to the turn list. */
+  .lm-view-pipeline-btn { display: flex !important; }
+}
+
+/* View pipeline button — hidden by default (desktop), shown only on mobile
+   via the media query above. */
+.lm-view-pipeline-btn { display: none; }
+
+@media (max-width: 480px) {
+  .lm-grid-4 { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .lm-grid-3 { grid-template-columns: 1fr; }
+  .lm-grid-5 { grid-template-columns: 1fr 1fr; gap: 6px; }
+}
+
+/* Animations */
+@keyframes lm-fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes lm-pulse-glow {
+  0%, 100% { box-shadow: 0 0 6px var(--lm-amber-glow); }
+  50%       { box-shadow: 0 0 14px var(--lm-amber-glow); }
+}
+.lm-fade-in  { animation: lm-fade-in 0.35s ease-out both; }
+@keyframes lm-blink { 0%, 80%, 100% { opacity: 0.2; } 40% { opacity: 1; } }
+@keyframes lm-cursor-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+.lm-cursor { animation: lm-cursor-blink 0.8s step-end infinite; }
+.lm-blink { animation: lm-blink 1.4s infinite; display: inline-block; }
+.lm-blink + span { animation: lm-blink 1.4s infinite; animation-delay: 0.2s; display: inline-block; }
+.lm-blink + span + span { animation: lm-blink 1.4s infinite; animation-delay: 0.4s; display: inline-block; }
+.lm-d1 { animation-delay: 60ms; }
+.lm-d2 { animation-delay: 120ms; }
+.lm-d3 { animation-delay: 180ms; }
+.lm-d4 { animation-delay: 240ms; }

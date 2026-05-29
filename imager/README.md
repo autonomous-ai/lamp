@@ -1,7 +1,7 @@
-# imager — Lumi golden image builder
+# imager — Lamp golden image builder
 
 Produces SD card images that boot OrangePi 4 Pro (or Raspberry Pi 5) directly
-into the Lumi AP/hotspot setup wizard. Flash, insert, power on — no
+into the Lamp AP/hotspot setup wizard. Flash, insert, power on — no
 `scripts/setup.sh` needed on the target.
 
 ```bash
@@ -49,7 +49,7 @@ Phase 2  chroot qemu-arm64:
          - Node.js 22 from NodeSource + `openclaw@$OPENCLAW_VERSION` npm global
          - openclaw onboard --skip-health (creates /root/.openclaw scaffolding)
          - uv (Python pkg mgr for LeLamp)
-         - systemd units: lumi, bootstrap, lumi-lelamp, lumi-wifi-power-save, openclaw
+         - systemd units: lamp, bootstrap, lamp-lelamp, openclaw
          - helper scripts /usr/local/bin/{device-ap-mode, device-sta-mode, connect-wifi, software-update}
            (verbatim copy from production OPi @ 100.111.149.69)
          - configs: hostapd, dnsmasq, dhcpcd, full prod nginx (CSP + WS + captive-portal),
@@ -57,13 +57,13 @@ Phase 2  chroot qemu-arm64:
            /etc/asound.conf (lamp_speaker / lamp_micro1 for ES8389 sndi2s4)
          - mask orangepi-firstrun-config.service (vendor wizard would conflict)
 Phase 3  OTA bake from metadata.json:
-         - bootstrap-server + lumi-server binaries
+         - bootstrap-server + lamp-server binaries
          - LeLamp Python app + `uv sync --python 3.12 --extra hardware`
            (with webrtcvad pkg_resources shim for Py 3.12+ where the symbol was removed)
          - Web UI to /usr/share/nginx/html/setup
          - Claude Desktop Buddy BLE plugin (optional, if `claude-desktop-buddy.url` in metadata)
-         - Writes /tmp/ota-versions.env (web/lumi/bootstrap/lelamp/buddy versions baked in)
-Phase 4  lumi-resize-once.service installed
+         - Writes /tmp/ota-versions.env (web/lamp/bootstrap/lelamp/buddy versions baked in)
+Phase 4  lamp-resize-once.service installed
          - oneshot, first-boot only, self-destructing
          - growpart + resize2fs to fill the actual SD card (image is 14 GB, SD likely larger)
 Phase 5  Finalize
@@ -81,19 +81,19 @@ efficiently).
 
 1. U-Boot reads `/boot/orangepiEnv.txt` (left intact from vendor image) →
    mounts `/dev/mmcblk1p1` as ext4 root.
-2. `lumi-resize-once.service` runs once: `growpart /dev/mmcblk1 1 && resize2fs
+2. `lamp-resize-once.service` runs once: `growpart /dev/mmcblk1 1 && resize2fs
    /dev/mmcblk1p1` → ext4 fills the real SD size. Service self-disables +
    removes itself. Re-flash will reinstall it.
 3. Operator runs `sudo device-ap-mode` (or the bootstrap-server triggers it
    when no STA association after a timeout).
-4. SSID becomes `Lumi-XXXX` where `XXXX` = last 4 hex chars of the ethernet
+4. SSID becomes `Lamp-XXXX` where `XXXX` = last 4 hex chars of the ethernet
    MAC. The board has no device-tree serial; `device-ap-mode`'s fallback
    chain (`/proc/device-tree/serial-number` → `/proc/cpuinfo Serial` →
    `eth0`/`end0` MAC) lands on MAC for OPi.
-5. mDNS hostname `lumi-<xxxx>.local` published by `avahi-daemon`.
+5. mDNS hostname `lamp-<xxxx>.local` published by `avahi-daemon`.
 6. Connect phone/laptop to AP → http://192.168.100.1/ → setup wizard collects
    API keys + home WiFi → `device-sta-mode` switches → device reachable via
-   `lumi-xxxx.local` on the home LAN.
+   `lamp-xxxx.local` on the home LAN.
 
 ## Configuration knobs
 
@@ -102,16 +102,16 @@ All env vars; override at the `make` call.
 | Variable | Default | Effect |
 |----------|---------|--------|
 | `TARGET` | `opi` | `opi` or `rpi` — picks builder script + output filename |
-| `OUT_IMG_SIZE` | `14G` | Partition size after expansion. ext4 fills this; xz compresses unused space away. SD card must be ≥ this (lumi-resize-once will expand further on first boot if SD is larger). |
+| `OUT_IMG_SIZE` | `14G` | Partition size after expansion. ext4 fills this; xz compresses unused space away. SD card must be ≥ this (lamp-resize-once will expand further on first boot if SD is larger). |
 | `OPI_FILE_ID` | `1CYfOaY6f5DozJBNvPJ0Gx1jBIFlGe8fn` | Google Drive file ID for `Orangepi4pro_1.0.6_debian_bookworm_server_*.7z`. Bump when the dev team uploads a new vendor release. |
 | `OPENCLAW_VERSION` | `2026.5.7` | npm package version pin. Bump as OpenClaw releases. |
-| `OTA_METADATA_URL` | `https://storage.googleapis.com/s3-autonomous-upgrade-3/lumi/ota/metadata.json` | Backend binaries source. Used by Phase 3 to download `lumi-server`, `bootstrap-server`, `lelamp`, `web`, optional `claude-desktop-buddy`. |
+| `OTA_METADATA_URL` | `https://storage.googleapis.com/s3-autonomous-upgrade-3/lamp/ota/metadata.json` | Backend binaries source. Used by Phase 3 to download `lamp-server`, `bootstrap-server`, `lelamp`, `web`, optional `claude-desktop-buddy`. |
 | `AP_BAND` | `2.4` | `2.4` or `5` — hostapd hw_mode. 5 GHz needs chip + regulatory support. |
 | `AP_CHANNEL` | `6` (2.4 GHz) / `36` (5 GHz) | hostapd channel |
 | `COUNTRY_CODE` | `US` | Regulatory domain for wpa_supplicant + hostapd |
 | `GCS_BUCKET` | `s3-autonomous-upgrade-3` | (Makefile) target bucket for `make upload` / `make upload-source` |
-| `GCS_PATH` | `lumi/imager/output` | (Makefile) path inside the bucket for built images + per-release notes |
-| `GCS_LEDGER` | `lumi/imager/RELEASES.md` | (Makefile) path for cumulative append-only release ledger |
+| `GCS_PATH` | `lamp/imager/output` | (Makefile) path inside the bucket for built images + per-release notes |
+| `GCS_LEDGER` | `lamp/imager/RELEASES.md` | (Makefile) path for cumulative append-only release ledger |
 
 Example — rebuild against a new vendor release uploaded to a different file ID:
 
@@ -168,7 +168,7 @@ Per-release note format (sample):
 
 OTA versions baked at build time:
 - web:        1.2.3
-- lumi:       0.0.620
+- lamp:       0.0.620
 - bootstrap:  0.0.10
 - lelamp:     1.0.5
 - claude-desktop-buddy: 1.0.2
@@ -191,7 +191,7 @@ can pull from GCS instead of Drive (TODO: wire `OPI_SOURCE_URL` env into
 build-orangepi.sh to prefer the GCS mirror).
 
 ```bash
-make upload-source                 # → gs://$GCS_BUCKET/lumi/imager/source/Orangepi4pro_*.7z
+make upload-source                 # → gs://$GCS_BUCKET/lamp/imager/source/Orangepi4pro_*.7z
 ```
 
 ## File layout
@@ -211,17 +211,17 @@ imager/
 
 ## Sanity checks after first flash
 
-SSH in (`ssh system@lumi-xxxx.local`, password `12345` until rotated by the
+SSH in (`ssh system@lamp-xxxx.local`, password `12345` until rotated by the
 setup wizard) and verify:
 
 ```bash
-systemctl is-enabled lumi lumi-lelamp lumi-wifi-power-save openclaw avahi-daemon
-ls /usr/local/bin/{lumi-server,bootstrap-server,device-ap-mode,connect-wifi,software-update}
+systemctl is-enabled lamp lamp-lelamp openclaw avahi-daemon
+ls /usr/local/bin/{lamp-server,bootstrap-server,device-ap-mode,connect-wifi,software-update}
 ls /opt/lelamp/.venv/bin/uvicorn       # LeLamp uv sync succeeded
 openclaw --version                       # OpenClaw npm global installed
 ls /etc/asound.conf /etc/udev/rules.d/91-pulseaudio-lelamp-ignore.rules
 findmnt /                                # ext4 root, expanded to full SD
-systemctl is-enabled lumi-resize-once 2>&1 | grep -q "not found" && echo OK_resize-once-self-destructed
+systemctl is-enabled lamp-resize-once 2>&1 | grep -q "not found" && echo OK_resize-once-self-destructed
 ```
 
 ## Maintenance — Pi vs OPi drift
@@ -317,7 +317,7 @@ because it authenticates to your Google account.
 5. Re-run `make build` — script sees the cached file and skips Phase 0 download
 
 **Permanent fix:** mirror to GCS once via `make upload-source`, then update
-`build-orangepi.sh` to pull from `gs://s3-autonomous-upgrade-3/lumi/imager/source/`
+`build-orangepi.sh` to pull from `gs://s3-autonomous-upgrade-3/lamp/imager/source/`
 instead of GDrive (TODO — wire `OPI_SOURCE_URL`).
 
 ### `make upload` warning about parallel composite uploads
@@ -377,7 +377,7 @@ proper). If everything's zero past offset 0x200, the bootloader was clobbered.
 - Switched base image from Armbian (wrong assumption) to vendor Orange Pi
   Bookworm 1.0.6 .7z (matches `/etc/orangepi-release` on production OPi).
 - Dropped Btrfs `@`/`@factory` subvolume scheme — production runs plain ext4
-  single-partition. Replaced @factory factory-reset with `lumi-resize-once`
+  single-partition. Replaced @factory factory-reset with `lamp-resize-once`
   first-boot expand.
 - Bootloader handling: now relies on vendor image's pre-baked U-Boot in raw
   sectors. No more `armbianEnv.txt` manipulation; `orangepiEnv.txt` is left
@@ -390,7 +390,7 @@ proper). If everything's zero past offset 0x200, the bootloader was clobbered.
 
 **Earlier (Pi 5 only)** — ported from `scripts/setup.sh`: openresolv +
 `name_servers="1.1.1.1 8.8.8.8"` fallback (Pi-only — OPi vendor image doesn't
-use openresolv), avahi `lumi-<suffix>.local` mDNS, PulseAudio udev ignore for
+use openresolv), avahi `lamp-<suffix>.local` mDNS, PulseAudio udev ignore for
 `sndi2s4` + `wm8960soundcard`, webrtcvad Py3.12+ patch, MAC-based SSID
 fallback for non-Pi boards in `device-ap-mode`, Pi Imager `wpa.conf` cleanup,
 `AP_BAND=5` knob, `stage_buddy` (Claude Desktop Buddy BLE plugin) gated on

@@ -1,8 +1,13 @@
 # Hardware
 
-Designs, schematics, and specifications for the Lumi lamp hardware.
+Designs, schematics, and specifications for the Lamp hardware.
 
-<img src="images/core.jpg" alt="Core: OrangePi 4 Pro, Waveshare bus servo adapter, STS3215 servo" width="50%">
+<table>
+  <tr>
+    <td><img src="images/core.jpg" alt="Core: OrangePi 4 Pro, Waveshare bus servo adapter, STS3215 servo"></td>
+    <td><img src="images/head.jpg" alt="Head: WS2812 LED ring, USB camera, 4× TTP223 touch sensors around the rim"></td>
+  </tr>
+</table>
 
 This folder is owned by the hardware team. Upload here:
 
@@ -13,11 +18,5 @@ This folder is owned by the hardware team. Upload here:
 - Wiring diagrams and pinouts
 - Enclosure and assembly photos
 
-Large binary CAD files are **not committed**. They are uploaded to **Mega.nz**
-and the public share link is tracked in [`cad/README.md`](cad/README.md).
-
----
-
-
-
-<img src="images/head.jpg" alt="Head: WS2812 LED ring, USB camera, 4× TTP223 touch sensors around the rim" width="50%">
+Large binary CAD files are stored via **Git LFS** (see `.gitattributes`).
+File list and revision notes live in [`cad/README.md`](cad/README.md).
