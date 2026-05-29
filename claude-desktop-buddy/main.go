@@ -38,7 +38,7 @@ type Config struct {
 	DeviceName         string `json:"device_name"`
 	HTTPPort           int    `json:"http_port"`
 	LeLampURL          string `json:"lelamp_url"`
-	LumiURL            string `json:"lumi_url"`
+	LampURL            string `json:"lamp_url"`
 	ApprovalTimeoutSec int    `json:"approval_timeout_sec"`
 	// NarrationLang picks the language used by the Narrator (UC-9
 	// activity status announcements). Supported values live in
@@ -49,10 +49,10 @@ type Config struct {
 
 func main() {
 	configPath := flag.String("config", "/root/config/buddy.json", "path to config file")
-	logPath := flag.String("log", "/var/log/lumi-buddy.log", "path to log file")
+	logPath := flag.String("log", "/var/log/claude-desktop-buddy.log", "path to log file")
 	flag.Parse()
 
-	// Rotating log file: 2 MB per file, keep 10 backups (same as lumi)
+	// Rotating log file: 2 MB per file, keep 10 backups (same as lamp)
 	rotatingWriter := &lumberjack.Logger{
 		Filename:   *logPath,
 		MaxSize:    2, // MB
@@ -70,7 +70,7 @@ func main() {
 		return
 	}
 
-	cfg.DeviceName = resolveDeviceName(cfg.DeviceName, cfg.LumiURL)
+	cfg.DeviceName = resolveDeviceName(cfg.DeviceName, cfg.LampURL)
 
 	// Register a BlueZ agent so LE Secure Connections pairing can complete.
 	// Without an agent, BlueZ rejects pairing requests and Claude Desktop's
@@ -79,7 +79,7 @@ func main() {
 		log.Printf("[buddy] WARN: register agent failed: %v (pairing will likely fail)", err)
 	}
 
-	bridge := NewBridge(cfg.LeLampURL, cfg.LumiURL)
+	bridge := NewBridge(cfg.LeLampURL, cfg.LampURL)
 	startTime := time.Now()
 
 	// Narrator (UC-9): short TTS announcements on state changes and
@@ -159,7 +159,7 @@ func main() {
 
 	// Start BLE (blocking — advertising loop)
 	log.Printf("[buddy] starting Claude Desktop Buddy plugin (%s)", cfg.DeviceName)
-	log.Printf("[buddy] LeLamp: %s, Lumi: %s, HTTP: :%d", cfg.LeLampURL, cfg.LumiURL, cfg.HTTPPort)
+	log.Printf("[buddy] LeLamp: %s, Lamp: %s, HTTP: :%d", cfg.LeLampURL, cfg.LampURL, cfg.HTTPPort)
 
 	if err := ble.Start(); err != nil {
 		log.Fatalf("[buddy] BLE start error: %v", err)
@@ -244,7 +244,7 @@ func handleBLEMessage(data []byte, sm *StateMachine, bleSrv *BLEServer, bridge *
 		// reading the journal — and us during integration work — see
 		// everything Claude Desktop sent.
 		log.Printf("[ble] event evt=%q role=%q content=%q", m.Evt, m.Role, m.TurnText())
-		// Fan out to Lumi so use cases (TTS, display, etc.) can subscribe.
+		// Fan out to Lamp so use cases (TTS, display, etc.) can subscribe.
 		bridge.OnEvent(m)
 		// UC-9 narration: a new user turn resets per-turn throttle;
 		// assistant turns are inspected block-by-block so tool_use and
@@ -351,10 +351,10 @@ func handleBLEMessage(data []byte, sm *StateMachine, bleSrv *BLEServer, bridge *
 func loadConfig(path string) Config {
 	cfg := Config{
 		Enabled:            true,
-		DeviceName:         "Claude-lumi-{MAC}",
+		DeviceName:         "Claude-lamp-{MAC}",
 		HTTPPort:           5002,
 		LeLampURL:          "http://127.0.0.1:5001",
-		LumiURL:            "http://127.0.0.1:5000",
+		LampURL:            "http://127.0.0.1:5000",
 		ApprovalTimeoutSec: 30,
 		NarrationLang:      "vi",
 	}
@@ -375,38 +375,38 @@ func loadConfig(path string) Config {
 }
 
 // resolveDeviceName expands the {MAC} placeholder in name by fetching the
-// hardware MAC suffix from Lumi's /api/system/network. Buddy may start before
-// Lumi is ready, so we retry transport errors for a short window. Names
+// hardware MAC suffix from Lamp's /api/system/network. Buddy may start before
+// Lamp is ready, so we retry transport errors for a short window. Names
 // without the placeholder pass through untouched.
 //
 // MAC suffix is preferred over device_id because it's hardware-derived
 // (last 4 chars of Pi serial, or eth0 MAC on non-Pi boards) and available
 // before /device/setup runs, whereas DeviceID is empty pre-provisioning.
-// Matching the mDNS hostname (`lumi-xxxx.local`) also makes the BLE name
+// Matching the mDNS hostname (`lamp-xxxx.local`) also makes the BLE name
 // recognisable to users who already know their device by its .local name.
 //
 // The suffix is truncated to 4 chars so the resolved name fits in the
 // 31-byte primary BLE advertisement alongside the 128-bit Nordic UART
 // service UUID. With a long name the system pushes it to the scan
 // response, which some scanners only fetch via active scan and may miss.
-func resolveDeviceName(name, lumiURL string) string {
+func resolveDeviceName(name, lampURL string) string {
 	if name == "" {
-		name = "Claude-lumi-{MAC}"
+		name = "Claude-lamp-{MAC}"
 	}
 	if !strings.Contains(name, "{MAC}") {
 		return name
 	}
 
-	mac, reason := fetchMAC(lumiURL)
+	mac, reason := fetchMAC(lampURL)
 	switch {
 	case mac != "":
-		log.Printf("[buddy] resolved mac=%q from Lumi", mac)
+		log.Printf("[buddy] resolved mac=%q from Lamp", mac)
 	case reason == "empty":
-		log.Printf("[buddy] WARN: Lumi reachable at %s but mac is empty — hardware serial/MAC unreadable", lumiURL)
+		log.Printf("[buddy] WARN: Lamp reachable at %s but mac is empty — hardware serial/MAC unreadable", lampURL)
 		mac = "unk"
 	default:
 		log.Printf("[buddy] WARN: failed to fetch mac from %s after %d attempts (%s)",
-			lumiURL, fetchAttempts, reason)
+			lampURL, fetchAttempts, reason)
 		mac = "unk"
 	}
 	short := shortMAC(mac)
@@ -417,9 +417,9 @@ func resolveDeviceName(name, lumiURL string) string {
 }
 
 // shortMAC returns a compact lowercase form of the MAC suitable for the
-// BLE local name. Takes the last dash-separated segment (e.g. "Lumi-A1B2"
+// BLE local name. Takes the last dash-separated segment (e.g. "Lamp-A1B2"
 // → "a1b2") and truncates to 4 chars. Lowercasing matches the mDNS
-// hostname convention (`lumi-xxxx.local`).
+// hostname convention (`lamp-xxxx.local`).
 func shortMAC(mac string) string {
 	if mac == "" {
 		return "unk"
@@ -437,12 +437,12 @@ const fetchAttempts = 15
 
 // fetchMAC returns (mac, reason). reason is one of:
 //
-//	"" on success, "empty" if Lumi answered with an empty mac (hardware
+//	"" on success, "empty" if Lamp answered with an empty mac (hardware
 //	serial/MAC unreadable), or a transport-level failure summary if all
 //	retries failed.
-func fetchMAC(lumiURL string) (string, string) {
+func fetchMAC(lampURL string) (string, string) {
 	client := &http.Client{Timeout: 3 * time.Second}
-	url := lumiURL + "/api/system/network"
+	url := lampURL + "/api/system/network"
 	var lastErr string
 	for i := 0; i < fetchAttempts; i++ {
 		mac, ok, errStr := tryFetchMAC(client, url)
@@ -461,7 +461,7 @@ func fetchMAC(lumiURL string) (string, string) {
 	return "", lastErr
 }
 
-// tryFetchMAC returns (mac, ok, errStr). ok=true means Lumi answered with
+// tryFetchMAC returns (mac, ok, errStr). ok=true means Lamp answered with
 // a parseable response (mac may still be empty if hardware ID is unset).
 // ok=false means transport/decode failure — caller should retry.
 func tryFetchMAC(client *http.Client, url string) (string, bool, string) {

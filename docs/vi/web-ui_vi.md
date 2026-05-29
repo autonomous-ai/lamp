@@ -342,7 +342,7 @@ def get_led_color():
 
 `lamp/web/src/components/SourceFooter.tsx` là một link nhỏ `position: fixed`, mount tại App root (`App.tsx`, ngoài `<Routes>`), nên xuất hiện ở mọi trang — Setup, Login, Monitor, EditConfig, GwConfig.
 
-Render tại `bottom: 6px, right: 8px` với chữ monospace 10px và opacity `0.7` — ai cần là thấy nhưng không đè form action buttons (Back / Next / Setup / Save) hoặc scroll. Link target: `https://github.com/autonomous-ai/ai-lamp-lumi`.
+Render tại `bottom: 6px, right: 8px` với chữ monospace 10px và opacity `0.7` — ai cần là thấy nhưng không đè form action buttons (Back / Next / Setup / Save) hoặc scroll. Link target: `https://github.com/autonomous-ai/lamp`.
 
 Lý do tồn tại: LeLamp Python (`lelamp/`) ship dưới GPL v3, bake sẵn vào image board. GPL §6 yêu cầu người nhận binary phải biết source code tương ứng ở đâu. Footer thỏa mãn lựa chọn "written offer" bằng cách expose URL repo public ngay trên thiết bị. Xem thêm `scripts/tag-release.sh` + `Makefile:tag-release` cho phần map version → commit.
 
@@ -358,7 +358,7 @@ make web-build        # tsc + vite build → lamp/web/dist/
 make web-deploy       # web-build + rsync dist/ → /usr/share/nginx/html/setup/
 
 # Deploy LeLamp (khi thay đổi server.py)
-make lelamp-deploy    # rsync + pip install + systemctl restart lumi-lelamp.service
+make lelamp-deploy    # rsync + pip install + systemctl restart lamp-lelamp.service
 ```
 
 > Deploy dùng `PI_HOST=lamp.local` (mDNS). Nếu không resolve được, dùng IP trực tiếp:

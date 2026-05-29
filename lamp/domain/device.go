@@ -67,7 +67,7 @@ type SetupRequest struct {
 	// AdminPassword is the plaintext password the operator picks at setup time.
 	// Server bcrypts it into config.AdminPasswordHash and never persists the
 	// plaintext. Used to gate browser admin access via POST /api/login + the
-	// lumi_session cookie. Empty allowed (validated at handler level so
+	// lamp_session cookie. Empty allowed (validated at handler level so
 	// pre-login-UI clients keep working during the migration window).
 	AdminPassword string `json:"admin_password"`
 
@@ -350,9 +350,9 @@ type MQTTInfoResponse struct {
 // NewDeviceMessage creates a base message with required fields populated from config.
 func NewMQTTInfoResponse(cfg *config.Config, msgType string, mac string) MQTTInfoResponse {
 	return MQTTInfoResponse{
-		Device:      "ai_lumi",
+		Device:      "ai_lamp",
 		Type:        msgType,
-		Version:     config.LumiVersion,
+		Version:     config.LampVersion,
 		ID:          cfg.DeviceID,
 		Mac:         mac,
 		Time:        time.Now().UTC().Format(time.RFC3339Nano),

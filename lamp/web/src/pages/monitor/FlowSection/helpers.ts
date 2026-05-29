@@ -8,7 +8,7 @@ function isChannelType(type: string): boolean {
   return CHANNEL_TYPES.has(type);
 }
 
-// Lumi emits motion.activity/emotion.detected/speech_emotion.detected/pose.ergo_risk
+// Lamp emits motion.activity/emotion.detected/speech_emotion.detected/pose.ergo_risk
 // with domain-specific prefixes ([activity]/[emotion]/[speech_emotion]/[posture])
 // instead of [sensing:*] so SOUL.md's [sensing:*] rule doesn't force the sensing
 // skill into context. Parsing here supports all domain-specific sensing prefixes.
@@ -75,7 +75,7 @@ export interface PipelineRow {
 //   command_output, patch) → one row each, kind="compaction"|"error"|"other".
 // - Other flow events (chat_send, hw_*, tts_send, …) are NOT aggregated
 //   into the pipeline — they belong to the surrounding flow nodes
-//   (Agent Call, Lumi Hook, etc.) and would clutter the pipeline.
+//   (Agent Call, Lamp Hook, etc.) and would clutter the pipeline.
 export function aggregateEvents(events: DisplayEvent[]): PipelineRow[] {
   const rows: PipelineRow[] = [];
 
@@ -122,7 +122,7 @@ export function aggregateEvents(events: DisplayEvent[]): PipelineRow[] {
       continue;
     }
 
-    // Tool call events. Lumi flow.Log("tool_call") fires twice per phase
+    // Tool call events. Lamp flow.Log("tool_call") fires twice per phase
     // for each tool (once from the `agent` stream without args, once from
     // `session.tool` with args + source) — collapse those duplicates by
     // merging into the trailing row when the preceding event was the same
@@ -314,7 +314,7 @@ export function refineTurnTypeFromSensingInputs(turn: Turn): void {
   }
 
   // Reclassify channel turns that are actually sensing events routed via OpenClaw channel.
-  // node-host is Lumi's own WebSocket identity in OpenClaw — it sends sensing events AND
+  // node-host is Lamp's own WebSocket identity in OpenClaw — it sends sensing events AND
   // voice commands via chat.send, so sender=node-host alone doesn't mean "system".
   if (isChannelType(turn.type)) {
     let hasRealUser = false;
@@ -334,7 +334,7 @@ export function refineTurnTypeFromSensingInputs(turn: Turn): void {
     if (hasRealUser) return; // keep as channel type
     if (sensingType) { turn.type = sensingType; return; }
     // Cron-fired turns: primary signal is the cron_fire flow event emitted by
-    // Lumi at lifecycle_start when it correlates an OpenClaw event:"cron"
+    // Lamp at lifecycle_start when it correlates an OpenClaw event:"cron"
     // (action:"started"). Fallback to the systemEvent wrapper string match if
     // the event was dropped (OpenClaw broadcasts cron with dropIfSlow:true).
     let isCron = false;
@@ -427,9 +427,9 @@ export function groupIntoTurns(events: DisplayEvent[]): Turn[] {
       const d = ev.detail as Record<string, any> | undefined;
       const msg = d?.message ?? d?.data?.message ?? ev.summary ?? "";
       const sender = d?.sender ?? d?.data?.sender ?? "";
-      // Skip node-host echo — Lumi's own chat.send echoed back via session.message.
+      // Skip node-host echo — Lamp's own chat.send echoed back via session.message.
       // These duplicate the sensing_input / voice_pipeline turn that already exists.
-      // Detect by: sender is node-host + message contains Lumi-injected directives.
+      // Detect by: sender is node-host + message contains Lamp-injected directives.
       if (sender === "node-host" && (containsSensingPrefix(msg) || /\[MANDATORY:/.test(msg) || /\[Follow /.test(msg) || /\[REPLY RULE:/.test(msg) || /\[context: current_user=/.test(msg))) {
         return null;
       }
@@ -598,7 +598,7 @@ export function groupIntoTurns(events: DisplayEvent[]): Turn[] {
       current.endTime = ev.time;
     }
     // chat_final_empty: OpenClaw sent state:"final" with empty Message for a
-    // Lumi-format runId that never opened a lifecycle. Factual close event —
+    // Lamp-format runId that never opened a lifecycle. Factual close event —
     // no interpretation. (Legacy `turn_steered` is back-compat for old JSONL.)
     // chat_final_ok: same shape but non-empty Message — slash commands
     // (/status, /new, /compact) dispatched pre-LLM by OpenClaw return a
@@ -673,7 +673,7 @@ export function groupIntoTurns(events: DisplayEvent[]): Turn[] {
 
     const prevIsChannelFallback = isChannelType(prev.type) && !turnHasRealChannelInput(prev);
     if (prevIsChannelFallback && prevHasNoOutput && currLooksAgentReply && closeInTime) {
-      if (turn.runId && /^lumi-(chat|sensing)-/i.test(turn.runId)) {
+      if (turn.runId && /^lamp-(chat|sensing)-/i.test(turn.runId)) {
         stitched.push(turn);
         continue;
       }
@@ -736,7 +736,7 @@ export function extractNodeInfo(events: DisplayEvent[]): NodeInfoMap {
     mic_input: [], cam_input: [], button_input: [], channel_input: [], webchat_input: [], intent_check: [], local_match: [],
     agent_call: [], agent_thinking: [], tool_exec: [],
     agent_response: [], tts_speak: [], schedule_trigger: [],
-    lumi_gate: [], hw_led: [], hw_servo: [], hw_emotion: [], hw_audio: [], hw_wellbeing: [], hw_mood: [], hw_music_suggestion: [], hw_posture: [], tg_out: [], tg_alert: [],
+    lamp_gate: [], hw_led: [], hw_servo: [], hw_emotion: [], hw_audio: [], hw_wellbeing: [], hw_mood: [], hw_music_suggestion: [], hw_posture: [], tg_out: [], tg_alert: [],
     ambient: [],
   };
   const fmtToken = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
@@ -1014,37 +1014,37 @@ export function extractNodeInfo(events: DisplayEvent[]): NodeInfoMap {
       if (body && body.startsWith("{")) {
         pushUnique(info.hw_emotion, `⚡ HW marker → curl -s -X POST http://127.0.0.1:5001${path} -H "Content-Type: application/json" -d '${body}'`);
         const m = body.match(/"emotion"\s*:\s*"([^"]+)"/);
-        pushUnique(info.lumi_gate, `🎭 → ${m ? m[1] : "emotion"}`);
+        pushUnique(info.lamp_gate, `🎭 → ${m ? m[1] : "emotion"}`);
       }
     }
     if (ev.type === "hw_led" || (ev.type === "flow_event" && ev.detail?.node === "hw_led")) {
       const { path, body } = parseHWEvent(ev, "/led/solid");
       if (body && body.startsWith("{")) {
         pushUnique(info.hw_led, `⚡ HW marker → curl -s -X POST http://127.0.0.1:5001${path} -d '${body}'`);
-        pushUnique(info.lumi_gate, `💡 → LED ${path}`);
+        pushUnique(info.lamp_gate, `💡 → LED ${path}`);
       }
     }
     if (ev.type === "hw_servo" || (ev.type === "flow_event" && ev.detail?.node === "hw_servo")) {
       const { path, body } = parseHWEvent(ev, "/servo/play");
       if (body && body.startsWith("{")) {
         pushUnique(info.hw_servo, `⚡ HW marker → curl -s -X POST http://127.0.0.1:5001${path} -d '${body}'`);
-        pushUnique(info.lumi_gate, `🤖 → servo ${path}`);
+        pushUnique(info.lamp_gate, `🤖 → servo ${path}`);
       }
     }
     if (ev.type === "hw_audio" || (ev.type === "flow_event" && ev.detail?.node === "hw_audio")) {
       const { path, body } = parseHWEvent(ev, "/audio/play");
       if (body && body.startsWith("{")) {
         pushUnique(info.hw_audio, `⚡ HW marker → curl -s -X POST http://127.0.0.1:5001${path} -d '${body}'`);
-        pushUnique(info.lumi_gate, `🎵 → audio ${path}`);
+        pushUnique(info.lamp_gate, `🎵 → audio ${path}`);
       }
     }
     if (ev.type === "hw_wellbeing" || (ev.type === "flow_event" && ev.detail?.node === "hw_wellbeing")) {
       const { path, body } = parseHWEvent(ev, "/wellbeing/log");
       if (body && body.startsWith("{")) {
-        // Wellbeing log goes to Lumi (port 5000), not LeLamp (5001), via the /api/ prefix.
+        // Wellbeing log goes to Lamp (port 5000), not LeLamp (5001), via the /api/ prefix.
         pushUnique(info.hw_wellbeing, `⚡ HW marker → curl -s -X POST http://127.0.0.1:5000/api${path} -d '${body}'`);
         const m = body.match(/"action"\s*:\s*"([^"]+)"/);
-        pushUnique(info.lumi_gate, `💧 → wellbeing ${m ? m[1] : path}`);
+        pushUnique(info.lamp_gate, `💧 → wellbeing ${m ? m[1] : path}`);
       }
     }
     if (ev.type === "hw_mood" || (ev.type === "flow_event" && ev.detail?.node === "hw_mood")) {
@@ -1055,7 +1055,7 @@ export function extractNodeInfo(events: DisplayEvent[]): NodeInfoMap {
         const moodMatch = body.match(/"mood"\s*:\s*"([^"]+)"/);
         const kind = kindMatch ? kindMatch[1] : "log";
         const mood = moodMatch ? moodMatch[1] : "?";
-        pushUnique(info.lumi_gate, `🧠 → mood ${kind}=${mood}`);
+        pushUnique(info.lamp_gate, `🧠 → mood ${kind}=${mood}`);
       }
     }
     if (ev.type === "hw_music_suggestion" || (ev.type === "flow_event" && ev.detail?.node === "hw_music_suggestion")) {
@@ -1063,7 +1063,7 @@ export function extractNodeInfo(events: DisplayEvent[]): NodeInfoMap {
       if (body && body.startsWith("{")) {
         pushUnique(info.hw_music_suggestion, `⚡ HW marker → curl -s -X POST http://127.0.0.1:5000/api${path} -d '${body}'`);
         const triggerMatch = body.match(/"trigger"\s*:\s*"([^"]+)"/);
-        pushUnique(info.lumi_gate, `🎼 → music-suggest ${triggerMatch ? triggerMatch[1] : path}`);
+        pushUnique(info.lamp_gate, `🎼 → music-suggest ${triggerMatch ? triggerMatch[1] : path}`);
       }
     }
     if (ev.type === "hw_posture" || (ev.type === "flow_event" && ev.detail?.node === "hw_posture")) {
@@ -1071,25 +1071,25 @@ export function extractNodeInfo(events: DisplayEvent[]): NodeInfoMap {
       if (body && body.startsWith("{")) {
         pushUnique(info.hw_posture, `⚡ HW marker → curl -s -X POST http://127.0.0.1:5000/api${path} -d '${body}'`);
         const kindMatch = body.match(/"kind"\s*:\s*"([^"]+)"/);
-        pushUnique(info.lumi_gate, `🪑 → posture ${kindMatch ? kindMatch[1] : path}`);
+        pushUnique(info.lamp_gate, `🪑 → posture ${kindMatch ? kindMatch[1] : path}`);
       }
     }
     if (ev.type === "flow_event" && (ev.detail?.node === "tts_send" || ev.detail?.node === "tts_suppressed")) {
-      pushUnique(info.lumi_gate, "🔊 → TTS");
+      pushUnique(info.lamp_gate, "🔊 → TTS");
     }
     if (ev.type === "flow_event" && ev.detail?.node === "tts_suppressed") {
       const d = ev.detail as Record<string, any> | undefined;
       const reason = d?.data?.reason ?? "suppressed";
-      pushUnique(info.lumi_gate, `🔇 → TTS suppressed (${reason})`);
+      pushUnique(info.lamp_gate, `🔇 → TTS suppressed (${reason})`);
     }
     if (ev.type === "flow_event" && ev.detail?.node === "no_reply") {
-      pushUnique(info.lumi_gate, "🚫 → no reply");
+      pushUnique(info.lamp_gate, "🚫 → no reply");
     }
     if (ev.type === "flow_event" && ev.detail?.node === "hw_only_reply") {
-      pushUnique(info.lumi_gate, "⚙ → HW only (no speech)");
+      pushUnique(info.lamp_gate, "⚙ → HW only (no speech)");
     }
     if (ev.type === "flow_event" && ev.detail?.node === "telegram_alert_broadcast") {
-      pushUnique(info.lumi_gate, "📢 → broadcast");
+      pushUnique(info.lamp_gate, "📢 → broadcast");
     }
   }
   // After processing all events: if lifecycle_end was seen but no response/no_reply, mark silent
@@ -1194,7 +1194,7 @@ export function extractNodeInfo(events: DisplayEvent[]): NodeInfoMap {
   // local_match: intent_match duration (instant, but show if > 0)
   // (local_match is triggered by intent_match, timing is included in intent_check)
 
-  // agent_call has no duration of its own — it's the act of Lumi writing
+  // agent_call has no duration of its own — it's the act of Lamp writing
   // chat.send to the WS, which is sub-millisecond on localhost. The 1-2s
   // commonly seen between chat_send and lifecycle_start is OpenClaw's
   // internal init (queue + hooks + skill load + prompt build), shown on
@@ -1295,14 +1295,14 @@ export function turnIO(turn: Turn): {
       // Extract snapshot paths from sensing_input (backend strips [snapshot:...] from chat_send
       // text, so sensing_input is the authoritative source for the Monitor turn-item thumbnails).
       if (typeof dataMsg === "string") {
-        const snapRe = /\[snapshot:\s*(?:\/tmp\/lumi-(?:sensing|emotion|motion)-snapshots|\/var\/log\/lumi\/snapshots|\/var\/lib\/lelamp\/snapshots)\/((?:sensing|emotion|motion)_[^\]]+\.jpg)\]/g;
+        const snapRe = /\[snapshot:\s*(?:\/tmp\/lamp-(?:sensing|emotion|motion)-snapshots|\/var\/lib\/lelamp\/snapshots)\/((?:sensing|emotion|motion)_[^\]]+\.jpg)\]/g;
         let snapMatch;
         while ((snapMatch = snapRe.exec(dataMsg)) !== null) {
           const url = `/api/sensing/snapshot/${snapMatch[1]}`;
           if (!snapshotUrls.includes(url)) snapshotUrls.push(url);
         }
         // Pose bucket markers (motion.activity only) — emitted by lelamp
-        // when a posture nudge folds into the turn. Lumi strips them from
+        // when a posture nudge folds into the turn. Lamp strips them from
         // the LLM-facing text but they survive in the sensing_input JSONL.
         // Pattern aligned with Go-side rePoseBucketMarker — accept any char
         // except ']' so future debug ids that include underscores or hyphens
@@ -1341,7 +1341,7 @@ export function turnIO(turn: Turn): {
       const raw = (d?.data?.message ?? d?.message ?? ev.summary ?? "").trim();
       // Extract all snapshot paths → convert to API URLs.
       // Accepts sensing_*.jpg (presence), emotion_*.jpg (FER), motion_*.jpg (activity) across all 4 dirs.
-      const snapRe = /\[snapshot:\s*(?:\/tmp\/lumi-(?:sensing|emotion|motion)-snapshots|\/var\/log\/lumi\/snapshots|\/var\/lib\/lelamp\/snapshots)\/((?:sensing|emotion|motion)_[^\]]+\.jpg)\]/g;
+      const snapRe = /\[snapshot:\s*(?:\/tmp\/lamp-(?:sensing|emotion|motion)-snapshots|\/var\/lib\/lelamp\/snapshots)\/((?:sensing|emotion|motion)_[^\]]+\.jpg)\]/g;
       let snapMatch;
       while ((snapMatch = snapRe.exec(raw)) !== null) {
         const url = `/api/sensing/snapshot/${snapMatch[1]}`;

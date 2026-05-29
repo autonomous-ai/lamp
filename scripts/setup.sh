@@ -118,44 +118,22 @@ stage_prerequisites() {
 }
 
 # ----------------------------------------------------------
-# Stage 0a: Raspberry Pi 5 WiFi stability (reduces STA drops when SSID/PSK are correct)
+# Stage 0a: Disable IPv6 (RPi 5 STA-drop workaround; harmless on OrangePi)
 # ----------------------------------------------------------
 stage_rpi5_wifi_stability() {
-  echo "[stage] RPi 5 WiFi stability (power save off, IPv6 disable)"
+  echo "[stage] Disable IPv6"
 
-  # Disable IPv6 — can cause connection drops on RPi 5
   mkdir -p /etc/sysctl.d
-  cat >/etc/sysctl.d/99-lumi-wifi.conf <<'EOF'
+  cat >/etc/sysctl.d/99-lamp-wifi.conf <<'EOF'
 net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
 EOF
-  sysctl -p /etc/sysctl.d/99-lumi-wifi.conf 2>/dev/null || true
-
-  # Disable WiFi power saving at boot (chip sleep causes STA drops)
-  # device-ap-mode and device-sta-mode also run power_save off when switching modes
-  cat >/etc/systemd/system/lumi-wifi-power-save.service <<'EOF'
-[Unit]
-Description=Disable WiFi power save on wlan0 (RPi 5 stability)
-After=network-online.target
-Before=hostapd.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/bin/sh -c 'for i in 1 2 3 4 5 6 7 8 9 10; do ip link show wlan0 >/dev/null 2>&1 && break; sleep 2; done; iw dev wlan0 set power_save off 2>/dev/null || iwconfig wlan0 power off 2>/dev/null || true'
-
-[Install]
-WantedBy=multi-user.target
-EOF
-  systemctl daemon-reload
-  systemctl enable lumi-wifi-power-save.service
-  # Run now if wlan0 exists (e.g. already on STA from image)
-  systemctl start lumi-wifi-power-save.service 2>/dev/null || true
+  sysctl -p /etc/sysctl.d/99-lamp-wifi.conf 2>/dev/null || true
 }
 
 # ----------------------------------------------------------
-# Stage 0b: OTA metadata (web, lumi, bootstrap URLs from GCS)
+# Stage 0b: OTA metadata (web, lamp, bootstrap URLs from GCS)
 # ----------------------------------------------------------
 # ----------------------------------------------------------
 # Stage 0c: Enable SPI in firmware config
@@ -180,7 +158,7 @@ stage_enable_spi() {
   else
     {
       echo ""
-      echo "# Enabled by lumi setup.sh to turn on SPI"
+      echo "# Enabled by lamp setup.sh to turn on SPI"
       echo "dtparam=spi=on"
     } >>"$cfg"
     echo "[stage] Added dtparam=spi=on to $cfg"
@@ -195,11 +173,11 @@ stage_ota_metadata() {
   echo "[stage] Fetch OTA metadata"
   METADATA_TMP="/tmp/ota-metadata.$$.json"
   retry "curl -fsSL -H \"Cache-Control: no-cache\" -H \"Pragma: no-cache\" -o \"$METADATA_TMP\" \"$OTA_METADATA_URL\"" 5
-  export WEB_VERSION WEB_URL LUMI_VERSION LUMI_URL BOOTSTRAP_VERSION BOOTSTRAP_URL
+  export WEB_VERSION WEB_URL LAMP_VERSION LAMP_URL BOOTSTRAP_VERSION BOOTSTRAP_URL
   WEB_VERSION=$(jq -r '.web.version // empty' "$METADATA_TMP")
   WEB_URL=$(jq -r '.web.url // empty' "$METADATA_TMP")
-  LUMI_VERSION=$(jq -r '.lumi.version // empty' "$METADATA_TMP")
-  LUMI_URL=$(jq -r '.lumi.url // empty' "$METADATA_TMP")
+  LAMP_VERSION=$(jq -r '.lamp.version // empty' "$METADATA_TMP")
+  LAMP_URL=$(jq -r '.lamp.url // empty' "$METADATA_TMP")
   BOOTSTRAP_VERSION=$(jq -r '.bootstrap.version // empty' "$METADATA_TMP")
   BOOTSTRAP_URL=$(jq -r '.bootstrap.url // empty' "$METADATA_TMP")
   LELAMP_VERSION=$(jq -r '.lelamp.version // empty' "$METADATA_TMP")
@@ -207,11 +185,11 @@ stage_ota_metadata() {
   BUDDY_VERSION=$(jq -r '."claude-desktop-buddy".version // empty' "$METADATA_TMP")
   BUDDY_URL=$(jq -r '."claude-desktop-buddy".url // empty' "$METADATA_TMP")
   rm -f "$METADATA_TMP"
-  if [ -z "$WEB_URL" ] || [ -z "$LUMI_URL" ] || [ -z "$BOOTSTRAP_URL" ]; then
-    echo "ERROR: OTA metadata missing web.url, lumi.url or bootstrap.url. Check $OTA_METADATA_URL"
+  if [ -z "$WEB_URL" ] || [ -z "$LAMP_URL" ] || [ -z "$BOOTSTRAP_URL" ]; then
+    echo "ERROR: OTA metadata missing web.url, lamp.url or bootstrap.url. Check $OTA_METADATA_URL"
     exit 1
   fi
-  echo "[stage] OTA versions: web=$WEB_VERSION lumi=$LUMI_VERSION bootstrap=$BOOTSTRAP_VERSION lelamp=$LELAMP_VERSION buddy=$BUDDY_VERSION"
+  echo "[stage] OTA versions: web=$WEB_VERSION lamp=$LAMP_VERSION bootstrap=$BOOTSTRAP_VERSION lelamp=$LELAMP_VERSION buddy=$BUDDY_VERSION"
 }
 
 # Download zip from URL, unzip, copy single binary to dest path (handles lamp-server, bootstrap-server in zip)
@@ -257,7 +235,7 @@ stage_backend() {
   fi
 
   install_binary_from_zip "$BOOTSTRAP_URL" /usr/local/bin/bootstrap-server "bootstrap"
-  install_binary_from_zip "$LUMI_URL" /usr/local/bin/lamp-server "lamp"
+  install_binary_from_zip "$LAMP_URL" /usr/local/bin/lamp-server "lamp"
 
   cat >/etc/systemd/system/bootstrap.service <<EOF
 [Unit]
@@ -301,7 +279,7 @@ EOF
   # Do NOT start lamp here — it switches to AP mode when unconfigured, killing internet.
   # Services will start after reboot at the end of setup.
   # /usr/local/bin/software-update is written later by stage_ap (covers
-  # all six components: lamp, openclaw, bootstrap, web, lelamp, lumi-buddy).
+  # all six components: lamp, openclaw, bootstrap, web, lelamp, claude-desktop-buddy).
 }
 
 # ----------------------------------------------------------
@@ -332,24 +310,24 @@ stage_lelamp() {
     echo "[stage] Configuring PulseAudio echo cancellation (WebRTC AEC)"
     cat >> "$PULSE_CONF" <<'PULSE_EOF'
 
-### Echo cancellation (WebRTC AEC) for Lumi smart lamp
+### Echo cancellation (WebRTC AEC) for Lamp smart lamp
 load-module module-echo-cancel source_name=aec_source sink_name=aec_sink aec_method=webrtc aec_args="analog_gain_control=0 digital_gain_control=0" channels=1
 set-default-source aec_source
 set-default-sink aec_sink
 PULSE_EOF
   fi
 
-  # Anonymous unix socket so the root-owned lumi-lelamp service can reach the
+  # Anonymous unix socket so the root-owned lamp-lelamp service can reach the
   # uid-1000 PulseAudio daemon (libpulse rejects cookie auth when the socket
   # owner differs from the connecting uid). Pairs with the PULSE_SERVER env
-  # added to the lumi-lelamp.service unit below. Required for Bluetooth
+  # added to the lamp-lelamp.service unit below. Required for Bluetooth
   # headset routing (pactl set-default-sink to a bluez sink).
-  if [ -f "$PULSE_CONF" ] && ! grep -q "pulse-anon-lumi" "$PULSE_CONF"; then
+  if [ -f "$PULSE_CONF" ] && ! grep -q "pulse-anon-lamp" "$PULSE_CONF"; then
     echo "[stage] Configuring PulseAudio anonymous socket for root access"
     cat >> "$PULSE_CONF" <<'PULSE_EOF'
 
-### Anonymous unix socket so root-owned lumi-lelamp can reach this PA daemon
-load-module module-native-protocol-unix auth-anonymous=1 socket=/tmp/pulse-anon-lumi
+### Anonymous unix socket so root-owned lamp-lelamp can reach this PA daemon
+load-module module-native-protocol-unix auth-anonymous=1 socket=/tmp/pulse-anon-lamp
 PULSE_EOF
   fi
 
@@ -424,9 +402,9 @@ WEBRTCVAD_EOF
   grep -q "^LELAMP_MODE=" "$LELAMP_DIR/.env" \
     || echo "LELAMP_MODE=production" >> "$LELAMP_DIR/.env"
 
-  cat >/etc/systemd/system/lumi-lelamp.service <<EOF
+  cat >/etc/systemd/system/lamp-lelamp.service <<EOF
 [Unit]
-Description=Lumi LeLamp Hardware Runtime
+Description=Lamp LeLamp Hardware Runtime
 After=network.target
 
 [Service]
@@ -437,21 +415,21 @@ EnvironmentFile=$LELAMP_DIR/.env
 Environment="PYTHONPATH=/opt"
 # Anonymous PulseAudio socket — see /etc/pulse/default.pa. Lets root reach the
 # desktop user's PulseAudio so the Bluetooth headset routing works.
-Environment="PULSE_SERVER=unix:/tmp/pulse-anon-lumi"
+Environment="PULSE_SERVER=unix:/tmp/pulse-anon-lamp"
 ExecStart=$LELAMP_DIR/.venv/bin/uvicorn lelamp.server:app --host 127.0.0.1 --port 5001
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=lumi-lelamp
+SyslogIdentifier=lamp-lelamp
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
   systemctl daemon-reload
-  systemctl enable lumi-lelamp
-  systemctl restart lumi-lelamp
+  systemctl enable lamp-lelamp
+  systemctl restart lamp-lelamp
 }
 
 # ----------------------------------------------------------
@@ -493,9 +471,9 @@ stage_buddy() {
 
   rm -rf /tmp/buddy-extract
 
-  cat >/etc/systemd/system/lumi-buddy.service <<EOF
+  cat >/etc/systemd/system/claude-desktop-buddy.service <<EOF
 [Unit]
-Description=Lumi Claude Desktop Buddy (BLE)
+Description=Lamp Claude Desktop Buddy (BLE)
 After=bluetooth.target lamp.service
 Wants=bluetooth.target
 
@@ -508,14 +486,14 @@ Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=lumi-buddy
+SyslogIdentifier=claude-desktop-buddy
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
   systemctl daemon-reload
-  systemctl enable lumi-buddy
+  systemctl enable claude-desktop-buddy
   # Don't start yet — starts on reboot
 }
 
@@ -529,7 +507,7 @@ stage_openclaw() {
   openclaw --version || true
 
   # OpenClaw state root for root-run service (under root's home).
-  # Must match the dot-prefixed path used everywhere else (lumi config default,
+  # Must match the dot-prefixed path used everywhere else (lamp config default,
   # migrate-openclaw-path.sh, stage_backend migration). Mismatch causes
   # OpenClaw WS to close 1008 / token_mismatch.
   OPENCLAW_HOME="${OPENCLAW_HOME:-/root/.openclaw}"
@@ -675,7 +653,7 @@ stage_nginx() {
   unzip -o -q /tmp/setup.zip -d /usr/share/nginx/html/setup
   rm -f /tmp/setup.zip
 
-  cat >/etc/nginx/conf.d/lumi.conf <<EOF
+  cat >/etc/nginx/conf.d/lamp.conf <<EOF
 upstream backend  { server 127.0.0.1:5000; }
 upstream lelamp   { server 127.0.0.1:5001; }
 upstream openclaw { server 127.0.0.1:18789; }
@@ -707,7 +685,7 @@ server {
   add_header Referrer-Policy "no-referrer" always;
   add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
   # Strict CSP. LeLamp self-hosts Swagger UI assets under /static/ (served
-  # via the Lumi /api/hardware/* proxy) so no CDN whitelist or
+  # via the Lamp /api/hardware/* proxy) so no CDN whitelist or
   # `'unsafe-inline'` is needed for the in-iframe docs to render. React app
   # 'unsafe-inline' stays only on style-src for its inline style props.
   add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; connect-src 'self' ws: wss:; frame-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'" always;
@@ -755,9 +733,9 @@ server {
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
   }
 
-  # Top-level openapi.json proxied to Lumi backend so the in-iframe Swagger
+  # Top-level openapi.json proxied to Lamp backend so the in-iframe Swagger
   # UI (loaded via /api/hardware/docs) can fetch its spec at the absolute
-  # path FastAPI hardcodes. Lumi adminAuthMiddleware gates the cookie/Bearer.
+  # path FastAPI hardcodes. Lamp adminAuthMiddleware gates the cookie/Bearer.
   location = /openapi.json {
     proxy_pass http://backend;
     proxy_set_header Host \$host;
@@ -961,7 +939,7 @@ EOF
 
   # dnsmasq: use .d drop-in so we don't break system config; bind range to wlan0 explicitly
   mkdir -p /etc/dnsmasq.d
-  cat >/etc/dnsmasq.d/99-lumi.conf <<EOF
+  cat >/etc/dnsmasq.d/99-lamp.conf <<EOF
 interface=wlan0
 bind-interfaces
 dhcp-range=wlan0,192.168.100.50,192.168.100.150,255.255.255.0,24h
@@ -972,7 +950,7 @@ no-resolv
 EOF
   # Remove any conflicting global interface in main config (leave rest intact)
   if [ -f /etc/dnsmasq.conf ]; then
-    sed -i 's/^interface=wlan0/#interface=wlan0  # use dnsmasq.d/99-lumi.conf/' /etc/dnsmasq.conf 2>/dev/null || true
+    sed -i 's/^interface=wlan0/#interface=wlan0  # use dnsmasq.d/99-lamp.conf/' /etc/dnsmasq.conf 2>/dev/null || true
   fi
 
   # dhcpcd: remove wlan0 block (including when it's at end-of-file with no trailing blank line)
@@ -1037,10 +1015,6 @@ sleep 1
 # Bring interface up
 ip link set wlan0 up
 sleep 1
-
-# Disable power saving
-iw dev wlan0 set power_save off 2>/dev/null || true
-iwconfig wlan0 power off 2>/dev/null || true
 
 # Assign static IP
 ip addr flush dev wlan0
@@ -1140,10 +1114,6 @@ iw dev wlan0 set type managed
 ip link set wlan0 up
 sleep 1
 
-# Disable power saving (better stability)
-iw dev wlan0 set power_save off 2>/dev/null || true
-iwconfig wlan0 power off 2>/dev/null || true
-
 # Remove any AP static IP
 ip addr flush dev wlan0
 
@@ -1232,11 +1202,9 @@ OTA_METADATA_URL="${OTA_METADATA_URL:-https://storage.googleapis.com/s3-autonomo
 [ "$(id -u)" -ne 0 ] && { echo "Run as root."; exit 1; }
 [ $# -ne 1 ] && { echo "Usage: software-update <lamp|openclaw|web>"; exit 1; }
 APP="$1"
-# Back-compat: `software-update lumi` still works during the brand rename window.
-[ "$APP" = "lumi" ] && APP="lamp"
 case "$APP" in
-  lamp|openclaw|bootstrap|web|lelamp|lumi-buddy) ;;
-  *) echo "Unknown app: $APP. Use lamp, openclaw, bootstrap, web, lelamp, or lumi-buddy."; exit 1 ;;
+  lamp|openclaw|bootstrap|web|lelamp|claude-desktop-buddy) ;;
+  *) echo "Unknown app: $APP. Use lamp, openclaw, bootstrap, web, lelamp, or claude-desktop-buddy."; exit 1 ;;
 esac
 
 METADATA_TMP=$(mktemp)
@@ -1244,12 +1212,7 @@ ZIP_TMP=""
 DIR_TMP=""
 trap 'rm -f "$METADATA_TMP" "$ZIP_TMP"; rm -rf "$DIR_TMP"' EXIT
 curl -fsSL -H "Cache-Control: no-cache" -H "Pragma: no-cache" -o "$METADATA_TMP" "$OTA_METADATA_URL" || { echo "Failed to fetch metadata from $OTA_METADATA_URL"; exit 1; }
-# Map command name to metadata key. Default 1:1. Legacy `lumi` arg from
-# pre-rename invocations still maps to the new `lamp` field.
-# `lumi-buddy` (BLE plugin) maps to claude-desktop-buddy.
 META_KEY="$APP"
-[ "$APP" = "lumi" ] && META_KEY="lamp"
-[ "$APP" = "lumi-buddy" ] && META_KEY="claude-desktop-buddy"
 VERSION=$(jq -r --arg a "$META_KEY" '.[$a].version // empty' "$METADATA_TMP")
 URL=$(jq -r --arg a "$META_KEY" '.[$a].url // empty' "$METADATA_TMP")
 [ -z "$VERSION" ] && { echo "Metadata has no version for $APP"; exit 1; }
@@ -1308,9 +1271,9 @@ elif [ "$APP" = "lelamp" ]; then
   find /root/.cache/uv -name "lerobot.egg-info" -type d 2>/dev/null | xargs rm -rf
   cd "$LELAMP_DIR" && "$UV_BIN" sync --python 3.12 --extra hardware || { echo "uv sync failed"; exit 1; }
   cd /
-  systemctl restart lumi-lelamp
+  systemctl restart lamp-lelamp
   echo "lelamp updated to $VERSION"
-elif [ "$APP" = "lumi-buddy" ]; then
+elif [ "$APP" = "claude-desktop-buddy" ]; then
   [ -z "$URL" ] && { echo "Metadata has no url for claude-desktop-buddy"; exit 1; }
   ZIP_TMP=$(mktemp)
   DIR_TMP=$(mktemp -d)
@@ -1321,8 +1284,8 @@ elif [ "$APP" = "lumi-buddy" ]; then
   [ -f "$DIR_TMP/buddy-plugin" ] && cp -f "$DIR_TMP/buddy-plugin" "$BUDDY_DIR/buddy-plugin" && chmod +x "$BUDDY_DIR/buddy-plugin"
   [ ! -f "/root/config/buddy.json" ] && [ -f "$DIR_TMP/config/buddy.json" ] && mkdir -p /root/config && cp -f "$DIR_TMP/config/buddy.json" /root/config/buddy.json
   echo "$VERSION" > "$BUDDY_DIR/VERSION_BUDDY"
-  systemctl restart lumi-buddy
-  echo "lumi-buddy updated to $VERSION"
+  systemctl restart claude-desktop-buddy
+  echo "claude-desktop-buddy updated to $VERSION"
 fi
 SOFTWAREUPDATE
   chmod +x /usr/local/bin/software-update
@@ -1337,11 +1300,8 @@ SOFTWAREUPDATE
 ensure_root
 
 # Stop lamp if running from a previous setup — it switches to AP mode when unconfigured, killing internet.
-# Also stop the legacy lumi.service unit on devices upgraded from the pre-rename layout.
 systemctl stop lamp.service 2>/dev/null || true
 systemctl disable lamp.service 2>/dev/null || true
-systemctl stop lumi.service 2>/dev/null || true
-systemctl disable lumi.service 2>/dev/null || true
 
 run_stage stage_locale
 run_stage stage_prerequisites
@@ -1365,8 +1325,8 @@ echo "======================================"
 echo "Setup complete!"
 echo "AP SSID: Lamp-XXXX (actual: ${AP_SSID:-unknown — stage_ap may have failed})"
 echo "Setup page: http://192.168.100.1 (AP) — or http://${LAMP_HOSTNAME:-lamp-xxxx}.local once on home Wi-Fi"
-echo "Backends: systemctl status bootstrap lamp lumi-lelamp lumi-buddy"
-echo "Updates:  software-update <bootstrap|lamp|openclaw|lelamp|lumi-buddy|web>"
+echo "Backends: systemctl status bootstrap lamp lamp-lelamp claude-desktop-buddy"
+echo "Updates:  software-update <bootstrap|lamp|openclaw|lelamp|claude-desktop-buddy|web>"
 if [ -n "$FAILED_STAGES" ]; then
   echo ""
   echo "WARNING: the following stages FAILED:$FAILED_STAGES"

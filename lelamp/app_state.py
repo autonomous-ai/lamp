@@ -92,7 +92,7 @@ _speaker_muted = False
 # --- Snapshot state ---
 
 _SNAPSHOT_DIR = os.environ.get(
-    "LELAMP_SNAPSHOT_DIR", "/root/.openclaw/media/lumi-snapshots"
+    "LELAMP_SNAPSHOT_DIR", "/root/.openclaw/media/lamp-snapshots"
 )
 _SNAPSHOT_MAX = 20
 _snapshot_paths: list = []
@@ -527,7 +527,7 @@ def _auto_camera_on(reason: str) -> bool:
     return True
 
 
-def _read_agent_name(lumi_cfg: dict) -> str:
+def _read_agent_name(lamp_cfg: dict) -> str:
     """Read agent name from IDENTITY.md. Falls back to default 'lamp'."""
     identity_path = os.path.join(_OPENCLAW_WORKSPACE, "IDENTITY.md")
     try:

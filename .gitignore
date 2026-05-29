@@ -43,6 +43,10 @@ lamp/web/node_modules/
 lamp/web/dist/
 *.zip
 
+# Claude Desktop Buddy (Go) — binary outputs
+claude-desktop-buddy/buddy-plugin
+claude-desktop-buddy/claude-desktop-buddy
+
 # LeLamp (Python)
 .venv
 __pycache__
@@ -55,15 +59,4 @@ scripts/.skill-hashes
 dlbackend/src/core/ser/models/emotion2vec_plus_large/emotion2vec.onnx
 dlbackend/tests/mock_data/audio/speakers/
 
-# Hardware CAD binaries — uploaded to Mega, link tracked in hardware/cad/README.md
-hardware/cad/*.stp
-hardware/cad/*.step
-hardware/cad/*.stl
-hardware/cad/*.STP
-hardware/cad/*.STEP
-hardware/cad/*.STL
-hardware/cad/*.f3d
-hardware/cad/*.f3z
-
-# Mega credentials (if user opts to store them on disk later)
-**/mega.env
+# Hardware CAD binaries are stored via Git LFS — see .gitattributes

@@ -25,11 +25,6 @@ const (
 	hooksBaseURL  = "https://storage.googleapis.com/s3-autonomous-upgrade-3/lamp/hooks"
 
 	lampMandatoryMarker = "<!-- LAMP DO NOT REMOVE -->"
-	// legacyLumiMarker is the previous marker. Kept so devices that ran
-	// onboarding before the rebrand still get their old block stripped on the
-	// next boot (otherwise the new LAMP block gets injected alongside the old
-	// LUMI block, leaving a junk duplicate in AGENTS.md / SOUL.md / HEARTBEAT.md).
-	legacyLumiMarker = "<!-- LUMI DO NOT REMOVE -->"
 
 	agentsMDBlock = `<!-- LAMP DO NOT REMOVE -->
 **Hooks** under ` + "`hooks/`" + ` are runtime triggers (handler.ts) that fire automatically on ` + "`message:preprocessed`" + ` before your turn begins. Their HOOK.md files are docstrings describing already-executed handlers — do NOT read them. Skipping HOOK.md reads removes one round-trip per turn with zero behavior change (turn-gate sets busy state, emotion-acknowledge fires the thinking emotion — both server-side, both unconditional).
@@ -207,7 +202,7 @@ func (s *Service) EnsureOnboarding() error {
 		needRestart = true
 	}
 
-	// Pin messages.queue.mode=steer so Lumi's concurrent producers (sensing
+	// Pin messages.queue.mode=steer so Lamp's concurrent producers (sensing
 	// drains, voice, Telegram, web chat) batch into the active turn at the
 	// next model boundary instead of fanning out as serialized followup turns.
 	if queueAdded, err := s.ensureMessagesQueueConfig(); err != nil {
@@ -303,7 +298,7 @@ func (s *Service) ensureAgentsMDBlock() (bool, error) {
 	}
 
 	// Remove old block (with or without marker) before injecting current version
-	if strings.Contains(text, lampMandatoryMarker) || strings.Contains(text, legacyLumiMarker) {
+	if strings.Contains(text, lampMandatoryMarker) {
 		text = stripMarkedBlock(text)
 	} else {
 		text = stripLegacyMandatoryBlock(text)
@@ -359,14 +354,14 @@ func (s *Service) ensureSoulMDBlock() (bool, error) {
 	// Fast path: file already contains the current block verbatim. Without
 	// this, the strip/rejoin path below re-introduces an extra blank line
 	// after `---` on every run, so output != content and we keep rewriting
-	// SOUL.md (and restarting OpenClaw) on every Lumi boot.
+	// SOUL.md (and restarting OpenClaw) on every Lamp boot.
 	if strings.Contains(text, soulMDBlock) {
 		return false, nil
 	}
 
 	// Strip any prior marker block first so the legacy-seed heuristic below
 	// only sees whatever was below the closing `---`.
-	if strings.Contains(text, lampMandatoryMarker) || strings.Contains(text, legacyLumiMarker) {
+	if strings.Contains(text, lampMandatoryMarker) {
 		text = stripMarkedBlock(text)
 	}
 
@@ -397,7 +392,7 @@ func (s *Service) ensureSoulMDBlock() (bool, error) {
 	var output string
 	if strings.TrimSpace(text) == "" {
 		// First install or clean migration → seed an owner-editable Personal section.
-		output = soulMDBlock + "\n\n## Personal\n\n_Owner-editable. Add notes about yourself, family, routines, or personality tweaks for Lumi here. The block above is managed by Lumi and will be refreshed on each update — keep your edits in this section._\n"
+		output = soulMDBlock + "\n\n## Personal\n\n_Owner-editable. Add notes about yourself, family, routines, or personality tweaks for Lamp here. The block above is managed by Lamp and will be refreshed on each update — keep your edits in this section._\n"
 	} else {
 		output = soulMDBlock + "\n\n" + text
 	}
@@ -434,7 +429,7 @@ func (s *Service) ensureHeartbeatMDBlock() (bool, error) {
 	}
 
 	// Remove old block if marker exists, then inject current version
-	if strings.Contains(text, lampMandatoryMarker) || strings.Contains(text, legacyLumiMarker) {
+	if strings.Contains(text, lampMandatoryMarker) {
 		text = stripMarkedBlock(text)
 	}
 
@@ -448,15 +443,15 @@ func (s *Service) ensureHeartbeatMDBlock() (bool, error) {
 	return true, nil
 }
 
-// stripMarkedBlock removes the block between the marker (<!-- LAMP DO NOT REMOVE -->
-// or the legacy <!-- LUMI DO NOT REMOVE -->) and the next --- separator.
+// stripMarkedBlock removes the block between the marker (<!-- LAMP DO NOT REMOVE -->)
+// and the next --- separator.
 func stripMarkedBlock(text string) string {
 	lines := strings.Split(text, "\n")
 	var cleaned []string
 	skip := false
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if trimmed == lampMandatoryMarker || trimmed == legacyLumiMarker {
+		if trimmed == lampMandatoryMarker {
 			skip = true
 			continue
 		}
@@ -473,7 +468,7 @@ func stripMarkedBlock(text string) string {
 }
 
 // stripLegacyMandatoryBlock removes the old MANDATORY block that was injected
-// before any marker (<!-- LAMP DO NOT REMOVE -->, formerly <!-- LUMI DO NOT REMOVE -->) was introduced.
+// before any marker (<!-- LAMP DO NOT REMOVE -->) was introduced.
 func stripLegacyMandatoryBlock(text string) string {
 	lines := strings.Split(text, "\n")
 	var cleaned []string
@@ -620,7 +615,7 @@ func (s *Service) ensureControlUIConfig() (bool, error) {
 // ensureMessagesQueueConfig pins messages.queue.mode to "steer" so concurrent
 // messages (sensing drains, voice + Telegram interleave) get batched into the
 // active turn at the next model boundary instead of spawning serialized
-// followup turns. Lumi has multiple producers (sensing handler, voice, web
+// followup turns. Lamp has multiple producers (sensing handler, voice, web
 // chat, Telegram) feeding agent:main:main; legacy "queue" mode runs each as
 // its own turn, missing batch opportunities the steer path can collapse.
 //
@@ -628,8 +623,8 @@ func (s *Service) ensureControlUIConfig() (bool, error) {
 // main session via KeyedAsyncQueue) and the ReplyRunAlreadyActive race seen
 // on 5.2 — verify on 5.7+ before relying on steer batching savings.
 //
-// Always overwrites — Lumi owns this config knob; an operator who flips it
-// to "queue" will see Lumi correct on the next boot.
+// Always overwrites — Lamp owns this config knob; an operator who flips it
+// to "queue" will see Lamp correct on the next boot.
 func (s *Service) ensureMessagesQueueConfig() (bool, error) {
 	configPath := filepath.Join(s.config.OpenclawConfigDir, "openclaw.json")
 	configBytes, err := os.ReadFile(configPath)
@@ -755,7 +750,7 @@ func (s *Service) ensureAgentDefaults() (bool, error) {
 	// Compaction
 	// reserveTokensFloor=5000: keep safeguard only as a last-resort guard near
 	// the model context limit (~195k for 200k models). Previously 80000, which
-	// made OpenClaw fire compact at ~120k actual context — same range Lumi's
+	// made OpenClaw fire compact at ~120k actual context — same range Lamp's
 	// /new RPC trigger fires (chat.history TotalTokens > 80k undercounts ~35k),
 	// so the two layers raced and produced the 30-60s compact freeze that
 	// /new was supposed to avoid.

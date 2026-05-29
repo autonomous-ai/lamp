@@ -1,4 +1,4 @@
-// Package i18n exposes the active STT language (Lumi config) and the
+// Package i18n exposes the active STT language (Lamp config) and the
 // consolidated table of short hardcoded TTS phrases — recovery
 // announcements, ambient mumbles, "brain restarting" notices, etc.
 // Phrase content lives in phrases.go; callers go through Pick/One

@@ -4,7 +4,7 @@ import type { DisplayEvent } from "../types";
 export type FlowStage =
   | "mic_input" | "cam_input" | "button_input" | "channel_input" | "webchat_input" | "intent_check" | "local_match"
   | "agent_call" | "agent_thinking" | "tool_exec" | "agent_response" | "tts_speak"
-  | "schedule_trigger" | "lumi_gate" | "hw_led" | "hw_servo" | "hw_emotion" | "hw_audio" | "hw_wellbeing" | "hw_mood" | "hw_music_suggestion" | "hw_posture" | "tg_out" | "tg_alert";
+  | "schedule_trigger" | "lamp_gate" | "hw_led" | "hw_servo" | "hw_emotion" | "hw_audio" | "hw_wellbeing" | "hw_mood" | "hw_music_suggestion" | "hw_posture" | "tg_out" | "tg_alert";
 
 /** No pipeline node highlighted — e.g. no matching triggers in recent events */
 export type ActiveFlowStage = FlowStage | "idle";
@@ -151,10 +151,10 @@ export const FLOW_NODES: FlowNodeDef[] = [
       "flow_event:cron_fire", "cron_fire",
     ] },
 
-  { id: "lumi_gate",
-    label: "Lumi Hook", short: "HOOK", icon: "🚦", color: "var(--lm-teal)", path: "agent",
+  { id: "lamp_gate",
+    label: "Lamp Hook", short: "HOOK", icon: "🚦", color: "var(--lm-teal)", path: "agent",
     shape: "square",
-    desc: "Lumi middleware · parse [HW:] markers · dispatch HW calls\n→ emotion / LED / servo / audio\n→ TTS (suppress if music)\n→ Telegram broadcast\n→ pause ambient if LED changed",
+    desc: "Lamp middleware · parse [HW:] markers · dispatch HW calls\n→ emotion / LED / servo / audio\n→ TTS (suppress if music)\n→ Telegram broadcast\n→ pause ambient if LED changed",
     triggers: [
       "led_set", "led_off", "ambient_pause", "ambient_resume",
       "flow_event:led_set", "flow_event:led_off",

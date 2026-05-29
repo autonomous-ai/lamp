@@ -6,7 +6,7 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { C, Field } from "@/components/setup/shared";
 
 // Login page — single password field that POSTs /api/login. On success the
-// server sets the lumi_session cookie (httpOnly + SameSite=Strict), and we
+// server sets the lamp_session cookie (httpOnly + SameSite=Strict), and we
 // navigate back to the page the user originally tried to reach (?next=…) or
 // fall back to /monitor.
 export default function Login() {
@@ -65,7 +65,7 @@ export default function Login() {
         </button>
 
         <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 4, color: C.text }}>
-          Lumi sign in
+          Lamp sign in
         </div>
         <div style={{ fontSize: 12, color: C.textDim, marginBottom: 18, lineHeight: 1.5 }}>
           Enter the admin password you set during device setup.

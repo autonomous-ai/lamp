@@ -3,7 +3,7 @@ export const API = "/api";
 // Web never touches /hw/* directly anymore — adminAuthMiddleware on the
 // proxy gates the bearer, and Go calls LeLamp on loopback. Bearer is
 // attached automatically by the fetch interceptor in lib/api.ts (search for
-// `__lumiFetchPatched`). For <img src> / <a href> / window.open use the
+// `__lampFetchPatched`). For <img src> / <a href> / window.open use the
 // `hwUrl()` helper which appends ?token= since those can't set headers.
 export const HW  = "/api/hardware";
 // Agent gateway base path. Runtime-agnostic: `/api/agent/*` proxies to the
@@ -65,8 +65,8 @@ export interface OCStatus {
   sessionKey: boolean;
   emotion?: string;
   version?: string;
-  uptime?: number; // seconds since Lumi WS became ready; 0 when disconnected (debug only)
-  agentUptime?: number; // OpenClaw gateway process uptime in seconds; survives Lumi restarts
+  uptime?: number; // seconds since Lamp WS became ready; 0 when disconnected (debug only)
+  agentUptime?: number; // OpenClaw gateway process uptime in seconds; survives Lamp restarts
 }
 export interface PresenceInfo {
   state: string;

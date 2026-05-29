@@ -61,9 +61,9 @@ TRACKING_FACE_DETECTOR_ENABLED: bool = os.environ.get(
 
 # --- Data layout ---
 
-# --- Sensing: Lumi integration ---
-LUMI_SENSING_URL = "http://127.0.0.1:5000/api/sensing/event"
-LUMI_WELLBEING_LOG_URL = "http://127.0.0.1:5000/api/wellbeing/log"
+# --- Sensing: Lamp integration ---
+LAMP_SENSING_URL = "http://127.0.0.1:5000/api/sensing/event"
+LAMP_WELLBEING_LOG_URL = "http://127.0.0.1:5000/api/wellbeing/log"
 
 # --- Sensing: Event cooldown ---
 EVENT_COOLDOWN_S = float(os.environ.get("LELAMP_EVENT_COOLDOWN_S", "60.0"))
@@ -89,19 +89,19 @@ FACE_STRANGER_FLUSH_S = float(os.environ.get("LELAMP_FACE_STRANGER_FLUSH_S", "10
 FACE_AREA_RATIO_THRESHOLD = float(os.environ.get("LELAMP_FACE_AREA_RATIO_THRESHOLD", "0.05"))
 
 # --- DL backend connection ---
-LUMI_CONFIG_PATH = os.environ.get("LUMI_CONFIG_PATH", "/root/config/config.json")
+LAMP_CONFIG_PATH = os.environ.get("LAMP_CONFIG_PATH", "/root/config/config.json")
 
-def _lumi_cfg_get(key: str, default: str = "") -> str:
-    """Read a value from Lumi's config.json (shared with Go server)."""
+def _lamp_cfg_get(key: str, default: str = "") -> str:
+    """Read a value from Lamp's config.json (shared with Go server)."""
     try:
         import json
-        with open(LUMI_CONFIG_PATH) as f:
+        with open(LAMP_CONFIG_PATH) as f:
             return json.load(f).get(key, default)
     except Exception:
         return default
 
-DL_BACKEND_URL = _lumi_cfg_get("llm_base_url") or os.environ.get("DL_BACKEND_URL", "")
-DL_API_KEY = _lumi_cfg_get("llm_api_key") or os.environ.get("DL_API_KEY", "")
+DL_BACKEND_URL = _lamp_cfg_get("llm_base_url") or os.environ.get("DL_BACKEND_URL", "")
+DL_API_KEY = _lamp_cfg_get("llm_api_key") or os.environ.get("DL_API_KEY", "")
 DL_HEARTBEAT_INTERVAL_S = float(os.environ.get("LELAMP_DL_HEARTBEAT_INTERVAL_S", "60.0"))
 
 # --- DL backend encryption (RSA + AES-256-GCM) ---
@@ -141,7 +141,7 @@ MOTION_PERSON_MIN_AREA_RATIO = float(
 )
 MOTION_SNAPSHOT_DIR = os.environ.get(
     "LELAMP_MOTION_SNAPSHOT_DIR",
-    os.path.join(tempfile.gettempdir(), "lumi-motion-snapshots"),
+    os.path.join(tempfile.gettempdir(), "lamp-motion-snapshots"),
 )
 MOTION_SNAPSHOT_MAX_COUNT = int(os.environ.get("LELAMP_MOTION_SNAPSHOT_MAX_COUNT", "100"))
 
@@ -154,7 +154,7 @@ EMOTION_FLUSH_S = float(os.environ.get("LELAMP_EMOTION_FLUSH_S", "10.0"))
 EMOTION_DEDUP_WINDOW_S = float(os.environ.get("LELAMP_EMOTION_DEDUP_WINDOW_S", "300.0"))
 EMOTION_SNAPSHOT_DIR = os.environ.get(
     "LELAMP_EMOTION_SNAPSHOT_DIR",
-    os.path.join(tempfile.gettempdir(), "lumi-emotion-snapshots"),
+    os.path.join(tempfile.gettempdir(), "lamp-emotion-snapshots"),
 )
 EMOTION_SNAPSHOT_MAX_COUNT = int(os.environ.get("LELAMP_EMOTION_SNAPSHOT_MAX_COUNT", "100"))
 
@@ -234,7 +234,7 @@ POSE_FLIP_DLBACKEND_ANGLE_SIGN = (
 
 # --- Sensing: Snapshot storage ---
 SNAPSHOT_TMP_DIR = os.environ.get(
-    "LELAMP_SNAPSHOT_TMP_DIR", "/tmp/lumi-sensing-snapshots"
+    "LELAMP_SNAPSHOT_TMP_DIR", "/tmp/lamp-sensing-snapshots"
 )
 SNAPSHOT_TMP_MAX_COUNT = int(os.environ.get("LELAMP_SNAPSHOT_TMP_MAX_COUNT", "50"))
 SNAPSHOT_PERSIST_DIR = os.environ.get(
@@ -266,7 +266,7 @@ SPEAKER_EMBEDDING_API_TIMEOUT_S: float = float(
 )
 SPEAKER_UNKNOWN_AUDIO_DIR: str = os.environ.get(
     "LELAMP_UNKNOWN_AUDIO_DIR",
-    os.path.join(tempfile.gettempdir(), "lumi-unknown-voice"),
+    os.path.join(tempfile.gettempdir(), "lamp-unknown-voice"),
 )
 DL_SPEAKER_ENDPOINT = os.environ.get("DL_SPEAKER_ENDPOINT", "/lelamp/api/dl/audio-recognizer/embed")
 SPEAKER_EMBEDDING_API_URL: str = DL_BACKEND_URL.rstrip("/") + "/" + DL_SPEAKER_ENDPOINT.strip("/") if DL_BACKEND_URL else ""

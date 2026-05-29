@@ -1,7 +1,7 @@
 # Security Audit: Lamp Go Server
 
 Date: 2026-05-16  
-Repo: `ai-lamp-lumi`  
+Repo: `lamp`  
 Scope: Lamp Go server only (`lamp/server`, `lamp/internal`, `lamp/domain`, nginx `/api/` wiring).  
 Instruction: report issues and exact remediation guidance only; do **not** patch runtime code in this document.
 
@@ -230,7 +230,7 @@ Any website can make browser requests to the device API and read responses if th
 Examples:
 
 - User visits malicious site on the same network as the lamp.
-- Site JavaScript calls `http://lumi.local/api/device/config`.
+- Site JavaScript calls `http://lamp.local/api/device/config`.
 - Because CORS is `*`, browser permits reading the response.
 - Secrets from config/logs can be exfiltrated.
 
@@ -275,7 +275,7 @@ For production, allowed origins should be exact, e.g.:
 map[string]bool{
     "http://127.0.0.1": true,
     "http://localhost": true,
-    "http://lumi.local": true,
+    "http://lamp.local": true,
 }
 ```
 
@@ -752,7 +752,7 @@ s.RePushVoiceConfig()
 `RePushVoiceConfig` restarts service:
 
 ```go
-exec.Command("systemctl", "restart", "lumi-lelamp").CombinedOutput()
+exec.Command("systemctl", "restart", "lamp-lelamp").CombinedOutput()
 ```
 
 ### Why it is risky
@@ -812,7 +812,7 @@ func validateExternalBaseURL(raw string) error {
 
 #### Rate limit restarts
 
-Do not let config updates restart `lumi-lelamp` unlimited times. Add debounce:
+Do not let config updates restart `lamp-lelamp` unlimited times. Add debounce:
 
 ```go
 // only restart once after config settles, e.g. after 2s debounce
@@ -1021,7 +1021,7 @@ system.POST("software-update/:target", s.softwareUpdate)
 Handler:
 
 ```go
-allowed := map[string]bool{"lumi": true, "web": true, "lelamp": true}
+allowed := map[string]bool{"lamp": true, "web": true, "lelamp": true}
 url := "http://127.0.0.1:8080/force-check/" + target
 http.DefaultClient.Do(req)
 ```
@@ -1054,7 +1054,7 @@ Also validate target as currently done; keep allowlist.
 From LAN without auth:
 
 ```sh
-curl -i -X POST http://<device-ip>/api/system/software-update/lumi
+curl -i -X POST http://<device-ip>/api/system/software-update/lamp
 ```
 
 Expected: `401`/`403`.
@@ -1121,7 +1121,7 @@ sensing.GET("snapshot/:category/:name", adminAuthMiddleware(s.config), s.sensing
 Where `internalOnlyMiddleware` checks either:
 
 - Loopback client IP and forwarded headers, or
-- `X-Lumi-Internal-Token` shared secret.
+- `X-Lamp-Internal-Token` shared secret.
 
 ### Acceptance checks
 
@@ -1279,7 +1279,7 @@ If external health check is required, expose only `/health` via nginx with no `/
 From LAN:
 
 ```sh
-curl -i -X POST http://<device-ip>:8080/force-check/lumi
+curl -i -X POST http://<device-ip>:8080/force-check/lamp
 ```
 
 Expected: connection refused/timeout.
@@ -1287,7 +1287,7 @@ Expected: connection refused/timeout.
 From local device:
 
 ```sh
-curl -i -X POST http://127.0.0.1:8080/force-check/lumi
+curl -i -X POST http://127.0.0.1:8080/force-check/lamp
 ```
 
 Expected: works.
@@ -1351,13 +1351,13 @@ Store an admin token in config or a separate root-only file. Prefer separate fil
 Example file:
 
 ```text
-/root/config/lumi-admin-token
+/root/config/lamp-admin-token
 ```
 
 Permissions:
 
 ```sh
-chmod 600 /root/config/lumi-admin-token
+chmod 600 /root/config/lamp-admin-token
 ```
 
 Middleware:
@@ -1384,12 +1384,12 @@ func adminAuthMiddleware(tokenProvider func() string) gin.HandlerFunc {
 
 ### Internal token middleware
 
-For LeLamp/OpenClaw -> Lumi internal ingestion, either use local-only or a shared header:
+For LeLamp/OpenClaw -> Lamp internal ingestion, either use local-only or a shared header:
 
 ```go
 func internalTokenMiddleware(expected string) gin.HandlerFunc {
     return func(c *gin.Context) {
-        got := c.GetHeader("X-Lumi-Internal-Token")
+        got := c.GetHeader("X-Lamp-Internal-Token")
         if expected == "" || subtle.ConstantTimeCompare([]byte(got), []byte(expected)) != 1 {
             c.JSON(http.StatusUnauthorized, serializers.ResponseError("unauthorized"))
             c.Abort()

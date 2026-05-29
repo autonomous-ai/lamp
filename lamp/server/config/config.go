@@ -13,11 +13,11 @@ import (
 
 const configPath = "config/config.json"
 
-// LumiVersion is injected at build time via ldflags.
+// LampVersion is injected at build time via ldflags.
 // Example:
 //
-//	-X go-lamp.autonomous.ai/server/config.LumiVersion=v1.2.3
-var LumiVersion = "dev"
+//	-X go-lamp.autonomous.ai/server/config.LampVersion=v1.2.3
+var LampVersion = "dev"
 
 type Config struct {
 	// mu serialises LLMModel mutations and config.Save() so the primary-model

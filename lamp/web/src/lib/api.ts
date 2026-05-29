@@ -17,10 +17,10 @@ export interface JSONResponse<T = unknown> {
 }
 
 // Legacy Bearer fallback. Browsers normally authenticate via the
-// `lumi_session` cookie set by POST /api/login, but scripted callers and
+// `lamp_session` cookie set by POST /api/login, but scripted callers and
 // shareable dev links may still pass an explicit token. Cleared on logout;
 // not persisted on first load (cookie auth makes sessionStorage unnecessary).
-const TOKEN_STORAGE_KEY = "lumi_api_token";
+const TOKEN_STORAGE_KEY = "lamp_api_token";
 let apiToken: string =
   typeof window !== "undefined" ? sessionStorage.getItem(TOKEN_STORAGE_KEY) ?? "" : "";
 
@@ -104,7 +104,7 @@ export function scrubLocationSecrets(): void {
 // when one is in play. Browsers default fetch to credentials: 'same-origin'
 // for same-origin requests, but Vite's dev server can confuse the heuristic
 // and the explicit setting is cheap insurance.
-if (typeof window !== "undefined" && !(window as unknown as { __lumiFetchPatched?: boolean }).__lumiFetchPatched) {
+if (typeof window !== "undefined" && !(window as unknown as { __lampFetchPatched?: boolean }).__lampFetchPatched) {
   const origFetch = window.fetch.bind(window);
   window.fetch = function patchedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     let url = "";
@@ -130,7 +130,7 @@ if (typeof window !== "undefined" && !(window as unknown as { __lumiFetchPatched
     }
     return origFetch(input, { ...init, headers, credentials: "include" });
   };
-  (window as unknown as { __lumiFetchPatched?: boolean }).__lumiFetchPatched = true;
+  (window as unknown as { __lampFetchPatched?: boolean }).__lampFetchPatched = true;
 }
 
 async function apiRequest<T>(url: string, options?: RequestInit): Promise<T> {
@@ -308,7 +308,7 @@ export async function updateDeviceConfig(body: Partial<Record<string, unknown>>)
 }
 
 /** POST /api/login — server validates bcrypt(password) against
- *  config.AdminPasswordHash and sets the lumi_session cookie on success. */
+ *  config.AdminPasswordHash and sets the lamp_session cookie on success. */
 export async function login(password: string): Promise<boolean> {
   return apiRequest<boolean>(`${API_BASE}/api/login`, {
     method: "POST",

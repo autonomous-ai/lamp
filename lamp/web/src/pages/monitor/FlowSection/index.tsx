@@ -66,7 +66,7 @@ export function FlowSection({
   // Opt-out model: store what user has EXCLUDED. Empty = show all.
   const [excludedTypes, setExcludedTypes] = useState<Set<string>>(() => {
     try {
-      const saved = localStorage.getItem("lumi-excluded-types-v1");
+      const saved = localStorage.getItem("lamp-excluded-types-v1");
       if (saved) return new Set(JSON.parse(saved));
     } catch {}
     return new Set();
@@ -133,7 +133,7 @@ export function FlowSection({
     const turnsSnapshot = groupIntoTurns(events);
     const payload = {
       exportedAt: new Date().toISOString(),
-      format: "lumi-monitor-ui-snapshot-v1",
+      format: "lamp-monitor-ui-snapshot-v1",
       flowEventsWindow: FLOW_EVENTS_MAX,
       eventCount: events.length,
       turnCount: turnsSnapshot.length,
@@ -154,7 +154,7 @@ export function FlowSection({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `lumi_flow_ui_snapshot_${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+    a.download = `lamp_flow_ui_snapshot_${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
     a.rel = "noopener";
     document.body.appendChild(a);
     a.click();
@@ -171,7 +171,7 @@ export function FlowSection({
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `lumi_flow_${day}_last${FLOW_EVENTS_MAX}.jsonl`;
+      a.download = `lamp_flow_${day}_last${FLOW_EVENTS_MAX}.jsonl`;
       a.rel = "noopener";
       document.body.appendChild(a);
       a.click();
@@ -193,7 +193,7 @@ export function FlowSection({
   }, [downloadServerJsonlTail, downloadUISnapshot]);
 
   const saveExcluded = (next: Set<string>) => {
-    try { localStorage.setItem("lumi-excluded-types-v1", JSON.stringify([...next])); } catch {}
+    try { localStorage.setItem("lamp-excluded-types-v1", JSON.stringify([...next])); } catch {}
   };
 
   const toggleType = (type: string) => {
@@ -269,10 +269,10 @@ export function FlowSection({
     // "newest" = default order from groupIntoTurns (newest first)
     return filtered;
   }, [turns, excludedTypes, fromTime, toTime, searchText, sortBy]);
-  // Detect adjacent turn pairs where one is a Lumi-id turn that closed with
+  // Detect adjacent turn pairs where one is a Lamp-id turn that closed with
   // chat_final_empty (OpenClaw closed stream · no message · no lifecycle) and
   // the adjacent turn is an OpenClaw-assigned UUID with matching input text.
-  // Each pair gets a stable color (hashed from the lumi runId) so distinct
+  // Each pair gets a stable color (hashed from the lamp runId) so distinct
   // pairs in view are visually distinguishable. Purely visual correlation —
   // no semantic label.
   const pairTintMap = useMemo(() => {
@@ -292,36 +292,36 @@ export function FlowSection({
       for (let i = 0; i < key.length; i++) h = ((h << 5) - h + key.charCodeAt(i)) | 0;
       return PAIR_BGS[Math.abs(h) % PAIR_BGS.length];
     };
-    // Inputs of the same logical message may differ between Lumi-side and
+    // Inputs of the same logical message may differ between Lamp-side and
     // OpenClaw-side because:
-    //   • Lumi log truncates chat_input message at 500 chars + "…" (see
+    //   • Lamp log truncates chat_input message at 500 chars + "…" (see
     //     service_chat.go:147) — UUID-side carries the full text.
-    //   • Lumi log keeps `[snapshot: /var/...]` paths in presence events
+    //   • Lamp log keeps `[snapshot: /var/...]` paths in presence events
     //     while OpenClaw refires with the snapshot stripped.
     // So check substring containment either way (after stripping the
     // sender prefix and trailing "…"). Guard with min length ≥32 to
     // avoid coincidental short-string matches.
     const normalizeForMatch = (s: string) =>
       s.replace(/^\[[^\]]+\]\s*/, "").replace(/…\s*$/, "").trim();
-    const isLumi = (id: string) => id.startsWith("lumi-");
+    const isLamp = (id: string) => id.startsWith("lamp-");
     for (let i = 0; i < filteredTurns.length - 1; i++) {
       const a = filteredTurns[i];
       const b = filteredTurns[i + 1];
-      const tryPair = (lumiTurn: typeof a, uuidTurn: typeof b) => {
-        if (!isLumi(lumiTurn.id) || isLumi(uuidTurn.id)) return false;
-        const closedEmpty = lumiTurn.events.some((ev) =>
+      const tryPair = (lampTurn: typeof a, uuidTurn: typeof b) => {
+        if (!isLamp(lampTurn.id) || isLamp(uuidTurn.id)) return false;
+        const closedEmpty = lampTurn.events.some((ev) =>
           ev.type === "flow_event" && (
             (ev.detail as Record<string, any>)?.node === "chat_final_empty" ||
             (ev.detail as Record<string, any>)?.node === "turn_steered"
           )
         );
         if (!closedEmpty) return false;
-        const lumiIn = normalizeForMatch(turnIO(lumiTurn).input);
+        const lampIn = normalizeForMatch(turnIO(lampTurn).input);
         const uuidIn = normalizeForMatch(turnIO(uuidTurn).input);
-        if (!lumiIn || !uuidIn) return false;
-        if (Math.min(lumiIn.length, uuidIn.length) < 32) return false;
-        if (!lumiIn.includes(uuidIn) && !uuidIn.includes(lumiIn)) return false;
-        const color = hashColor(lumiTurn.id);
+        if (!lampIn || !uuidIn) return false;
+        if (Math.min(lampIn.length, uuidIn.length) < 32) return false;
+        if (!lampIn.includes(uuidIn) && !uuidIn.includes(lampIn)) return false;
+        const color = hashColor(lampTurn.id);
         map.set(a.id, color);
         map.set(b.id, color);
         return true;
@@ -514,8 +514,8 @@ export function FlowSection({
               title={
                 "Xem 'bộ nhớ tóm tắt' mà OpenClaw tự sinh và chèn vào đầu prompt của MỖI turn agent.\n\n" +
                 "• Vì sao cần: khi context vượt ~80k tokens, OpenClaw auto-compact — gộp history cũ thành 1 đoạn summary, rồi dùng summary này thay cho history đến lần compact tiếp theo.\n" +
-                "• Rủi ro: nếu summary vô tình copy/méo rule từ SKILL.md, KNOWLEDGE.md, SOUL.md → agent sẽ theo summary (đứng đầu prompt) thay vì SKILL.md → Lumi trả lời sai lý do không giải thích nổi.\n\n" +
-                "Click để xem: timestamp, summary chars, session file, và TOÀN VĂN summary đang điều khiển Lumi."
+                "• Rủi ro: nếu summary vô tình copy/méo rule từ SKILL.md, KNOWLEDGE.md, SOUL.md → agent sẽ theo summary (đứng đầu prompt) thay vì SKILL.md → Lamp trả lời sai lý do không giải thích nổi.\n\n" +
+                "Click để xem: timestamp, summary chars, session file, và TOÀN VĂN summary đang điều khiển Lamp."
               }
               style={flowGhostBtn}
             >📋 Summary</button>

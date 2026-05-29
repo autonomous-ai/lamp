@@ -2,7 +2,7 @@
 
 Receives `(user, wav_bytes, duration_s)` per utterance from voice_service,
 buffers recognition results per user, periodically flushes with polarity-
-bucket dedup, and POSTs `speech_emotion.detected` sensing events to Lumi.
+bucket dedup, and POSTs `speech_emotion.detected` sensing events to Lamp.
 
 Architecture mirrors `EmotionPerception` in the face sensing pipeline:
 
@@ -21,7 +21,7 @@ Architecture mirrors `EmotionPerception` in the face sensing pipeline:
         - mode label per user
         - bucket = polarity(mode)
         - TTL dedup keyed on (user, bucket) over DEDUP_WINDOW_S
-        - hedged message → POST Lumi sensing event
+        - hedged message → POST Lamp sensing event
 
 Anti-spam guards (matched to face emotion):
 
@@ -84,7 +84,7 @@ _MIN_AUDIO_S: float = float(
 )
 _API_URL: str = getattr(config, "SPEECH_EMOTION_API_URL", "") or ""
 _API_KEY: str = getattr(config, "SPEECH_EMOTION_API_KEY", "") or ""
-_LUMI_URL: str = config.LUMI_SENSING_URL
+_LAMP_URL: str = config.LAMP_SENSING_URL
 
 
 @dataclass(slots=True)
@@ -121,7 +121,7 @@ class SpeechEmotionService:
 
     Spawns two daemon threads when the recognizer is available — worker
     (drains the submission queue, runs HTTP recognize) and flush (drains
-    the per-user buffer every FLUSH_S, dedups, sends to Lumi). Both shut
+    the per-user buffer every FLUSH_S, dedups, sends to Lamp). Both shut
     down when stop() is called.
     """
 
@@ -132,7 +132,7 @@ class SpeechEmotionService:
         flush_s: float = _FLUSH_S,
         dedup_window_s: float = _DEDUP_WINDOW_S,
         min_audio_s: float = _MIN_AUDIO_S,
-        lumi_url: str = _LUMI_URL,
+        lamp_url: str = _LAMP_URL,
         queue_maxsize: int = DEFAULT_QUEUE_MAXSIZE,
     ):
         self._recognizer: BaseSpeechEmotionRecognizer = (
@@ -141,7 +141,7 @@ class SpeechEmotionService:
         self._flush_s: float = flush_s
         self._dedup_window_s: float = dedup_window_s
         self._min_audio_s: float = min_audio_s
-        self._lumi_url: str = lumi_url
+        self._lamp_url: str = lamp_url
 
         # mutable state — guarded by _lock
         self._lock: threading.RLock = threading.RLock()
@@ -159,10 +159,10 @@ class SpeechEmotionService:
             logger.info(
                 "[speech_emotion] SERVICE STARTED — flush=%.1fs dedup=%.1fs "
                 "min_audio=%.1fs per-label thresholds=%s default=%.2f "
-                "lumi_url=%s recognizer=%s",
+                "lamp_url=%s recognizer=%s",
                 flush_s, dedup_window_s, min_audio_s,
                 CONFIDENCE_THRESHOLD_BY_LABEL, DEFAULT_CONFIDENCE_THRESHOLD,
-                self._lumi_url, type(self._recognizer).__name__,
+                self._lamp_url, type(self._recognizer).__name__,
             )
         else:
             logger.warning(
@@ -401,19 +401,19 @@ class SpeechEmotionService:
             "[speech_emotion] EMIT — user=%r message=%r",
             user, message,
         )
-        self._send_to_lumi(message=message, user=user)
+        self._send_to_lamp(message=message, user=user)
 
     # --- transport --------------------------------------------------------
 
-    def _send_to_lumi(self, *, message: str, user: str) -> None:
-        """POST sensing event to Lumi with 3x retry on connection error / 503.
+    def _send_to_lamp(self, *, message: str, user: str) -> None:
+        """POST sensing event to Lamp with 3x retry on connection error / 503.
 
-        Same shape as voice_service._send_to_lumi but carries `current_user`
-        explicitly so the Lumi sensing handler doesn't have to look it up.
+        Same shape as voice_service.send_to_lamp but carries `current_user`
+        explicitly so the Lamp sensing handler doesn't have to look it up.
         """
-        if not self._lumi_url:
+        if not self._lamp_url:
             logger.warning(
-                "[speech_emotion] _send_to_lumi skipped — empty lumi_url"
+                "[speech_emotion] send_to_lamp skipped — empty lamp_url"
             )
             return
         payload = {
@@ -423,45 +423,45 @@ class SpeechEmotionService:
         }
         logger.info(
             "[speech_emotion] POST -> %s payload.user=%r payload.type=%s",
-            self._lumi_url, user, SENSING_EVENT_TYPE,
+            self._lamp_url, user, SENSING_EVENT_TYPE,
         )
         max_retries = 3
         for attempt in range(1, max_retries + 1):
             try:
-                resp = requests.post(self._lumi_url, json=payload, timeout=5)
+                resp = requests.post(self._lamp_url, json=payload, timeout=5)
             except requests.ConnectionError as e:
                 if attempt < max_retries:
                     logger.warning(
-                        "[speech_emotion] Lumi unreachable (attempt %d/%d), "
+                        "[speech_emotion] Lamp unreachable (attempt %d/%d), "
                         "retry in 2s",
                         attempt, max_retries,
                     )
                     time.sleep(2)
                     continue
                 logger.warning(
-                    "[speech_emotion] Lumi unreachable after %d attempts: %s",
+                    "[speech_emotion] Lamp unreachable after %d attempts: %s",
                     max_retries, e,
                 )
                 return
             except requests.RequestException as e:
-                logger.warning("[speech_emotion] Lumi POST failed: %s", e)
+                logger.warning("[speech_emotion] Lamp POST failed: %s", e)
                 return
 
             if resp.status_code == 503 and attempt < max_retries:
                 logger.warning(
-                    "[speech_emotion] Lumi 503, retry %d/%d in 2s",
+                    "[speech_emotion] Lamp 503, retry %d/%d in 2s",
                     attempt, max_retries,
                 )
                 time.sleep(2)
                 continue
             if resp.status_code != 200:
                 logger.warning(
-                    "[speech_emotion] Lumi returned %d: %s",
+                    "[speech_emotion] Lamp returned %d: %s",
                     resp.status_code, resp.text[:200],
                 )
                 return
             logger.info(
-                "[speech_emotion] SENT -> Lumi 200 OK (attempt=%d): %s",
+                "[speech_emotion] SENT -> Lamp 200 OK (attempt=%d): %s",
                 attempt, message,
             )
             return

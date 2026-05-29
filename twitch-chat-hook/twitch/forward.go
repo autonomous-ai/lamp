@@ -1,4 +1,4 @@
-// Forwards Twitch chat lines into Lumi's sensing pipeline as a sensing
+// Forwards Twitch chat lines into Lamp's sensing pipeline as a sensing
 // event, mirroring how LeLamp's voice service posts voice_command
 // transcripts (see lelamp/service/voice/voice_service.py: same URL, same
 // body shape). The "[source: twitch]" prefix lets SOUL.md distinguish this
@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	defaultLumiSensingURL = "http://127.0.0.1:5000/api/sensing/event"
+	defaultLampSensingURL = "http://127.0.0.1:5000/api/sensing/event"
 	defaultEventType      = "voice"
 )
 
@@ -29,23 +29,23 @@ type sensingEvent struct {
 	Message string `json:"message"`
 }
 
-// ForwardChatMessage POSTs a chat line to the Lumi sensing endpoint.
+// ForwardChatMessage POSTs a chat line to the Lamp sensing endpoint.
 //
 // Env overrides:
 //
-//	LUMI_SENSING_URL     default http://127.0.0.1:5000/api/sensing/event
+//	LAMP_SENSING_URL     default http://127.0.0.1:5000/api/sensing/event
 //	TWITCH_SENSING_TYPE  default voice_command
 //
 // Fire-and-forget. The send runs in a background goroutine so the caller's
-// read loop is never blocked by a slow Lumi; errors are logged.
+// read loop is never blocked by a slow Lamp; errors are logged.
 func ForwardChatMessage(ctx context.Context, nick, text string) {
 	go forward(ctx, nick, text)
 }
 
 func forward(ctx context.Context, nick, text string) {
-	url := os.Getenv("LUMI_SENSING_URL")
+	url := os.Getenv("LAMP_SENSING_URL")
 	if url == "" {
-		url = defaultLumiSensingURL
+		url = defaultLampSensingURL
 	}
 	evtType := os.Getenv("TWITCH_SENSING_TYPE")
 	if evtType == "" {

@@ -80,7 +80,7 @@ func (s *Service) SendChatMessageWithImage(message string, imageBase64 string) (
 // NextChatRunID allocates ids for the next chat.send so callers can flow.SetTrace(runID) before flow.Start.
 func (s *Service) NextChatRunID() (reqID string, runID string) {
 	reqID = fmt.Sprintf("chat-%d", s.reqCounter.Add(1))
-	runID = fmt.Sprintf("lumi-%s-%d", reqID, time.Now().UnixMilli())
+	runID = fmt.Sprintf("lamp-%s-%d", reqID, time.Now().UnixMilli())
 	return reqID, runID
 }
 
@@ -133,8 +133,8 @@ func (s *Service) sendChat(message string, imageBase64 string, fixedReqID string
 		return "", fmt.Errorf("websocket not connected")
 	}
 
-	// reqID labels outbound chat.send from Lumi (sensing POST, wake greeting, etc.) — not "audio only".
-	// Idempotency key must stay stable for OpenClaw run_id mapping; use lumi-chat-* (not lumi-sensing-*)
+	// reqID labels outbound chat.send from Lamp (sensing POST, wake greeting, etc.) — not "audio only".
+	// Idempotency key must stay stable for OpenClaw run_id mapping; use lamp-chat-* (not lamp-sensing-*)
 	// so logs are not mistaken for sound/voice-only turns vs Telegram.
 	var reqID string
 	var idempotencyKey string
@@ -143,7 +143,7 @@ func (s *Service) sendChat(message string, imageBase64 string, fixedReqID string
 		idempotencyKey = fixedRunID
 	} else {
 		reqID = fmt.Sprintf("chat-%d", s.reqCounter.Add(1))
-		idempotencyKey = fmt.Sprintf("lumi-%s-%d", reqID, time.Now().UnixMilli())
+		idempotencyKey = fmt.Sprintf("lamp-%s-%d", reqID, time.Now().UnixMilli())
 	}
 
 	params := map[string]interface{}{
@@ -170,9 +170,9 @@ func (s *Service) sendChat(message string, imageBase64 string, fixedReqID string
 	// real telegram/channel input.
 	s.markOutboundChat(wsMessage)
 	// Emit chat_input flow event so Flow Monitor's IN field shows the
-	// actual message text. Without this, lumi-chat-* turns render as
+	// actual message text. Without this, lamp-chat-* turns render as
 	// "Input not captured" because the agent path skips chat.history
-	// fetch for Lumi-originated runs (only channel turns hit that path).
+	// fetch for Lamp-originated runs (only channel turns hit that path).
 	previewMsg := message
 	if len(previewMsg) > 500 {
 		previewMsg = previewMsg[:500] + "…"
@@ -259,7 +259,7 @@ func (s *Service) sendChat(message string, imageBase64 string, fixedReqID string
 		"image_bytes": len(imageBase64),
 		"message":     message,
 	}, idempotencyKey)
-	slog.Info("flow correlation", "op", "ws_chat_send", "section", "lumi_to_openclaw_ws",
+	slog.Info("flow correlation", "op", "ws_chat_send", "section", "lamp_to_openclaw_ws",
 		"device_run_id", idempotencyKey, "req_id", reqID, "has_image", hasImage)
 
 	s.monitorBus.Push(domain.MonitorEvent{

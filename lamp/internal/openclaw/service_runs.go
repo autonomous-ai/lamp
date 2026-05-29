@@ -208,7 +208,7 @@ func (s *Service) SetPendingChatTrace(runID string, message string) {
 }
 
 // RemovePendingChatTraceByRunID removes the entry whose runID matches target.
-// Used on lifecycle_start when payload.RunID is already a Lumi-format
+// Used on lifecycle_start when payload.RunID is already a Lamp-format
 // idempotencyKey (5.4+ echo path) — the runId IS the device trace, no
 // mapping needed, but the entry must be cleared so MatchPendingByMessage
 // doesn't pick it up for a later UUID lifecycle with the same message.
@@ -230,7 +230,7 @@ func (s *Service) RemovePendingChatTraceByRunID(target string) bool {
 }
 
 // MatchPendingByMessage finds and removes the pending entry whose message
-// matches needle (after trim). Used when a UUID lifecycle arrives: Lumi
+// matches needle (after trim). Used when a UUID lifecycle arrives: Lamp
 // fetches chat.history, extracts the last user message text, and calls this
 // to recover the original idempotencyKey — replacing the brittle FIFO
 // send-order mapping. Returns "" if no match.

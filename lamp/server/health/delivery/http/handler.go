@@ -23,7 +23,7 @@ import (
 	"go-lamp.autonomous.ai/server/serializers"
 )
 
-// serverStartTime records when the Lumi process started.
+// serverStartTime records when the Lamp process started.
 var serverStartTime = time.Now()
 
 // HealthHandler represents the HTTP handler for health and system info.
@@ -63,7 +63,7 @@ func (h *HealthHandler) SystemInfo(c *gin.Context) {
 		"lelampUptime":   readLeLampUptime(),
 		"lelampVersion":  readLeLampVersion(),
 		"goRoutines": runtime.NumGoroutine(),
-		"version":    config.LumiVersion,
+		"version":    config.LampVersion,
 		"deviceId":   h.config.DeviceID,
 		"agent":      h.agentInfo(),
 	}
@@ -225,7 +225,7 @@ func (h *HealthHandler) Dashboard(c *gin.Context) {
 			"connected":  h.agentGateway.IsReady(),
 			"sessionKey": h.agentGateway.GetSessionKey() != "",
 		},
-		"version":  config.LumiVersion,
+		"version":  config.LampVersion,
 		"deviceId": h.config.DeviceID,
 	}
 	c.JSON(http.StatusOK, serializers.ResponseSuccess(dash))
@@ -369,9 +369,9 @@ func readLeLampVersion() string {
 	return v
 }
 
-// readLeLampUptime returns uptime in seconds of the lumi-lelamp systemd service.
+// readLeLampUptime returns uptime in seconds of the lamp-lelamp systemd service.
 func readLeLampUptime() int64 {
-	out, err := exec.Command("systemctl", "show", "lumi-lelamp",
+	out, err := exec.Command("systemctl", "show", "lamp-lelamp",
 		"--property=ActiveEnterTimestamp", "--value").Output()
 	if err != nil {
 		return 0

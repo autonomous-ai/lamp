@@ -84,25 +84,25 @@ func extractSayTag(text string) string {
 	return inner
 }
 
-// isLumiOutboundChatRunID is true when runID matches Lumi's chat.send idempotency key
-// (lumi-chat-* current; lumi-sensing-* legacy). Used so traceless lifecycle_start is not
-// mis-tagged as Telegram-only when the turn was initiated from Lumi.
-func isLumiOutboundChatRunID(runID string) bool {
+// isLampOutboundChatRunID is true when runID matches Lamp's chat.send idempotency key
+// (lamp-chat-* current; lamp-sensing-* legacy). Used so traceless lifecycle_start is not
+// mis-tagged as Telegram-only when the turn was initiated from Lamp.
+func isLampOutboundChatRunID(runID string) bool {
 	if runID == "" {
 		return false
 	}
-	return strings.HasPrefix(runID, "lumi-chat-") || strings.HasPrefix(runID, "lumi-sensing-")
+	return strings.HasPrefix(runID, "lamp-chat-") || strings.HasPrefix(runID, "lamp-sensing-")
 }
 
-// labelForLumiInternal returns the UI label that best describes a Lumi-
-// internal message (sensing/voice/wellbeing/system events Lumi posts via
+// labelForLampInternal returns the UI label that best describes a Lamp-
+// internal message (sensing/voice/wellbeing/system events Lamp posts via
 // chat.send). Used by the Flow Monitor channel-turn handler to avoid
 // mis-labelling steer-merged self-fire turns as `[telegram]` when they
-// are actually sensing or voice events Lumi originated.
+// are actually sensing or voice events Lamp originated.
 //
 // Returns "" when the text doesn't match any known internal prefix —
 // caller should fall back to the configured-channel label in that case.
-func labelForLumiInternal(text string) string {
+func labelForLampInternal(text string) string {
 	switch {
 	case strings.HasPrefix(text, "[user] [ambient]"),
 		strings.HasPrefix(text, "[ambient]"),
@@ -127,12 +127,12 @@ func labelForLumiInternal(text string) string {
 }
 
 // isChannelOriginatedRun returns true only when any of the given runIDs was
-// synthesised by Lumi from a real external channel user message — currently
+// synthesised by Lamp from a real external channel user message — currently
 // "tg-<msgID>" created in the session.message handler when OpenClaw forwards
 // a Telegram user turn (see handler_events.go ~line 1157).
 //
 // This is the positive-evidence signal for "real channel user", replacing the
-// older "anything NOT lumi-chat-*" default which mis-classified UUID runs
+// older "anything NOT lamp-chat-*" default which mis-classified UUID runs
 // from OpenClaw steer-mode self-fire / cron / heartbeat as Telegram and
 // suppressed their TTS even when no real user was on the other end.
 //
@@ -201,14 +201,14 @@ func extractMessageContentText(raw json.RawMessage) string {
 	return strings.Join(parts, "")
 }
 
-// lumiInternalPrefixes are message-text prefixes Lumi puts on chat.sends it
+// lampInternalPrefixes are message-text prefixes Lamp puts on chat.sends it
 // issues itself (sensing events, ambient voice, activity, emotion cues,
 // wellbeing nudges, wake greetings). Used as a robust guard alongside
 // IsRecentOutboundChat — that exact-match buffer can miss when the 30s
 // window expires or 32-entry cap overflows under load. Any text starting
-// with one of these prefixes is definitely Lumi-internal, never a real
+// with one of these prefixes is definitely Lamp-internal, never a real
 // Telegram user message, and must NOT mark the run as a channel turn.
-var lumiInternalPrefixes = []string{
+var lampInternalPrefixes = []string{
 	"[sensing:",
 	"[ambient]",
 	"[activity]",
@@ -223,14 +223,14 @@ var lumiInternalPrefixes = []string{
 	"你剛剛醒來",
 }
 
-// isLumiInternalMessage returns true when the message text was issued by
-// Lumi via chat.send (matches a known prefix). The check is independent of
+// isLampInternalMessage returns true when the message text was issued by
+// Lamp via chat.send (matches a known prefix). The check is independent of
 // the recent-outbound TTL buffer so it stays correct under burst load.
-func isLumiInternalMessage(text string) bool {
+func isLampInternalMessage(text string) bool {
 	if text == "" {
 		return false
 	}
-	for _, p := range lumiInternalPrefixes {
+	for _, p := range lampInternalPrefixes {
 		if strings.HasPrefix(text, p) {
 			return true
 		}

@@ -2,7 +2,7 @@
 headset so the user can use the lamp privately without disturbing others.
 
 Endpoints live under /bluetooth/* (exposed to the web UI via /hw/bluetooth/*
-through the existing Lumi reverse proxy).
+through the existing Lamp reverse proxy).
 """
 
 import logging

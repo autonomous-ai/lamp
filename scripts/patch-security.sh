@@ -10,8 +10,9 @@
 
 set -euo pipefail
 
-LELAMP_SVC="/etc/systemd/system/lumi-lelamp.service"
-NGINX_CONF="/etc/nginx/conf.d/lumi.conf"
+LELAMP_SVC="/etc/systemd/system/lamp-lelamp.service"
+LELAMP_UNIT="lamp-lelamp"
+NGINX_CONF="/etc/nginx/conf.d/lamp.conf"
 
 # Hash watched files before patching so the end-of-script restart only fires
 # when something actually changed. Idempotent re-runs (everything already
@@ -27,9 +28,9 @@ echo "[patch] Starting security patch..."
 if grep -q "\-\-host 0.0.0.0" "$LELAMP_SVC" 2>/dev/null; then
   sed -i 's/--host 0\.0\.0\.0/--host 127.0.0.1/' "$LELAMP_SVC"
   systemctl daemon-reload
-  echo "[patch] lumi-lelamp: bind changed to 127.0.0.1"
+  echo "[patch] ${LELAMP_UNIT}: bind changed to 127.0.0.1"
 else
-  echo "[patch] lumi-lelamp: already on 127.0.0.1, skipping"
+  echo "[patch] ${LELAMP_UNIT}: already on 127.0.0.1, skipping"
 fi
 
 # 2. nginx /hw/: add allow/deny if missing
@@ -172,9 +173,9 @@ if anchor not in content:
     sys.exit(0)
 
 block = (
-    "  # Top-level openapi.json proxied to Lumi backend so the in-iframe Swagger\n"
+    "  # Top-level openapi.json proxied to Lamp backend so the in-iframe Swagger\n"
     "  # UI (loaded via /api/hardware/docs) can fetch its spec at the absolute\n"
-    "  # path FastAPI hardcodes. Lumi adminAuthMiddleware gates the cookie/Bearer.\n"
+    "  # path FastAPI hardcodes. Lamp adminAuthMiddleware gates the cookie/Bearer.\n"
     "  location = /openapi.json {\n"
     "    proxy_pass http://backend;\n"
     "    proxy_set_header Host $host;\n"
@@ -242,7 +243,7 @@ if "Content-Security-Policy" in content:
     #   - frame-ancestors 'none' → 'self' (CSP mirror of SAMEORIGIN)
     #   - Strict CSP: revert any prior CDN whitelist + `'unsafe-inline'`
     #     script-src that an earlier patch added. LeLamp now self-hosts the
-    #     Swagger UI bundle (Lumi proxies it via /api/hardware/static/*) so
+    #     Swagger UI bundle (Lamp proxies it via /api/hardware/static/*) so
     #     no CDN allow-list is required.
     new_content = content
     new_content = new_content.replace(
@@ -329,29 +330,19 @@ else
   echo "[patch] LELAMP_MODE=production added to .env"
 fi
 
-# 5. Add EnvironmentFile to lumi-lelamp.service if missing
+# 5. Add EnvironmentFile to lelamp unit if missing
 if ! grep -q "^EnvironmentFile=" "$LELAMP_SVC" 2>/dev/null; then
   sed -i '/^\[Service\]/a EnvironmentFile=\/opt\/lelamp\/.env' "$LELAMP_SVC"
   systemctl daemon-reload
-  echo "[patch] lumi-lelamp.service: EnvironmentFile added"
+  echo "[patch] ${LELAMP_UNIT}.service: EnvironmentFile added"
 else
-  echo "[patch] lumi-lelamp.service: EnvironmentFile already present, skipping"
+  echo "[patch] ${LELAMP_UNIT}.service: EnvironmentFile already present, skipping"
 fi
 
 # 6. Bind lamp-server to 127.0.0.1 (defense-in-depth: port 5000 unreachable from LAN
 #    even if nginx config is wrong). Only needed on devices deployed before 2026-05-19.
-# Prefer the renamed lamp.service / lamp-server paths; fall back to the legacy
-# lumi.service / lumi-server names on devices still on the pre-rename layout.
-if [ -f "/etc/systemd/system/lamp.service" ]; then
-  LAMP_SVC="/etc/systemd/system/lamp.service"
-else
-  LAMP_SVC="/etc/systemd/system/lumi.service"
-fi
-if [ -x "/usr/local/bin/lamp-server" ]; then
-  LAMP_BIN="/usr/local/bin/lamp-server"
-else
-  LAMP_BIN="/usr/local/bin/lumi-server"
-fi
+LAMP_SVC="/etc/systemd/system/lamp.service"
+LAMP_BIN="/usr/local/bin/lamp-server"
 
 # Detect if the installed binary still binds 0.0.0.0 by checking its help/version
 # output — there is no config knob for this; it is baked into the binary.
@@ -374,13 +365,11 @@ else
 fi
 
 if [ "$LELAMP_HASH_BEFORE" != "$LELAMP_HASH_AFTER" ]; then
-  # Restart the renamed `lamp` service; fall back to legacy `lumi` on older devices.
   LAMP_UNIT="lamp"
-  systemctl list-unit-files lamp.service >/dev/null 2>&1 || LAMP_UNIT="lumi"
-  echo "[patch] lumi-lelamp.service changed → restarting lumi-lelamp + ${LAMP_UNIT}"
-  systemctl restart lumi-lelamp "$LAMP_UNIT"
+  echo "[patch] ${LELAMP_UNIT}.service changed → restarting ${LELAMP_UNIT} + ${LAMP_UNIT}"
+  systemctl restart "$LELAMP_UNIT" "$LAMP_UNIT"
 else
-  echo "[patch] lumi-lelamp.service unchanged, skipping service restart"
+  echo "[patch] ${LELAMP_UNIT}.service unchanged, skipping service restart"
 fi
 
 echo "[patch] Done. Device is patched."

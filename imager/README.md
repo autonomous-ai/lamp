@@ -1,7 +1,7 @@
-# imager — Lumi golden image builder
+# imager — Lamp golden image builder
 
 Produces SD card images that boot OrangePi 4 Pro (or Raspberry Pi 5) directly
-into the Lumi AP/hotspot setup wizard. Flash, insert, power on — no
+into the Lamp AP/hotspot setup wizard. Flash, insert, power on — no
 `scripts/setup.sh` needed on the target.
 
 ```bash
@@ -49,7 +49,7 @@ Phase 2  chroot qemu-arm64:
          - Node.js 22 from NodeSource + `openclaw@$OPENCLAW_VERSION` npm global
          - openclaw onboard --skip-health (creates /root/.openclaw scaffolding)
          - uv (Python pkg mgr for LeLamp)
-         - systemd units: lamp, bootstrap, lumi-lelamp, lumi-wifi-power-save, openclaw
+         - systemd units: lamp, bootstrap, lamp-lelamp, openclaw
          - helper scripts /usr/local/bin/{device-ap-mode, device-sta-mode, connect-wifi, software-update}
            (verbatim copy from production OPi @ 100.111.149.69)
          - configs: hostapd, dnsmasq, dhcpcd, full prod nginx (CSP + WS + captive-portal),
@@ -63,7 +63,7 @@ Phase 3  OTA bake from metadata.json:
          - Web UI to /usr/share/nginx/html/setup
          - Claude Desktop Buddy BLE plugin (optional, if `claude-desktop-buddy.url` in metadata)
          - Writes /tmp/ota-versions.env (web/lamp/bootstrap/lelamp/buddy versions baked in)
-Phase 4  lumi-resize-once.service installed
+Phase 4  lamp-resize-once.service installed
          - oneshot, first-boot only, self-destructing
          - growpart + resize2fs to fill the actual SD card (image is 14 GB, SD likely larger)
 Phase 5  Finalize
@@ -81,7 +81,7 @@ efficiently).
 
 1. U-Boot reads `/boot/orangepiEnv.txt` (left intact from vendor image) →
    mounts `/dev/mmcblk1p1` as ext4 root.
-2. `lumi-resize-once.service` runs once: `growpart /dev/mmcblk1 1 && resize2fs
+2. `lamp-resize-once.service` runs once: `growpart /dev/mmcblk1 1 && resize2fs
    /dev/mmcblk1p1` → ext4 fills the real SD size. Service self-disables +
    removes itself. Re-flash will reinstall it.
 3. Operator runs `sudo device-ap-mode` (or the bootstrap-server triggers it
@@ -102,7 +102,7 @@ All env vars; override at the `make` call.
 | Variable | Default | Effect |
 |----------|---------|--------|
 | `TARGET` | `opi` | `opi` or `rpi` — picks builder script + output filename |
-| `OUT_IMG_SIZE` | `14G` | Partition size after expansion. ext4 fills this; xz compresses unused space away. SD card must be ≥ this (lumi-resize-once will expand further on first boot if SD is larger). |
+| `OUT_IMG_SIZE` | `14G` | Partition size after expansion. ext4 fills this; xz compresses unused space away. SD card must be ≥ this (lamp-resize-once will expand further on first boot if SD is larger). |
 | `OPI_FILE_ID` | `1CYfOaY6f5DozJBNvPJ0Gx1jBIFlGe8fn` | Google Drive file ID for `Orangepi4pro_1.0.6_debian_bookworm_server_*.7z`. Bump when the dev team uploads a new vendor release. |
 | `OPENCLAW_VERSION` | `2026.5.7` | npm package version pin. Bump as OpenClaw releases. |
 | `OTA_METADATA_URL` | `https://storage.googleapis.com/s3-autonomous-upgrade-3/lamp/ota/metadata.json` | Backend binaries source. Used by Phase 3 to download `lamp-server`, `bootstrap-server`, `lelamp`, `web`, optional `claude-desktop-buddy`. |
@@ -215,13 +215,13 @@ SSH in (`ssh system@lamp-xxxx.local`, password `12345` until rotated by the
 setup wizard) and verify:
 
 ```bash
-systemctl is-enabled lamp lumi-lelamp lumi-wifi-power-save openclaw avahi-daemon
+systemctl is-enabled lamp lamp-lelamp openclaw avahi-daemon
 ls /usr/local/bin/{lamp-server,bootstrap-server,device-ap-mode,connect-wifi,software-update}
 ls /opt/lelamp/.venv/bin/uvicorn       # LeLamp uv sync succeeded
 openclaw --version                       # OpenClaw npm global installed
 ls /etc/asound.conf /etc/udev/rules.d/91-pulseaudio-lelamp-ignore.rules
 findmnt /                                # ext4 root, expanded to full SD
-systemctl is-enabled lumi-resize-once 2>&1 | grep -q "not found" && echo OK_resize-once-self-destructed
+systemctl is-enabled lamp-resize-once 2>&1 | grep -q "not found" && echo OK_resize-once-self-destructed
 ```
 
 ## Maintenance — Pi vs OPi drift
@@ -377,7 +377,7 @@ proper). If everything's zero past offset 0x200, the bootloader was clobbered.
 - Switched base image from Armbian (wrong assumption) to vendor Orange Pi
   Bookworm 1.0.6 .7z (matches `/etc/orangepi-release` on production OPi).
 - Dropped Btrfs `@`/`@factory` subvolume scheme — production runs plain ext4
-  single-partition. Replaced @factory factory-reset with `lumi-resize-once`
+  single-partition. Replaced @factory factory-reset with `lamp-resize-once`
   first-boot expand.
 - Bootloader handling: now relies on vendor image's pre-baked U-Boot in raw
   sectors. No more `armbianEnv.txt` manipulation; `orangepiEnv.txt` is left

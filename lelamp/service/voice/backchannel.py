@@ -2,7 +2,7 @@
 Backchannel — active listening cues during STT sessions.
 
 Plays short filler words ("Uhm", "Ok", etc.) via TTS when the user pauses
-mid-speech, signaling that Lumi is still listening.
+mid-speech, signaling that Lamp is still listening.
 
 Usage:
     bc = Backchannel(tts_service)
@@ -37,12 +37,12 @@ logger = logging.getLogger("lelamp.voice.backchannel")
 
 
 def _default_fillers_for_active_lang() -> str:
-    """Pick the default filler list based on Lumi's stt_language. Falls
+    """Pick the default filler list based on Lamp's stt_language. Falls
     back to DEFAULT_LANG when the config can't be read or the language is
     empty/unknown. Caller can still override with LELAMP_BACKCHANNEL_FILLERS."""
     try:
-        from lelamp.config import _lumi_cfg_get
-        lang = (_lumi_cfg_get("stt_language") or "").strip()
+        from lelamp.config import _lamp_cfg_get
+        lang = (_lamp_cfg_get("stt_language") or "").strip()
     except Exception:
         lang = ""
     return DEFAULT_FILLERS_BY_LANG.get(lang, DEFAULT_FILLERS_BY_LANG[DEFAULT_LANG])

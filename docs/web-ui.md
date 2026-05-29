@@ -343,7 +343,7 @@ def get_led_color():
 
 `lamp/web/src/components/SourceFooter.tsx` is a tiny `position: fixed` link mounted at the App root (`App.tsx`, outside `<Routes>`), so it appears on every page — Setup, Login, Monitor, EditConfig, GwConfig.
 
-Renders at `bottom: 6px, right: 8px` with monospace 10px text and opacity `0.7` — visible to anyone who looks for it without blocking form action buttons (Back / Next / Setup / Save) or scroll. Link target: `https://github.com/autonomous-ai/ai-lamp-lumi`.
+Renders at `bottom: 6px, right: 8px` with monospace 10px text and opacity `0.7` — visible to anyone who looks for it without blocking form action buttons (Back / Next / Setup / Save) or scroll. Link target: `https://github.com/autonomous-ai/lamp`.
 
 Reason it exists: LeLamp Python (`lelamp/`) ships GPL v3, baked into the board image. GPL §6 requires recipients of the binary to be informed where corresponding source lives. The footer satisfies the "written offer" alternative by exposing the public repo URL on the device itself. See also `scripts/tag-release.sh` + `Makefile:tag-release` for the version → commit traceability piece.
 
@@ -359,7 +359,7 @@ make web-build        # tsc + vite build → lamp/web/dist/
 make web-deploy       # web-build + rsync dist/ → /usr/share/nginx/html/setup/
 
 # Deploy LeLamp (when server.py changes)
-make lelamp-deploy    # rsync + pip install + systemctl restart lumi-lelamp.service
+make lelamp-deploy    # rsync + pip install + systemctl restart lamp-lelamp.service
 ```
 
 > Deploy uses `PI_HOST=lamp.local` (mDNS). If it doesn't resolve, use IP directly:

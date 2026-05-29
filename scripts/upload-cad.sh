@@ -6,7 +6,7 @@
 #
 # Examples:
 #   scripts/upload-cad.sh hardware/cad/lamp-v3.stp
-#   scripts/upload-cad.sh hardware/cad/lamp-v3.stp /lumi-cad
+#   scripts/upload-cad.sh hardware/cad/lamp-v3.stp /lamp-cad
 #
 # Requirements:
 #   - MEGAcmd installed (brew install --cask megacmd)
@@ -14,7 +14,7 @@
 set -euo pipefail
 
 LOCAL_FILE="${1:-}"
-REMOTE_DIR="${2:-/lumi-cad}"
+REMOTE_DIR="${2:-/lamp-cad}"
 
 if [[ -z "$LOCAL_FILE" ]]; then
   echo "usage: $(basename "$0") <local-file> [remote-dir]" >&2

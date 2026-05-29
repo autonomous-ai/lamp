@@ -183,7 +183,7 @@ var phrases = map[Phrase]map[string][]string{
 	},
 	PhraseChitchatGreeting: {
 		LangEN:   {"[chuckle] Hi there!", "[laughs softly] Hey hey!", "[whisper] I'm here."},
-		LangVI:   {"[chuckle] Chào bạn!", "[laughs softly] Mình đây!", "[whisper] Lumi đây nè."},
+		LangVI:   {"[chuckle] Chào bạn!", "[laughs softly] Mình đây!", "[whisper] Lamp đây nè."},
 		LangZhCN: {"[chuckle] 你好呀!", "[laughs softly] 嗨, 我在这里."},
 		LangZhTW: {"[chuckle] 你好啊!", "[laughs softly] 嗨, 我在這裡."},
 	},
@@ -219,7 +219,7 @@ var phrases = map[Phrase]map[string][]string{
 	},
 	PhraseChitchatPresenceCheck: {
 		LangEN:   {"[chuckle] Still here!", "[whisper] Right here.", "I'm here."},
-		LangVI:   {"[chuckle] Vẫn đây nè!", "[whisper] Mình đây.", "Có Lumi đây."},
+		LangVI:   {"[chuckle] Vẫn đây nè!", "[whisper] Mình đây.", "Có Lamp đây."},
 		LangZhCN: {"[chuckle] 我还在!", "[whisper] 在呢."},
 		LangZhTW: {"[chuckle] 我還在!", "[whisper] 在呢."},
 	},
